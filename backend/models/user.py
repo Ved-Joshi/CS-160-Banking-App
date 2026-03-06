@@ -12,6 +12,7 @@ class UserRole(str, enum.Enum):
     USER = "USER"
     ADMIN = "ADMIN"
 
+# User variables for db table: id, name, email, pw, role, date created
 class User(Base):
     __tablename__ = "users"
 
