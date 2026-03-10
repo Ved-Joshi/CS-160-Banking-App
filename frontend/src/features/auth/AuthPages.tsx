@@ -263,7 +263,7 @@ export function ResetPasswordPage() {
     });
 
     const { data: listener } = supabase.auth.onAuthStateChange((event, ctx) => {
-      if (event === 'PASSWORD_RECOVERY' || (event === 'SIGNED_IN' && ctx?.session)) {
+      if (event === 'PASSWORD_RECOVERY' || (event === 'SIGNED_IN' && ctx)) {
         setCanUpdate(true);
       }
     });
