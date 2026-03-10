@@ -40,7 +40,7 @@ export function AppShell() {
               <small>Signed in</small>
             </div>
           </div>
-          <button className="side-nav__signout" onClick={signOut} type="button">
+          <button className="side-nav__signout" onClick={() => { void signOut(); }} type="button">
             Sign out
           </button>
         </div>

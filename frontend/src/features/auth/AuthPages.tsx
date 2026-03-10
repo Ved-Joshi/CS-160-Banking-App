@@ -1,11 +1,13 @@
 import { zodResolver } from '@hookform/resolvers/zod';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { Link, Navigate, useNavigate } from 'react-router-dom';
 import { z } from 'zod';
 import { Button, Card, Field, InlineAlert, PageHeader } from '../../components/ui';
 import { authService } from '../../lib/mockApi';
+import { supabase } from '../../lib/supabaseClient';
 import { useAuth } from './useAuth';
+import { SESSION_KEY, writeStorage } from '../../lib/storage';
 
 function AuthLayout({ title, subtitle, children }: { title: string; subtitle: string; children: React.ReactNode }) {
   return (
@@ -80,8 +82,8 @@ export function LoginPage() {
   const form = useForm<z.infer<typeof loginSchema>>({
     resolver: zodResolver(loginSchema),
     defaultValues: {
-      email: 'alex.morgan@examplebank.com',
-      password: 'Password123',
+      email: '',
+      password: '',
     },
   });
 
@@ -140,7 +142,7 @@ export function MfaPage() {
   const [serverError, setServerError] = useState('');
   const form = useForm<z.infer<typeof codeSchema>>({
     resolver: zodResolver(codeSchema),
-    defaultValues: { code: '941205' },
+    defaultValues: { code: '' },
   });
 
   return (
@@ -196,8 +198,8 @@ export function RegisterPage() {
       <Card className="auth-card">
         <form
           className="stack-lg"
-          onSubmit={form.handleSubmit(async () => {
-            await register();
+        onSubmit={form.handleSubmit(async (values) => {
+            await register(values);
             navigate('/app/dashboard');
           })}
         >
@@ -234,40 +236,132 @@ const resetSchema = z.object({
   email: z.string().email(),
 });
 
+const updatePasswordSchema = z.object({
+  password: z.string().min(8),
+  confirm: z.string().min(8),
+}).refine((values) => values.password === values.confirm, {
+  message: 'Passwords must match.',
+  path: ['confirm'],
+});
+
 export function ResetPasswordPage() {
   const [submitted, setSubmitted] = useState('');
-  const form = useForm<z.infer<typeof resetSchema>>({
+  const [canUpdate, setCanUpdate] = useState(false);
+  const [serverError, setServerError] = useState('');
+
+  const requestForm = useForm<z.infer<typeof resetSchema>>({
     resolver: zodResolver(resetSchema),
   });
 
+  const updateForm = useForm<z.infer<typeof updatePasswordSchema>>({
+    resolver: zodResolver(updatePasswordSchema),
+  });
+
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data }) => {
+      setCanUpdate(Boolean(data.session));
+    });
+
+    const { data: listener } = supabase.auth.onAuthStateChange((event, ctx) => {
+      if (event === 'PASSWORD_RECOVERY' || (event === 'SIGNED_IN' && ctx?.session)) {
+        setCanUpdate(true);
+      }
+    });
+
+    return () => {
+      listener?.subscription.unsubscribe();
+    };
+  }, []);
+
   return (
-    <AuthLayout title="Reset your password" subtitle="Request a password reset link to restore access to your account.">
+    <AuthLayout
+      title={canUpdate ? 'Create a new password' : 'Reset your password'}
+      subtitle={canUpdate ? 'Enter a new password to finish resetting your account access.' : 'Request a password reset link to restore access to your account.'}
+    >
       <Card className="auth-card">
-        <form
-          className="stack-lg"
-          onSubmit={form.handleSubmit(async (values) => {
-            const result = await authService.requestReset(values.email);
-            setSubmitted(result.email);
-          })}
-        >
-          <PageHeader title="Forgot password" eyebrow="Account recovery" subtitle="Enter your email address and we will send password reset instructions." />
-          {submitted ? (
-            <InlineAlert title="Reset request sent" tone="success">
-              A password reset link has been sent to {submitted}.
-            </InlineAlert>
-          ) : null}
-          <Field label="Email address" error={form.formState.errors.email?.message}>
-            <input {...form.register('email')} type="email" />
-          </Field>
-          <div className="button-row">
-            <Button type="submit">Send link</Button>
-          </div>
-          <div className="auth-secondary-action">
-            <Link className="text-link" to="/login">
-              Back to sign in
-            </Link>
-          </div>
-        </form>
+        {canUpdate ? (
+          <form
+            className="stack-lg"
+            onSubmit={updateForm.handleSubmit(async (values) => {
+              setServerError('');
+              const { error } = await supabase.auth.updateUser({ password: values.password });
+              if (error) {
+                updateForm.setError('password', { message: error.message });
+                return;
+              }
+              setSubmitted('updated');
+              await supabase.auth.signOut();
+              writeStorage(SESSION_KEY, null);
+            })}
+          >
+            <PageHeader title="Set new password" eyebrow="Password reset" subtitle="Choose a new password for your account." />
+            {submitted === 'updated' ? (
+              <InlineAlert title="Password updated" tone="success">
+                Your password has been changed. You can now sign in with the new password.
+              </InlineAlert>
+            ) : null}
+            <Field label="New password" error={updateForm.formState.errors.password?.message}>
+              <input {...updateForm.register('password')} type="password" autoComplete="new-password" />
+            </Field>
+            <Field label="Confirm password" error={updateForm.formState.errors.confirm?.message}>
+              <input {...updateForm.register('confirm')} type="password" autoComplete="new-password" />
+            </Field>
+            <div className="button-row">
+              <Button type="submit">Update password</Button>
+            </div>
+            <div className="auth-secondary-action">
+              <Link
+                className="text-link"
+                to="/login"
+                onClick={async (event) => {
+                  event.preventDefault();
+                  await supabase.auth.signOut();
+                  writeStorage(SESSION_KEY, null);
+                  window.location.replace('/login');
+                }}
+              >
+                Back to sign in
+              </Link>
+            </div>
+          </form>
+        ) : (
+          <form
+            className="stack-lg"
+            onSubmit={requestForm.handleSubmit(async (values) => {
+              try {
+                setServerError('');
+                const result = await authService.requestReset(values.email);
+                setSubmitted(result.email);
+              } catch (error) {
+                const message = error instanceof Error ? error.message : 'Unable to send reset email right now.';
+                setServerError(message);
+              }
+            })}
+          >
+            <PageHeader title="Forgot password" eyebrow="Account recovery" subtitle="Enter your email address and we will send password reset instructions." />
+            {serverError ? (
+              <InlineAlert title="Unable to send email" tone="warning">
+                {serverError}
+              </InlineAlert>
+            ) : null}
+            {submitted ? (
+              <InlineAlert title="Reset request sent" tone="success">
+                A password reset link has been sent to {submitted}.
+              </InlineAlert>
+            ) : null}
+            <Field label="Email address" error={requestForm.formState.errors.email?.message}>
+              <input {...requestForm.register('email')} type="email" />
+            </Field>
+            <div className="button-row">
+              <Button type="submit">Send link</Button>
+            </div>
+            <div className="auth-secondary-action">
+              <Link className="text-link" to="/login">
+                Back to sign in
+              </Link>
+            </div>
+          </form>
+        )}
       </Card>
     </AuthLayout>
   );

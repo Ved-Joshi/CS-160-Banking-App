@@ -6,8 +6,8 @@ export interface AuthContextValue {
   loading: boolean;
   signIn: (email: string, password: string) => Promise<void>;
   completeMfa: (code: string) => Promise<void>;
-  register: () => Promise<void>;
-  signOut: () => void;
+  register: (input: { firstName: string; lastName: string; email: string; password: string }) => Promise<void>;
+  signOut: () => Promise<void>;
 }
 
 export const AuthContext = createContext<AuthContextValue | null>(null);

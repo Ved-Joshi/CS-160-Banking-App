@@ -1,4 +1,5 @@
-import { mockAccounts, mockAtms, mockDeposits, mockNotifications, mockPayments, mockPayees, mockProfile, mockTransactions, mockUser } from '../mocks/data';
+import { mockAccounts, mockAtms, mockDeposits, mockNotifications, mockPayments, mockPayees, mockTransactions } from '../mocks/data';
+import { supabase } from './supabaseClient';
 import { readStorage, writeStorage } from './storage';
 import type {
   AtmLocation,
@@ -13,6 +14,7 @@ import type {
   TransferResult,
   User,
 } from '../types/banking';
+import type { User as SupabaseUser } from '@supabase/supabase-js';
 
 const PAYMENTS_KEY = 'sj-state-payments';
 const DEPOSITS_KEY = 'sj-state-deposits';
@@ -28,29 +30,101 @@ function nowIso(): string {
   return new Date().toISOString();
 }
 
+function mapUser(user: SupabaseUser | null): User {
+  if (!user) {
+    throw new Error('Unable to find an authenticated Supabase user.');
+  }
+
+  const metadata = (user.user_metadata as Record<string, string> | undefined) ?? {};
+  return {
+    id: user.id,
+    email: user.email ?? '',
+    firstName: metadata.firstName ?? '',
+    lastName: metadata.lastName ?? '',
+  };
+}
+
 export const authService = {
   async login(email: string, password: string): Promise<User> {
-    if (!email || password.length < 8) {
-      throw new Error('Enter a valid email and password.');
+    const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+    if (error) {
+      throw new Error(error.message);
     }
 
-    return delay(mockUser);
+    return mapUser(data.user);
   },
-  async register(): Promise<User> {
-    return delay(mockUser);
+  async register(input: { firstName: string; lastName: string; email: string; password: string }): Promise<User> {
+    const { data, error } = await supabase.auth.signUp({
+      email: input.email,
+      password: input.password,
+      options: {
+        data: {
+          firstName: input.firstName,
+          lastName: input.lastName,
+        },
+      },
+    });
+
+    if (error) {
+      throw new Error(error.message);
+    }
+
+    return mapUser(data.user);
   },
   async requestReset(email: string): Promise<{ email: string }> {
-    return delay({ email });
+    const { error } = await supabase.auth.resetPasswordForEmail(email, {
+      redirectTo: `${window.location.origin}/reset-password`,
+    });
+
+    if (error) {
+      throw new Error(error.message);
+    }
+
+    return { email };
   },
   async verifyMfa(code: string): Promise<User> {
     if (code.length !== 6) {
       throw new Error('Enter the 6-digit security code.');
     }
 
-    return delay(mockUser);
+    const currentUser = (await supabase.auth.getUser()).data.user;
+    const email = currentUser?.email;
+
+    if (!email) {
+      throw new Error('No pending verification. Start sign-in again.');
+    }
+
+    const { data, error } = await supabase.auth.verifyOtp({
+      email,
+      token: code,
+      type: 'email',
+    });
+
+    if (error) {
+      throw new Error(error.message);
+    }
+
+    return mapUser(data.user ?? currentUser);
   },
   async getProfile(): Promise<CustomerProfile> {
-    return delay(mockProfile);
+    const { data, error } = await supabase.auth.getUser();
+
+    if (error || !data.user) {
+      throw new Error(error?.message ?? 'No authenticated user.');
+    }
+
+    const user = mapUser(data.user);
+    const fullName = `${user.firstName} ${user.lastName}`.trim() || user.email;
+
+    return {
+      id: user.id,
+      fullName,
+      email: user.email,
+      phone: data.user.phone ?? '—',
+      address: '',
+      memberSince: data.user.created_at,
+      mfaEnabled: false,
+    };
   },
 };
 

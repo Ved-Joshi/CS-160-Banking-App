@@ -38,6 +38,18 @@ npm install
 npm run dev
 ```
 
+Create a `.env` file (see `.env.example`) with your Supabase project values:
+
+```
+VITE_SUPABASE_URL=...
+VITE_SUPABASE_ANON_KEY=...
+VITE_API_URL=http://localhost:8000
+```
+
+Password reset flow
+- Users request a reset at `/reset-password` (sends Supabase email).
+- Email link redirects to `/reset-password`; once the session is restored, the page shows a new-password form and calls `supabase.auth.updateUser`.
+
 ## Verify
 
 ```bash
