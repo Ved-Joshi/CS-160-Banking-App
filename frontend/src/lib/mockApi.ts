@@ -8,6 +8,7 @@ import type {
   Deposit,
   NotificationItem,
   Payee,
+  RegistrationInput,
   ScheduledPayment,
   Transaction,
   TransferRequest,
@@ -39,9 +40,17 @@ function mapUser(user: SupabaseUser | null): User {
   return {
     id: user.id,
     email: user.email ?? '',
+    username: metadata.username ?? '',
     firstName: metadata.firstName ?? '',
     lastName: metadata.lastName ?? '',
   };
+}
+
+function formatAddress(metadata: Record<string, string>): string {
+  const streetParts = [metadata.streetAddress, metadata.apartmentUnit].filter(Boolean).join(', ');
+  const locality = [metadata.city, metadata.state, metadata.zipCode].filter(Boolean).join(', ').replace(', ,', ',');
+
+  return [streetParts, locality].filter(Boolean).join(', ');
 }
 
 export const authService = {
@@ -53,14 +62,21 @@ export const authService = {
 
     return mapUser(data.user);
   },
-  async register(input: { firstName: string; lastName: string; email: string; password: string }): Promise<User> {
+  async register(input: RegistrationInput): Promise<User> {
     const { data, error } = await supabase.auth.signUp({
       email: input.email,
       password: input.password,
       options: {
         data: {
-          firstName: input.firstName,
-          lastName: input.lastName,
+          username: input.username,
+          mobilePhone: input.mobilePhone,
+          streetAddress: input.streetAddress,
+          apartmentUnit: input.apartmentUnit ?? '',
+          city: input.city,
+          state: input.state,
+          zipCode: input.zipCode,
+          // Keep high-risk onboarding fields out of auth metadata.
+          taxIdLast4: input.taxId.slice(-4),
         },
       },
     });
@@ -114,14 +130,16 @@ export const authService = {
     }
 
     const user = mapUser(data.user);
-    const fullName = `${user.firstName} ${user.lastName}`.trim() || user.email;
+    const metadata = (data.user.user_metadata as Record<string, string> | undefined) ?? {};
+    const fullName = `${user.firstName} ${user.lastName}`.trim() || user.username || user.email;
 
     return {
       id: user.id,
       fullName,
+      username: user.username,
       email: user.email,
-      phone: data.user.phone ?? '—',
-      address: '',
+      phone: metadata.mobilePhone || data.user.phone || '—',
+      address: formatAddress(metadata) || '—',
       memberSince: data.user.created_at,
       mfaEnabled: false,
     };

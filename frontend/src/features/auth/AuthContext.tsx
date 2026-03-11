@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { SESSION_KEY, readStorage, writeStorage } from '../../lib/storage';
 import { authService } from '../../lib/mockApi';
 import { supabase } from '../../lib/supabaseClient';
-import type { User } from '../../types/banking';
+import type { RegistrationInput, User } from '../../types/banking';
 import { AuthContext, type AuthContextValue } from './auth-context';
 
 export function AuthProvider({ children }: { children: ReactNode }) {
@@ -17,6 +17,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const hydrated: User = {
         id: data.user.id,
         email: data.user.email ?? '',
+        username: metadata.username ?? '',
         firstName: metadata.firstName ?? '',
         lastName: metadata.lastName ?? '',
       };
@@ -39,7 +40,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         writeStorage(SESSION_KEY, nextUser);
         setUser(nextUser);
       },
-      async register(input: { firstName: string; lastName: string; email: string; password: string }) {
+      async register(input: RegistrationInput) {
         const nextUser = await authService.register(input);
         writeStorage(SESSION_KEY, nextUser);
         setUser(nextUser);

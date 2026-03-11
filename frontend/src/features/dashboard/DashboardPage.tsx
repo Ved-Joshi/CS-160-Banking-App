@@ -12,7 +12,7 @@ export function DashboardPage() {
   const { data: payments = [] } = useQuery({ queryKey: ['payments'], queryFn: billPayService.listPayments });
   const { data: deposits = [] } = useQuery({ queryKey: ['deposits'], queryFn: depositsService.list });
 
-  const displayName = [user?.firstName, user?.lastName].filter(Boolean).join(' ') || user?.email || accounts[0]?.nickname || 'Welcome';
+  const displayName = [user?.firstName, user?.lastName].filter(Boolean).join(' ') || user?.username || user?.email || accounts[0]?.nickname || 'Welcome';
   const totalAvailable = accounts.reduce((sum, account) => sum + account.balances.availableBalance, 0);
   const recentTransactions = transactions.slice(0, 4);
   const pendingDeposit = deposits.find((deposit) => deposit.status === 'PENDING_REVIEW');

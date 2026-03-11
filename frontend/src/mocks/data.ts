@@ -13,6 +13,7 @@ import type {
 export const mockUser: User = {
   id: 'user-1',
   email: 'alex.morgan@examplebank.com',
+  username: 'alex.morgan',
   firstName: 'Alex',
   lastName: 'Morgan',
 };
@@ -20,6 +21,7 @@ export const mockUser: User = {
 export const mockProfile: CustomerProfile = {
   id: 'profile-1',
   fullName: 'Alex Morgan',
+  username: 'alex.morgan',
   email: 'alex.morgan@examplebank.com',
   phone: '(415) 555-0193',
   address: '1700 Mission Street, San Francisco, CA 94103',

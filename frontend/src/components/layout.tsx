@@ -13,6 +13,11 @@ const navItems = [
 
 export function AppShell() {
   const { user, signOut } = useAuth();
+  const displayName = [user?.firstName, user?.lastName].filter(Boolean).join(' ') || user?.username || user?.email || 'Signed in';
+  const initials = `${user?.firstName?.[0] ?? ''}${user?.lastName?.[0] ?? ''}`
+    || user?.username?.slice(0, 2).toUpperCase()
+    || user?.email?.slice(0, 2).toUpperCase()
+    || 'SJ';
 
   return (
     <div className="app-shell">
@@ -32,11 +37,9 @@ export function AppShell() {
         </nav>
         <div className="side-nav__footer">
           <div className="side-nav__profile">
-            <span className="side-nav__profile-badge">
-              {user?.firstName?.[0]}{user?.lastName?.[0]}
-            </span>
+            <span className="side-nav__profile-badge">{initials}</span>
             <div>
-              <p>{user?.firstName} {user?.lastName}</p>
+              <p>{displayName}</p>
               <small>Signed in</small>
             </div>
           </div>

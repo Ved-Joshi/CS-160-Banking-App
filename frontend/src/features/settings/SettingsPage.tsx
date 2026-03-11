@@ -19,12 +19,20 @@ export function SettingsPage() {
                 <dd>{profile.fullName}</dd>
               </div>
               <div>
+                <dt>Username</dt>
+                <dd>{profile.username || '—'}</dd>
+              </div>
+              <div>
                 <dt>Email</dt>
                 <dd>{profile.email}</dd>
               </div>
               <div>
                 <dt>Phone</dt>
                 <dd>{profile.phone}</dd>
+              </div>
+              <div>
+                <dt>Address</dt>
+                <dd>{profile.address}</dd>
               </div>
               <div>
                 <dt>Member since</dt>
