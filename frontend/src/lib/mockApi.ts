@@ -1,4 +1,5 @@
-import { mockAccounts, mockAtms, mockDeposits, mockNotifications, mockPayments, mockPayees, mockProfile, mockTransactions, mockUser } from '../mocks/data';
+import { mockAccounts, mockAtms, mockDeposits, mockNotifications, mockPayments, mockPayees, mockTransactions } from '../mocks/data';
+import { supabase } from './supabaseClient';
 import { readStorage, writeStorage } from './storage';
 import type {
   AtmLocation,
@@ -7,12 +8,14 @@ import type {
   Deposit,
   NotificationItem,
   Payee,
+  RegistrationInput,
   ScheduledPayment,
   Transaction,
   TransferRequest,
   TransferResult,
   User,
 } from '../types/banking';
+import type { User as SupabaseUser } from '@supabase/supabase-js';
 
 const PAYMENTS_KEY = 'sj-state-payments';
 const DEPOSITS_KEY = 'sj-state-deposits';
@@ -28,29 +31,118 @@ function nowIso(): string {
   return new Date().toISOString();
 }
 
+function mapUser(user: SupabaseUser | null): User {
+  if (!user) {
+    throw new Error('Unable to find an authenticated Supabase user.');
+  }
+
+  const metadata = (user.user_metadata as Record<string, string> | undefined) ?? {};
+  return {
+    id: user.id,
+    email: user.email ?? '',
+    username: metadata.username ?? '',
+    firstName: metadata.firstName ?? '',
+    lastName: metadata.lastName ?? '',
+  };
+}
+
+function formatAddress(metadata: Record<string, string>): string {
+  const streetParts = [metadata.streetAddress, metadata.apartmentUnit].filter(Boolean).join(', ');
+  const locality = [metadata.city, metadata.state, metadata.zipCode].filter(Boolean).join(', ').replace(', ,', ',');
+
+  return [streetParts, locality].filter(Boolean).join(', ');
+}
+
 export const authService = {
   async login(email: string, password: string): Promise<User> {
-    if (!email || password.length < 8) {
-      throw new Error('Enter a valid email and password.');
+    const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+    if (error) {
+      throw new Error(error.message);
     }
 
-    return delay(mockUser);
+    return mapUser(data.user);
   },
-  async register(): Promise<User> {
-    return delay(mockUser);
+  async register(input: RegistrationInput): Promise<User> {
+    const { data, error } = await supabase.auth.signUp({
+      email: input.email,
+      password: input.password,
+      options: {
+        data: {
+          username: input.username,
+          mobilePhone: input.mobilePhone,
+          streetAddress: input.streetAddress,
+          apartmentUnit: input.apartmentUnit ?? '',
+          city: input.city,
+          state: input.state,
+          zipCode: input.zipCode,
+          // Keep high-risk onboarding fields out of auth metadata.
+          taxIdLast4: input.taxId.slice(-4),
+        },
+      },
+    });
+
+    if (error) {
+      throw new Error(error.message);
+    }
+
+    return mapUser(data.user);
   },
   async requestReset(email: string): Promise<{ email: string }> {
-    return delay({ email });
+    const { error } = await supabase.auth.resetPasswordForEmail(email, {
+      redirectTo: `${window.location.origin}/reset-password`,
+    });
+
+    if (error) {
+      throw new Error(error.message);
+    }
+
+    return { email };
   },
   async verifyMfa(code: string): Promise<User> {
     if (code.length !== 6) {
       throw new Error('Enter the 6-digit security code.');
     }
 
-    return delay(mockUser);
+    const currentUser = (await supabase.auth.getUser()).data.user;
+    const email = currentUser?.email;
+
+    if (!email) {
+      throw new Error('No pending verification. Start sign-in again.');
+    }
+
+    const { data, error } = await supabase.auth.verifyOtp({
+      email,
+      token: code,
+      type: 'email',
+    });
+
+    if (error) {
+      throw new Error(error.message);
+    }
+
+    return mapUser(data.user ?? currentUser);
   },
   async getProfile(): Promise<CustomerProfile> {
-    return delay(mockProfile);
+    const { data, error } = await supabase.auth.getUser();
+
+    if (error || !data.user) {
+      throw new Error(error?.message ?? 'No authenticated user.');
+    }
+
+    const user = mapUser(data.user);
+    const metadata = (data.user.user_metadata as Record<string, string> | undefined) ?? {};
+    const fullName = `${user.firstName} ${user.lastName}`.trim() || user.username || user.email;
+
+    return {
+      id: user.id,
+      fullName,
+      username: user.username,
+      email: user.email,
+      phone: metadata.mobilePhone || data.user.phone || '—',
+      address: formatAddress(metadata) || '—',
+      memberSince: data.user.created_at,
+      mfaEnabled: false,
+    };
   },
 };
 

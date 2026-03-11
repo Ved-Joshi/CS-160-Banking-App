@@ -52,6 +52,14 @@ select {
   background: var(--white);
 }
 
+select {
+  appearance: none;
+  padding-right: 3rem;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath fill='%2358708d' d='M1.41.59 6 5.17 10.59.59 12 2l-6 6-6-6z'/%3E%3C/svg%3E");
+  background-position: right 1rem center;
+  background-repeat: no-repeat;
+}
+
 h1,
 h2,
 h3,
@@ -195,6 +203,10 @@ p {
   width: min(32rem, 100%);
   padding: 2.25rem;
   box-shadow: 0 24px 48px rgba(16, 35, 59, 0.12);
+}
+
+.auth-card--wide {
+  width: min(46rem, 100%);
 }
 
 .auth-card--center {

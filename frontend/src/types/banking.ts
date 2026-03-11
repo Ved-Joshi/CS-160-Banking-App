@@ -15,6 +15,7 @@ export type NotificationType = 'deposit' | 'payment' | 'transfer' | 'security';
 export interface User {
   id: string;
   email: string;
+  username?: string;
   firstName: string;
   lastName: string;
 }
@@ -22,11 +23,27 @@ export interface User {
 export interface CustomerProfile {
   id: string;
   fullName: string;
+  username?: string;
   email: string;
   phone: string;
   address: string;
   memberSince: string;
   mfaEnabled: boolean;
+}
+
+export interface RegistrationInput {
+  email: string;
+  mobilePhone: string;
+  streetAddress: string;
+  apartmentUnit?: string;
+  city: string;
+  state: string;
+  zipCode: string;
+  dateOfBirth: string;
+  username: string;
+  password: string;
+  passwordConfirmation: string;
+  taxId: string;
 }
 
 export interface BalanceSummary {

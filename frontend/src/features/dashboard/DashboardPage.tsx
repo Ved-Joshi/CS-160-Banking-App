@@ -3,13 +3,16 @@ import { Link } from 'react-router-dom';
 import { Card, InlineAlert, PageHeader, StatusChip } from '../../components/ui';
 import { accountsService, billPayService, depositsService, transactionsService } from '../../lib/mockApi';
 import { formatCurrency, formatDate } from '../../lib/format';
+import { useAuth } from '../auth/useAuth';
 
 export function DashboardPage() {
+  const { user } = useAuth();
   const { data: accounts = [] } = useQuery({ queryKey: ['accounts'], queryFn: accountsService.list });
   const { data: transactions = [] } = useQuery({ queryKey: ['transactions'], queryFn: transactionsService.list });
   const { data: payments = [] } = useQuery({ queryKey: ['payments'], queryFn: billPayService.listPayments });
   const { data: deposits = [] } = useQuery({ queryKey: ['deposits'], queryFn: depositsService.list });
 
+  const displayName = [user?.firstName, user?.lastName].filter(Boolean).join(' ') || user?.username || user?.email || accounts[0]?.nickname || 'Welcome';
   const totalAvailable = accounts.reduce((sum, account) => sum + account.balances.availableBalance, 0);
   const recentTransactions = transactions.slice(0, 4);
   const pendingDeposit = deposits.find((deposit) => deposit.status === 'PENDING_REVIEW');
@@ -18,7 +21,7 @@ export function DashboardPage() {
     <div className="stack-xl">
       <PageHeader
         eyebrow="Account overview"
-        title="Good evening, Alex."
+        title={`Welcome, ${displayName}!`}
         subtitle="See balances, recent activity, and the items that still need your attention."
       />
       {pendingDeposit ? (
