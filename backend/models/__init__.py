@@ -1,0 +1,1 @@
+from models.user import User  # allow tables to register
