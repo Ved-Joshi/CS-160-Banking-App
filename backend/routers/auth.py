@@ -2,10 +2,10 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from sqlalchemy import select
 
-from ..database import get_db                                                   # dependency that gives a DB session per request
-from ..models.user import User                                                  # SQLAlchemy model (users table)
-from ..schemas.auth import RegisterIn, LoginIn, TokenOut                        # Pydantic request/response schemas
-from ..utils.security import hash_password, verify_password, create_access_token    
+from database import get_db                                                 # dependency that gives a DB session per request
+from models.user import User                                                # SQLAlchemy model (users table)
+from schemas.auth import RegisterIn, LoginIn, TokenOut                       # Pydantic request/response schemas
+from utils.security import hash_password, verify_password, create_access_token    
 
 # APIRouter groups endpoints together under a prefix.
 # prefix="/auth" means routes become /auth/register, /auth/login

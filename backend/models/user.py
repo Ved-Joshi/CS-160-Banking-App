@@ -6,7 +6,7 @@ from sqlalchemy import String, DateTime, Enum
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
-from ..database import Base
+from database import Base
 
 class UserRole(str, enum.Enum):
     USER = "USER"
