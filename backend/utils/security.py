@@ -1,29 +1,28 @@
 from datetime import datetime, timedelta, timezone
-from jose import jwt, JWTError
-from passlib.context import CryptContext
-from config import settings
 import hashlib
+import bcrypt
+from jose import jwt
 
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+from config import settings
 
+
+# ---------- Password hashing (Option 2: prehash + bcrypt) ----------
 
 def _prehash(password: str) -> bytes:
-    """
-    Pre-hash the password using SHA-256 to avoid bcrypt's 72-byte limit.
-    Always encode as UTF-8.
-    """
+    # fixed 32 bytes, avoids bcrypt 72-byte limit
     return hashlib.sha256(password.encode("utf-8")).digest()
 
-
 def hash_password(password: str) -> str:
-    prehashed = _prehash(password)
-    return pwd_context.hash(prehashed)
-
+    pre = _prehash(password)
+    salt = bcrypt.gensalt()
+    return bcrypt.hashpw(pre, salt).decode("utf-8")
 
 def verify_password(password: str, password_hash: str) -> bool:
-    prehashed = _prehash(password)
-    return pwd_context.verify(prehashed, password_hash)
+    pre = _prehash(password)
+    return bcrypt.checkpw(pre, password_hash.encode("utf-8"))
 
+
+# ---------- JWT token ----------
 
 def create_access_token(user_id: str, role: str) -> str:
     exp = datetime.now(timezone.utc) + timedelta(minutes=settings.JWT_EXPIRES_MIN)

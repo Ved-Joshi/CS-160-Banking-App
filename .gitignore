@@ -25,3 +25,9 @@ dist-ssr
 
 # Project documents
 overview.md
+
+# SQLite ignores
+bank.db
+*.db
+.venv/
+__pycache__/
