@@ -5,6 +5,7 @@ venv/
 ENV/
 .venv/
 env/
+env
 
 # Logs
 logs
