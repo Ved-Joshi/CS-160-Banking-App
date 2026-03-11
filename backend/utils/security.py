@@ -1,25 +1,31 @@
 from datetime import datetime, timedelta, timezone
-from passlib.context import CryptContext
 from jose import jwt, JWTError
-
+from passlib.context import CryptContext
 from config import settings
+import hashlib
 
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated=["auto"])
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
-# hash password using python JOSE JWT, verify upon login
+
+def _prehash(password: str) -> bytes:
+    """
+    Pre-hash the password using SHA-256 to avoid bcrypt's 72-byte limit.
+    Always encode as UTF-8.
+    """
+    return hashlib.sha256(password.encode("utf-8")).digest()
+
+
 def hash_password(password: str) -> str:
-    return pwd_context.hash(password)
+    prehashed = _prehash(password)
+    return pwd_context.hash(prehashed)
+
 
 def verify_password(password: str, password_hash: str) -> bool:
-    return pwd_context.verify(password, password_hash)
+    prehashed = _prehash(password)
+    return pwd_context.verify(prehashed, password_hash)
 
-# Access tokens
-def create_access_token (user_id: str, role: str) -> str:
+
+def create_access_token(user_id: str, role: str) -> str:
     exp = datetime.now(timezone.utc) + timedelta(minutes=settings.JWT_EXPIRES_MIN)
     payload = {"sub": user_id, "role": role, "exp": exp}
     return jwt.encode(payload, settings.JWT_SECRET, algorithm=settings.JWT_ALG)
-def decode_token(token: str) -> dict:
-    try:
-        return jwt.decode(token, settings.JWT_SECRET, algorithms=[settings.JWT_ALG])
-    except JWTError as e:
-        raise ValueError("Invalid access token") from e
