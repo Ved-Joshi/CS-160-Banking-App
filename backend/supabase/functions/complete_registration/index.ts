@@ -13,7 +13,7 @@ serve(async (req) => {
   // TODO: insert profile row and return profile summary
 
   return new Response(
-    JSON.stringify({ ok: true, message: "complete_registration stub" }),
-    { headers: { "Content-Type": "application/json" } },
+    JSON.stringify({ ok: false, error: "Not Implemented" }),
+    { status: 501, headers: { "Content-Type": "application/json" } },
   );
 });

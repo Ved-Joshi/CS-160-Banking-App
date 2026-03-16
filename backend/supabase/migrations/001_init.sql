@@ -110,6 +110,7 @@ create table if not exists public.ledger_accounts (
   is_active boolean not null default true,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
+  constraint ledger_accounts_ledger_code_unique unique (ledger_code),
   constraint ledger_accounts_owner_type check (owner_type in ('customer', 'bank', 'external')),
   constraint ledger_accounts_class check (account_class in ('asset', 'liability', 'equity', 'revenue', 'expense')),
   constraint ledger_accounts_normal_balance check (normal_balance in ('debit', 'credit'))
@@ -215,6 +216,7 @@ create table if not exists public.transfers (
   failure_reason text,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
+  constraint transfers_amount_positive check (amount_cents > 0),
   constraint transfers_status check (status in ('pending', 'completed', 'failed', 'cancelled'))
 );
 
@@ -256,6 +258,7 @@ create table if not exists public.bill_payments (
   failure_reason text,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
+  constraint bill_payments_amount_positive check (amount_cents > 0),
   constraint bill_payments_cadence check (cadence in ('once', 'weekly', 'biweekly', 'monthly')),
   constraint bill_payments_status check (status in ('scheduled', 'processing', 'completed', 'failed', 'cancelled'))
 );
@@ -279,6 +282,7 @@ create table if not exists public.deposits (
   reviewed_at timestamptz,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
+  constraint deposits_amount_positive check (amount_cents > 0),
   constraint deposits_status check (status in ('submitted', 'under_review', 'approved', 'rejected'))
 );
 
@@ -291,7 +295,7 @@ for each row execute function public.set_updated_at();
 create table if not exists public.transactions (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null references public.profiles (id) on delete cascade,
-  account_id uuid not null references public.accounts (id) on delete cascade,
+  account_id uuid not null references public.accounts (id) on delete restrict,
   journal_id uuid not null references public.ledger_journals (id) on delete restrict,
   type text not null,
   direction text not null,
@@ -304,6 +308,7 @@ create table if not exists public.transactions (
   deposit_id uuid references public.deposits (id) on delete set null,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
+  constraint transactions_amount_positive check (amount_cents > 0),
   constraint transactions_type check (type in ('transfer', 'bill_payment', 'deposit', 'fee', 'interest', 'adjustment')),
   constraint transactions_direction check (direction in ('in', 'out')),
   constraint transactions_status check (status in ('pending', 'posted', 'failed', 'reversed'))
@@ -381,20 +386,13 @@ create policy profiles_select_own
 on public.profiles for select
 using (auth.uid() = id);
 
-create policy profiles_update_own
-on public.profiles for update
-using (auth.uid() = id)
-with check (auth.uid() = id);
+create policy accounts_select_own
+on public.accounts for select
+using (auth.uid() = user_id);
 
-create policy accounts_own
-on public.accounts for all
-using (auth.uid() = user_id)
-with check (auth.uid() = user_id);
-
-create policy transactions_own
-on public.transactions for all
-using (auth.uid() = user_id)
-with check (auth.uid() = user_id);
+create policy transactions_select_own
+on public.transactions for select
+using (auth.uid() = user_id);
 
 create policy transfers_own
 on public.transfers for all
