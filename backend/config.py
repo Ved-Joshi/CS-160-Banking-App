@@ -20,3 +20,6 @@ class Settings(BaseSettings):
         case_sensitive = True
 
 settings = Settings()
+
+if not settings.DEBUG and settings.JWT_SECRET == "change-me":
+    raise ValueError("JWT_SECRET must be set to a non-default value in production.")
