@@ -33,6 +33,7 @@ dist-ssr
 
 # Project documents
 overview.md
+supabase-implementation-plan.md
 
 # SQLite ignores
 bank.db
