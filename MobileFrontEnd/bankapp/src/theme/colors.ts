@@ -1,0 +1,17 @@
+export const colors = {
+  navy950: "#10233B",
+  navy900: "#173154",
+  navy700: "#31527E",
+  linkBlue: "#5B7696",
+  linkBlueHover: "#47627F",
+  red700: "#B1111F",
+  red600: "#C71F2D",
+  white: "#FFFFFF",
+  surface: "#F8FBFF",
+  line: "#D4DDE8",
+  text: "#12233D",
+  muted: "#58708D",
+  success: "#1F6B47",
+  warning: "#8A5A00",
+  background: "#EDF1F7",
+};
