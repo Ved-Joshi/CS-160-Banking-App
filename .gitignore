@@ -38,6 +38,7 @@ STATUS.md
 
 # Supabase CLI temp artifacts
 supabase/.temp/
+backend/supabase/.temp/
 
 # SQLite ignores
 bank.db
