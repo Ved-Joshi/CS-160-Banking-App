@@ -230,6 +230,8 @@ serve(async (req) => {
       ok: false,
       error: profileError.message,
       phone_normalized: phone,
+      phone_length: phone.length,
+      phone_codepoints: Array.from(phone).map((c) => c.charCodeAt(0)),
     });
   }
 
