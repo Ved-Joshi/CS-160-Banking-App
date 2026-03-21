@@ -30,6 +30,14 @@ const getEnv = (key: string) => {
   return value;
 };
 
+const getEnvAny = (keys: string[]) => {
+  for (const key of keys) {
+    const value = Deno.env.get(key);
+    if (value) return value;
+  }
+  throw new Error(`Missing ${keys.join(" or ")}`);
+};
+
 const normalizeEmail = (email: string) => email.trim().toLowerCase();
 const normalizeUsername = (username: string) => username.trim().toLowerCase();
 const normalizeState = (state: string) => state.trim().toUpperCase();
@@ -148,8 +156,8 @@ serve(async (req) => {
   let serviceRoleKey: string;
   let encryptionKey: string;
   try {
-    supabaseUrl = getEnv("SUPABASE_URL");
-    serviceRoleKey = getEnv("SUPABASE_SERVICE_ROLE_KEY");
+    supabaseUrl = getEnvAny(["SB_URL", "SUPABASE_URL"]);
+    serviceRoleKey = getEnvAny(["SB_SERVICE_ROLE_KEY", "SUPABASE_SERVICE_ROLE_KEY"]);
     encryptionKey = getEnv("REGISTRATION_ENCRYPTION_KEY_B64");
   } catch (err) {
     return json(500, { ok: false, error: (err as Error).message });
