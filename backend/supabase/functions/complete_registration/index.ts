@@ -163,19 +163,20 @@ serve(async (req) => {
     return json(500, { ok: false, error: (err as Error).message });
   }
 
-  const supabase = createClient(supabaseUrl, serviceRoleKey, {
+  const supabaseAdmin = createClient(supabaseUrl, serviceRoleKey, {
     auth: { persistSession: false },
-    global: { headers: { Authorization: `Bearer ${token}` } },
   });
 
-  const { data: userData, error: userError } = await supabase.auth.getUser();
+  const { data: userData, error: userError } = await supabaseAdmin.auth.getUser(
+    token,
+  );
   if (userError || !userData.user) {
     return json(401, { ok: false, error: "Invalid auth session" });
   }
 
   const user = userData.user;
 
-  const { data: existingProfile } = await supabase
+  const { data: existingProfile } = await supabaseAdmin
     .from("profiles")
     .select("id")
     .eq("id", user.id)
@@ -188,7 +189,7 @@ serve(async (req) => {
   const taxCiphertext = await encryptTaxId(taxDigits, encryptionKey);
   const taxLast4 = taxDigits.slice(-4);
 
-  const { error: profileError, data: profileRows } = await supabase
+  const { error: profileError, data: profileRows } = await supabaseAdmin
     .from("profiles")
     .insert({
       id: user.id,
@@ -213,7 +214,7 @@ serve(async (req) => {
     return json(400, { ok: false, error: profileError.message });
   }
 
-  const { error: privateError } = await supabase
+  const { error: privateError } = await supabaseAdmin
     .from("customer_private")
     .insert({
       user_id: user.id,
@@ -223,7 +224,7 @@ serve(async (req) => {
     });
 
   if (privateError) {
-    await supabase.from("profiles").delete().eq("id", user.id);
+    await supabaseAdmin.from("profiles").delete().eq("id", user.id);
     return json(400, { ok: false, error: privateError.message });
   }
 
