@@ -41,7 +41,20 @@ const getEnvAny = (keys: string[]) => {
 const normalizeEmail = (email: string) => email.trim().toLowerCase();
 const normalizeUsername = (username: string) => username.trim().toLowerCase();
 const normalizeState = (state: string) => state.trim().toUpperCase();
-const normalizePhone = (phone: string) => phone.trim();
+const normalizePhone = (phone: string) => {
+  const trimmed = phone.trim();
+  const digits = trimmed.replace(/\D/g, "");
+  if (trimmed.startsWith("+")) {
+    return `+${digits}`;
+  }
+  if (digits.length === 10) {
+    return `+1${digits}`;
+  }
+  if (digits.length === 11 && digits.startsWith("1")) {
+    return `+${digits}`;
+  }
+  return `+${digits}`;
+};
 const normalizeZip = (zip: string) => zip.trim();
 
 const isAdult = (dob: string) => {
