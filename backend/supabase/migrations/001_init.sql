@@ -39,7 +39,9 @@ create table if not exists public.profiles (
   constraint profiles_email_lower check (email = lower(email)),
   constraint profiles_username_lower check (username = lower(username)),
   constraint profiles_username_format check (username ~ '^[a-z0-9._-]{3,32}$'),
-  constraint profiles_phone_format check (mobile_phone_e164 ~ '^\\+[0-9]{10,15}$'),
+  constraint profiles_phone_format check (
+    regexp_replace(mobile_phone_e164, '\\D', '', 'g') ~ '^[0-9]{10,15}$'
+  ),
   constraint profiles_zip_format check (zip_code ~ '^[0-9]{5}(-[0-9]{4})?$'),
   constraint profiles_state_format check (
     state in (
