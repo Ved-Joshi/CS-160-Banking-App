@@ -226,12 +226,20 @@ serve(async (req) => {
     .single();
 
   if (profileError) {
+    const urlHost = (() => {
+      try {
+        return new URL(supabaseUrl).host;
+      } catch {
+        return "unknown";
+      }
+    })();
     return json(400, {
       ok: false,
       error: profileError.message,
       phone_normalized: phone,
       phone_length: phone.length,
       phone_codepoints: Array.from(phone).map((c) => c.charCodeAt(0)),
+      supabase_host: urlHost,
     });
   }
 
