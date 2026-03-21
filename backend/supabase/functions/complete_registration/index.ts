@@ -16,8 +16,10 @@ type RegistrationPayload = {
   tax_identifier_raw: string;
 };
 
+const FUNCTION_VERSION = "2026-03-21-1";
+
 const json = (status: number, body: Record<string, unknown>) =>
-  new Response(JSON.stringify(body), {
+  new Response(JSON.stringify({ version: FUNCTION_VERSION, ...body }), {
     status,
     headers: { "Content-Type": "application/json" },
   });
@@ -224,7 +226,11 @@ serve(async (req) => {
     .single();
 
   if (profileError) {
-    return json(400, { ok: false, error: profileError.message });
+    return json(400, {
+      ok: false,
+      error: profileError.message,
+      phone_normalized: phone,
+    });
   }
 
   const { error: privateError } = await supabaseAdmin
