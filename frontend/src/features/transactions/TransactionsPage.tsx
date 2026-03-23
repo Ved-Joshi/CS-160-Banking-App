@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { useMemo, useState } from 'react';
-import { Card, DataTable, Field, PageHeader, StatusChip } from '../../components/ui';
+import { Card, DataTable, EmptyState, Field, PageHeader, StatusChip } from '../../components/ui';
 import { accountsService, transactionsService } from '../../lib/bankingApi';
 import { formatCurrency, formatDate } from '../../lib/format';
 
@@ -66,7 +66,14 @@ export function TransactionsPage() {
         </div>
       </Card>
       <Card>
-        <DataTable headers={['Date', 'Description', 'Type', 'Status', 'Amount']} rows={rows} />
+        {filtered.length ? (
+          <DataTable headers={['Date', 'Description', 'Type', 'Status', 'Amount']} rows={rows} />
+        ) : (
+          <EmptyState
+            title="No transactions yet"
+            description="Transaction activity will appear here once your accounts start receiving posted or pending activity."
+          />
+        )}
       </Card>
     </div>
   );
