@@ -16,6 +16,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (!session?.user) return;
       if (session.aal !== 'aal2') {
         setMfaPending(true);
+        writeStorage(SESSION_KEY, null);
+        setUser(null);
         return;
       }
       const metadata = (session.user.user_metadata as Record<string, string> | undefined) ?? {};
@@ -41,6 +43,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         const result = await authService.login(email, password);
         if (result.mfaRequired) {
           setMfaPending(true);
+          writeStorage(SESSION_KEY, null);
+          setUser(null);
           return 'mfa';
         }
         writeStorage(SESSION_KEY, result.user);
