@@ -20,8 +20,10 @@ export const mockUser: User = {
 
 export const mockProfile: CustomerProfile = {
   id: 'profile-1',
+  firstName: 'Alex',
+  middleName: '',
+  lastName: 'Morgan',
   fullName: 'Alex Morgan',
-  username: 'alex.morgan',
   email: 'alex.morgan@examplebank.com',
   phone: '(415) 555-0193',
   address: '1700 Mission Street, San Francisco, CA 94103',

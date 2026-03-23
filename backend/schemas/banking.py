@@ -107,8 +107,10 @@ class AtmLocation(BaseModel):
 
 class CustomerProfile(BaseModel):
     id: str
+    firstName: str
+    middleName: Optional[str] = None
+    lastName: str
     fullName: str
-    username: Optional[str] = None
     email: str
     phone: str
     address: str

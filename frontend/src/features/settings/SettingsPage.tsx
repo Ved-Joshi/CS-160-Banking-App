@@ -19,10 +19,6 @@ export function SettingsPage() {
                 <dd>{profile.fullName}</dd>
               </div>
               <div>
-                <dt>Username</dt>
-                <dd>{profile.username || '—'}</dd>
-              </div>
-              <div>
                 <dt>Email</dt>
                 <dd>{profile.email}</dd>
               </div>

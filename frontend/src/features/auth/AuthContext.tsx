@@ -20,6 +20,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         email: session.user.email ?? '',
         username: metadata.username ?? '',
         firstName: metadata.firstName ?? '',
+        middleName: metadata.middleName ?? '',
         lastName: metadata.lastName ?? '',
       };
       writeStorage(SESSION_KEY, hydrated);

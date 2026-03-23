@@ -17,13 +17,16 @@ export interface User {
   email: string;
   username?: string;
   firstName: string;
+  middleName?: string;
   lastName: string;
 }
 
 export interface CustomerProfile {
   id: string;
+  firstName: string;
+  middleName?: string;
+  lastName: string;
   fullName: string;
-  username?: string;
   email: string;
   phone: string;
   address: string;
@@ -32,6 +35,9 @@ export interface CustomerProfile {
 }
 
 export interface RegistrationInput {
+  firstName: string;
+  middleName?: string;
+  lastName: string;
   email: string;
   mobilePhone: string;
   streetAddress: string;
@@ -40,7 +46,6 @@ export interface RegistrationInput {
   state: string;
   zipCode: string;
   dateOfBirth: string;
-  username: string;
   password: string;
   passwordConfirmation: string;
   taxId: string;

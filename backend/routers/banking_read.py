@@ -213,13 +213,18 @@ async def get_profile(current_user: SupabaseUser = Depends(get_current_user)) ->
 
     profile = rows[0]
     first_name = profile.get("first_name") or current_user.user_metadata.get("firstName") or ""
+    middle_name = profile.get("middle_name") or current_user.user_metadata.get("middleName") or None
     last_name = profile.get("last_name") or current_user.user_metadata.get("lastName") or ""
-    full_name = " ".join(part for part in [first_name, last_name] if part).strip() or profile.get("username") or current_user.email
+    full_name = " ".join(
+        part for part in [first_name, middle_name, last_name] if part
+    ).strip() or current_user.email
 
     return CustomerProfile(
         id=current_user.id,
+        firstName=first_name,
+        middleName=middle_name,
+        lastName=last_name,
         fullName=full_name,
-        username=profile.get("username"),
         email=profile.get("email") or current_user.email,
         phone=profile.get("mobile_phone_e164") or current_user.phone or "—",
         address=format_address(profile),

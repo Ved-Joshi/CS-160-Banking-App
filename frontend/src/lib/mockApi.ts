@@ -1,5 +1,5 @@
 import { mockAccounts, mockAtms, mockDeposits, mockNotifications, mockPayments, mockPayees, mockTransactions } from '../mocks/data';
-import { supabase } from './supabaseClient';
+import { supabase, supabaseAnonKey, supabaseUrl } from './supabaseClient';
 import { readStorage, writeStorage, MFA_CHALLENGE_KEY } from './storage';
 import type {
   AtmLocation,
@@ -42,6 +42,7 @@ function mapUser(user: SupabaseUser | null): User {
     email: user.email ?? '',
     username: metadata.username ?? '',
     firstName: metadata.firstName ?? '',
+    middleName: metadata.middleName ?? '',
     lastName: metadata.lastName ?? '',
   };
 }
@@ -102,18 +103,35 @@ export const authService = {
     const { data, error } = await supabase.auth.signUp({
       email: input.email,
       password: input.password,
+      options: {
+        data: {
+          firstName: input.firstName,
+          middleName: input.middleName ?? '',
+          lastName: input.lastName,
+        },
+      },
     });
 
     if (error) {
       throw new Error(error.message);
     }
 
-    const { error: regError } = await supabase.functions.invoke('complete_registration', {
-      body: {
+    if (!data.session?.access_token) {
+      throw new Error('Registration created the auth user, but no session was issued. Disable email confirmation in Supabase Auth or sign in after confirming the email before completing registration.');
+    }
+
+    const registrationResponse = await fetch(`${supabaseUrl}/functions/v1/complete_registration`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${data.session.access_token}`,
+        apikey: supabaseAnonKey,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
         email: input.email,
-        username: input.username.toLowerCase(),
-        first_name: input.username || 'User',
-        last_name: 'User',
+        first_name: input.firstName,
+        middle_name: input.middleName ?? null,
+        last_name: input.lastName,
         mobile_phone_e164: input.mobilePhone,
         street_address: input.streetAddress,
         apartment_unit: input.apartmentUnit ?? null,
@@ -122,11 +140,29 @@ export const authService = {
         zip_code: input.zipCode,
         date_of_birth: input.dateOfBirth,
         tax_identifier_raw: input.taxId,
-      },
+      }),
     });
 
-    if (regError) {
-      throw new Error(regError.message);
+    if (!registrationResponse.ok) {
+      let payload: { error?: string; message?: string } | null = null;
+
+      try {
+        payload = await registrationResponse.json() as { error?: string; message?: string };
+      } catch {
+        payload = null;
+      }
+
+      const message = payload?.error || payload?.message;
+      if (message) {
+        throw new Error(message);
+      }
+
+      const text = await registrationResponse.clone().text().catch(() => '');
+      if (text) {
+        throw new Error(text);
+      }
+
+      throw new Error(`Registration failed with status ${registrationResponse.status}.`);
     }
 
     clearMfaChallenge();
@@ -182,12 +218,14 @@ export const authService = {
 
     const user = mapUser(data.user);
     const metadata = (data.user.user_metadata as Record<string, string> | undefined) ?? {};
-    const fullName = `${user.firstName} ${user.lastName}`.trim() || user.username || user.email;
+    const fullName = [user.firstName, user.middleName, user.lastName].filter(Boolean).join(' ').trim() || user.email;
 
     return {
       id: user.id,
+      firstName: user.firstName,
+      middleName: user.middleName,
+      lastName: user.lastName,
       fullName,
-      username: user.username,
       email: user.email,
       phone: metadata.mobilePhone || data.user.phone || '—',
       address: formatAddress(metadata) || '—',
