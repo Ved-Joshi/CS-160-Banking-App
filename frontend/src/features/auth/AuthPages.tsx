@@ -153,8 +153,8 @@ export function LoginPage() {
           onSubmit={form.handleSubmit(async (values) => {
             try {
               setServerError('');
-              await signIn(values.email, values.password);
-              navigate('/app/dashboard');
+              const result = await signIn(values.email, values.password);
+              navigate(result === 'mfa' ? '/mfa' : '/app/dashboard');
             } catch (error) {
               setServerError(error instanceof Error ? error.message : 'Sign in failed.');
             }
@@ -284,8 +284,8 @@ export function RegisterPage() {
         <form
           className="stack-lg"
           onSubmit={form.handleSubmit(async (values) => {
-            await register(values);
-            navigate('/app/dashboard');
+            const result = await register(values);
+            navigate(result === 'mfa' ? '/mfa' : '/app/dashboard');
           })}
         >
           <PageHeader title="Enroll in online banking" eyebrow="New customer" subtitle="Create secure online access for your personal banking profile." />

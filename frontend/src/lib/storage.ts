@@ -1,4 +1,5 @@
 export const SESSION_KEY = 'sj-state-session';
+export const MFA_CHALLENGE_KEY = 'sj-state-mfa-challenge';
 
 export function readStorage<T>(key: string, fallback: T): T {
   const value = window.localStorage.getItem(key);

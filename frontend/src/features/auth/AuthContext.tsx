@@ -31,9 +31,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       user,
       loading,
       async signIn(email, password) {
-        const nextUser = await authService.login(email, password);
-        writeStorage(SESSION_KEY, nextUser);
-        setUser(nextUser);
+        const result = await authService.login(email, password);
+        writeStorage(SESSION_KEY, result.user);
+        setUser(result.user);
+        return result.mfaRequired ? 'mfa' : 'ok';
       },
       async completeMfa(code) {
         const nextUser = await authService.verifyMfa(code);
@@ -41,9 +42,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setUser(nextUser);
       },
       async register(input: RegistrationInput) {
-        const nextUser = await authService.register(input);
-        writeStorage(SESSION_KEY, nextUser);
-        setUser(nextUser);
+        const result = await authService.register(input);
+        writeStorage(SESSION_KEY, result.user);
+        setUser(result.user);
+        return result.mfaRequired ? 'mfa' : 'ok';
       },
       async signOut() {
         await supabase.auth.signOut();
