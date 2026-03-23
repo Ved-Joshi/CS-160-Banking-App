@@ -45,10 +45,16 @@ const ALLOWED_FIELDS = new Set<string>([
   "tax_identifier_raw",
 ]);
 
+const corsHeaders = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Methods": "POST, OPTIONS",
+};
+
 const json = (status: number, body: Record<string, unknown>) =>
   new Response(JSON.stringify({ version: FUNCTION_VERSION, ...body }), {
     status,
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...corsHeaders },
   });
 
 const getEnv = (key: string) => {
@@ -125,10 +131,7 @@ const encryptTaxId = async (raw: string, keyB64: string) => {
 
 serve(async (req) => {
   if (req.method === "OPTIONS") {
-    return new Response(null, {
-      status: 204,
-      headers: { "Access-Control-Allow-Origin": "*" },
-    });
+    return new Response(null, { status: 204, headers: corsHeaders });
   }
 
   if (req.method !== "POST") {
