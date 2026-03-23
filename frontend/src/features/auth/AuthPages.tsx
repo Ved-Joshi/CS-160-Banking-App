@@ -5,7 +5,6 @@ import { Link, Navigate, useNavigate } from 'react-router-dom';
 import { z } from 'zod';
 import { Button, Card, Field, InlineAlert, PageHeader } from '../../components/ui';
 import { authService } from '../../lib/mockApi';
-import { supabase } from '../../lib/supabaseClient';
 import type { RegistrationInput } from '../../types/banking';
 import { useAuth } from './useAuth';
 import { SESSION_KEY, writeStorage } from '../../lib/storage';
@@ -192,7 +191,7 @@ const codeSchema = z.object({
 
 export function MfaPage() {
   const navigate = useNavigate();
-  const { completeMfa } = useAuth();
+  const { completeMfa, signOut } = useAuth();
   const [serverError, setServerError] = useState('');
   const [infoMessage, setInfoMessage] = useState('');
   const form = useForm<z.infer<typeof codeSchema>>({
@@ -230,8 +229,7 @@ export function MfaPage() {
               className="text-link"
               type="button"
               onClick={async () => {
-                await supabase.auth.signOut();
-                writeStorage(SESSION_KEY, null);
+                await signOut();
                 navigate('/login');
               }}
             >

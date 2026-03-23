@@ -251,24 +251,10 @@ serve(async (req) => {
     .single();
 
   if (profileError) {
-    const urlHost = (() => {
-      try {
-        return new URL(supabaseUrl).host;
-      } catch {
-        return "unknown";
-      }
-    })();
     if (profileError.code === "23505") {
       return json(409, { ok: false, error: "Username or phone already exists" });
     }
-    return json(400, {
-      ok: false,
-      error: profileError.message,
-      phone_normalized: phone,
-      phone_length: phone.length,
-      phone_codepoints: Array.from(phone).map((c) => c.charCodeAt(0)),
-      supabase_host: urlHost,
-    });
+    return json(400, { ok: false, error: profileError.message });
   }
 
   const { error: privateError } = await supabaseAdmin
