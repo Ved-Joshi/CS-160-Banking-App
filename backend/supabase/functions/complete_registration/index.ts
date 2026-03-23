@@ -16,7 +16,34 @@ type RegistrationPayload = {
   tax_identifier_raw: string;
 };
 
-const FUNCTION_VERSION = "2026-03-21-1";
+const FUNCTION_VERSION = "2026-03-23-1";
+const REQUIRED_FIELDS: (keyof RegistrationPayload)[] = [
+  "email",
+  "username",
+  "first_name",
+  "last_name",
+  "mobile_phone_e164",
+  "street_address",
+  "city",
+  "state",
+  "zip_code",
+  "date_of_birth",
+  "tax_identifier_raw",
+];
+const ALLOWED_FIELDS = new Set<string>([
+  "email",
+  "username",
+  "first_name",
+  "last_name",
+  "mobile_phone_e164",
+  "street_address",
+  "apartment_unit",
+  "city",
+  "state",
+  "zip_code",
+  "date_of_birth",
+  "tax_identifier_raw",
+]);
 
 const json = (status: number, body: Record<string, unknown>) =>
   new Response(JSON.stringify({ version: FUNCTION_VERSION, ...body }), {
@@ -115,19 +142,14 @@ serve(async (req) => {
     return json(400, { ok: false, error: "Invalid JSON" });
   }
 
-  const missing = [
-    "email",
-    "username",
-    "first_name",
-    "last_name",
-    "mobile_phone_e164",
-    "street_address",
-    "city",
-    "state",
-    "zip_code",
-    "date_of_birth",
-    "tax_identifier_raw",
-  ].filter((key) => !payload[key as keyof RegistrationPayload]);
+  const unknown = Object.keys(payload).filter((key) => !ALLOWED_FIELDS.has(key));
+  if (unknown.length > 0) {
+    return json(400, { ok: false, error: `Unknown fields: ${unknown.join(", ")}` });
+  }
+
+  const missing = REQUIRED_FIELDS.filter(
+    (key) => !payload[key] || String(payload[key]).trim() === "",
+  );
 
   if (missing.length > 0) {
     return json(400, { ok: false, error: `Missing: ${missing.join(", ")}` });
@@ -146,7 +168,7 @@ serve(async (req) => {
   if (!/^[a-z0-9._-]{3,32}$/.test(username)) {
     return json(400, { ok: false, error: "Invalid username" });
   }
-  if (!/^\+[1-9][0-9]{1,14}$/.test(phone)) {
+  if (!/^\+[0-9]{10,15}$/.test(phone)) {
     return json(400, { ok: false, error: "Invalid phone" });
   }
   if (!/^[0-9]{5}(-[0-9]{4})?$/.test(zip)) {
@@ -233,6 +255,9 @@ serve(async (req) => {
         return "unknown";
       }
     })();
+    if (profileError.code === "23505") {
+      return json(409, { ok: false, error: "Username or phone already exists" });
+    }
     return json(400, {
       ok: false,
       error: profileError.message,
