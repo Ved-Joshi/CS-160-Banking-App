@@ -1,6 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from config import settings
+from routers.banking_read import router as banking_read_router
 
 app = FastAPI(
     title="Banking App API",
@@ -16,6 +17,8 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+app.include_router(banking_read_router)
 
 @app.get("/health")
 async def health():

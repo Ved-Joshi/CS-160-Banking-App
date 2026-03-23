@@ -1,5 +1,6 @@
-from pydantic_settings import BaseSettings
 from typing import Optional
+
+from pydantic_settings import BaseSettings
 
 class Settings(BaseSettings):
     # Server Configuration
@@ -14,6 +15,10 @@ class Settings(BaseSettings):
     JWT_SECRET: str = "change-me"
     JWT_ALG: str = "HS256"
     JWT_EXPIRES_MIN: int = 60
+
+    # Supabase configuration for backend banking APIs
+    SUPABASE_URL: Optional[str] = None
+    SUPABASE_SERVICE_ROLE_KEY: Optional[str] = None
 
     class Config:
         env_file = ".env"
