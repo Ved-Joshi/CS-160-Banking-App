@@ -11,16 +11,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const loading = false;
 
   useEffect(() => {
-    supabase.auth.getSession().then(async ({ data }) => {
+    supabase.auth.getSession().then(({ data }) => {
       const session = data.session;
       if (!session?.user) return;
-      const { data: assurance } = await supabase.auth.mfa.getAuthenticatorAssuranceLevel();
-      if (assurance?.currentLevel !== 'aal2') {
-        setMfaPending(true);
-        writeStorage(SESSION_KEY, null);
-        setUser(null);
-        return;
-      }
       const metadata = (session.user.user_metadata as Record<string, string> | undefined) ?? {};
       const hydrated: User = {
         id: session.user.id,
@@ -30,6 +23,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         lastName: metadata.lastName ?? '',
       };
       writeStorage(SESSION_KEY, hydrated);
+      writeStorage(MFA_CHALLENGE_KEY, null);
       setUser(hydrated);
       setMfaPending(false);
     });

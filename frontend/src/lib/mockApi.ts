@@ -95,19 +95,8 @@ export const authService = {
       throw new Error(error.message);
     }
 
-    const user = mapUser(data.user);
-    const { data: assurance } = await supabase.auth.mfa.getAuthenticatorAssuranceLevel();
-    if (assurance?.currentLevel === 'aal2') {
-      return { user, mfaRequired: false };
-    }
-
-    const factorId = await getPhoneFactorId();
-    if (!factorId) {
-      return { user, mfaRequired: false };
-    }
-
-    await createPhoneChallenge(factorId);
-    return { user, mfaRequired: true };
+    clearMfaChallenge();
+    return { user: mapUser(data.user), mfaRequired: false };
   },
   async register(input: RegistrationInput): Promise<{ user: User; mfaRequired: boolean }> {
     const { data, error } = await supabase.auth.signUp({
@@ -140,19 +129,8 @@ export const authService = {
       throw new Error(regError.message);
     }
 
-    const enrollResult = await supabase.auth.mfa.enroll({
-      factorType: 'phone',
-      phone: input.mobilePhone,
-      friendlyName: 'Primary phone',
-    });
-
-    if (enrollResult.error || !enrollResult.data) {
-      throw new Error(enrollResult.error?.message ?? 'Unable to enroll phone MFA.');
-    }
-
-    await createPhoneChallenge(enrollResult.data.id);
-
-    return { user: mapUser(data.user), mfaRequired: true };
+    clearMfaChallenge();
+    return { user: mapUser(data.user), mfaRequired: false };
   },
   async requestReset(email: string): Promise<{ email: string }> {
     const { error } = await supabase.auth.resetPasswordForEmail(email, {
