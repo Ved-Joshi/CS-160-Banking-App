@@ -63,6 +63,11 @@ export interface BankAccount {
   balances: BalanceSummary;
 }
 
+export interface CreateBankAccountInput {
+  nickname: string;
+  type: AccountType;
+}
+
 export interface Transaction {
   id: string;
   accountId: string;

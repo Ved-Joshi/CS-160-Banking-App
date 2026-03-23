@@ -79,8 +79,8 @@ export function DashboardPage() {
             description="Account cards will appear here after at least one banking account has been provisioned for your profile."
             action={
               <div className="button-row">
-                <Link className="button button--secondary" to="/app/settings">
-                  Review profile
+                <Link className="button button--secondary" to="/app/accounts">
+                  Open an account
                 </Link>
               </div>
             }

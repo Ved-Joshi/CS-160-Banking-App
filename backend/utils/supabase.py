@@ -1,4 +1,5 @@
 import json
+import random
 from dataclasses import dataclass
 from decimal import Decimal, ROUND_HALF_UP
 from typing import Any, Iterable, Optional
@@ -18,6 +19,10 @@ def cents_to_amount(value: Optional[int]) -> float:
 
 def amount_to_cents(value: float) -> int:
     return int((Decimal(str(value)) * Decimal("100")).quantize(Decimal("1"), rounding=ROUND_HALF_UP))
+
+
+def random_last4() -> str:
+    return f"{random.randint(0, 9999):04d}"
 
 
 @dataclass
@@ -121,6 +126,20 @@ class SupabaseClient:
         if limit is not None:
             query.append(("limit", str(limit)))
         return self._request("GET", f"/rest/v1/{table}", query=query) or []
+
+    def insert_row(self, table: str, values: dict[str, Any]) -> dict[str, Any]:
+        rows = self._request(
+            "POST",
+            f"/rest/v1/{table}",
+            body=values,
+            prefer="return=representation",
+        ) or []
+        if not rows:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Supabase did not return the created {table} row.",
+            )
+        return rows[0]
 
 
 supabase_client = SupabaseClient()

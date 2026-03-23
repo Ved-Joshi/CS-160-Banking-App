@@ -1,15 +1,90 @@
-import { useQuery } from '@tanstack/react-query';
+import { zodResolver } from '@hookform/resolvers/zod';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useForm } from 'react-hook-form';
 import { Link, useParams } from 'react-router-dom';
-import { Card, DataTable, EmptyState, PageHeader, StatusChip } from '../../components/ui';
+import { z } from 'zod';
+import { Button, Card, DataTable, EmptyState, Field, InlineAlert, PageHeader, StatusChip } from '../../components/ui';
 import { accountsService, transactionsService } from '../../lib/bankingApi';
 import { formatCurrency, formatDate } from '../../lib/format';
 
+const createAccountSchema = z.object({
+  nickname: z.string().min(2, 'Nickname must be at least 2 characters.').max(80),
+  type: z.enum(['Checking', 'Savings', 'Credit']),
+});
+
 export function AccountsPage() {
+  const queryClient = useQueryClient();
   const { data: accounts = [] } = useQuery({ queryKey: ['accounts'], queryFn: accountsService.list });
+  const createAccount = useMutation({
+    mutationFn: accountsService.create,
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ['accounts'] });
+    },
+  });
+  const form = useForm<z.infer<typeof createAccountSchema>>({
+    resolver: zodResolver(createAccountSchema),
+    defaultValues: {
+      nickname: '',
+      type: 'Checking',
+    },
+  });
 
   return (
     <div className="stack-xl">
-      <PageHeader title="Accounts" eyebrow="Balances and details" subtitle="Review current and available balances across your linked products." />
+      <PageHeader
+        title="Accounts"
+        eyebrow="Balances and details"
+        subtitle="Review current balances and open additional banking products for your profile."
+      />
+      {!accounts.length ? (
+        <EmptyState
+          title="No accounts yet"
+          description="You do not have any linked banking products yet. Open your first account below and it will appear here immediately."
+        />
+      ) : null}
+      <div className="grid-two">
+        <Card>
+          <form
+            className="stack-lg"
+            onSubmit={form.handleSubmit(async (values) => {
+              await createAccount.mutateAsync(values);
+              form.reset({ nickname: '', type: values.type });
+            })}
+          >
+            <h3>Open a new account</h3>
+            {createAccount.error ? (
+              <InlineAlert title="Unable to open account" tone="warning">
+                {createAccount.error instanceof Error ? createAccount.error.message : 'Something went wrong.'}
+              </InlineAlert>
+            ) : null}
+            {createAccount.data ? (
+              <InlineAlert title="Account created" tone="success">
+                {createAccount.data.nickname} is now available in your account list.
+              </InlineAlert>
+            ) : null}
+            <Field label="Account nickname" error={form.formState.errors.nickname?.message}>
+              <input {...form.register('nickname')} placeholder="Everyday Checking" />
+            </Field>
+            <Field label="Account type" error={form.formState.errors.type?.message}>
+              <select {...form.register('type')}>
+                <option value="Checking">Checking</option>
+                <option value="Savings">Savings</option>
+                <option value="Credit">Credit</option>
+              </select>
+            </Field>
+            <Button disabled={createAccount.isPending} type="submit">
+              {createAccount.isPending ? 'Opening account...' : 'Open account'}
+            </Button>
+          </form>
+        </Card>
+        <Card>
+          <h3>Account setup details</h3>
+          <div className="stack-md">
+            <p className="muted">New accounts start with a zero balance and become available immediately in the dashboard, transfers, deposits, and bill pay flows.</p>
+            <p className="muted">Checking and savings accounts receive the standard routing number used in the current demo environment. Credit accounts appear without a routing number.</p>
+          </div>
+        </Card>
+      </div>
       <div className="grid-three">
         {accounts.map((account) => (
           <Card key={account.id}>

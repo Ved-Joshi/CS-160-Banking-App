@@ -1,4 +1,4 @@
-import type { AtmLocation, BankAccount, CustomerProfile, Deposit, ScheduledPayment, Transaction } from '../types/banking';
+import type { AtmLocation, BankAccount, CreateBankAccountInput, CustomerProfile, Deposit, ScheduledPayment, Transaction } from '../types/banking';
 import { apiRequest } from './apiClient';
 
 export const profileService = {
@@ -13,6 +13,12 @@ export const accountsService = {
   },
   get(accountId: string): Promise<BankAccount> {
     return apiRequest(`/api/accounts/${accountId}`);
+  },
+  create(input: CreateBankAccountInput): Promise<BankAccount> {
+    return apiRequest('/api/accounts', {
+      method: 'POST',
+      body: input,
+    });
   },
 };
 

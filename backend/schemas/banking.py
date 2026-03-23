@@ -1,6 +1,6 @@
 from typing import Literal, Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 AccountType = Literal["Checking", "Savings", "Credit"]
@@ -27,6 +27,11 @@ class BankAccount(BaseModel):
     openedAt: str
     closeEligible: bool
     balances: BalanceSummary
+
+
+class CreateBankAccountIn(BaseModel):
+    nickname: str = Field(min_length=2, max_length=80)
+    type: AccountType
 
 
 class Transaction(BaseModel):

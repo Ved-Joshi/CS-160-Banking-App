@@ -3,8 +3,8 @@ from pathlib import PurePosixPath
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from dependencies.auth import get_current_user
-from schemas.banking import AtmLocation, BankAccount, CustomerProfile, Deposit, DepositImage, DepositImages, NotificationItem, Payee, ScheduledPayment, Transaction
-from utils.supabase import SupabaseUser, cents_to_amount, supabase_client
+from schemas.banking import AtmLocation, BankAccount, CreateBankAccountIn, CustomerProfile, Deposit, DepositImage, DepositImages, NotificationItem, Payee, ScheduledPayment, Transaction
+from utils.supabase import SupabaseUser, cents_to_amount, random_last4, supabase_client
 
 router = APIRouter(prefix="/api", tags=["banking"])
 
@@ -19,6 +19,14 @@ def map_account_type(value: str) -> str:
 
 def map_account_status(value: str) -> str:
     return "Open" if value == "open" else "Restricted"
+
+
+def normalize_account_type(value: str) -> str:
+    return {
+        "Checking": "checking",
+        "Savings": "savings",
+        "Credit": "credit",
+    }.get(value, "checking")
 
 
 def map_transaction_type(value: str) -> str:
@@ -243,6 +251,30 @@ async def get_account(account_id: str, current_user: SupabaseUser = Depends(get_
     if not rows:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Account not found.")
     return map_account(rows[0])
+
+
+@router.post("/accounts", response_model=BankAccount, status_code=status.HTTP_201_CREATED)
+async def create_account(
+    payload: CreateBankAccountIn,
+    current_user: SupabaseUser = Depends(get_current_user),
+) -> BankAccount:
+    account_type = normalize_account_type(payload.type)
+    routing_number = "121000358" if account_type in {"checking", "savings"} else None
+    created = supabase_client.insert_row(
+        "accounts",
+        {
+            "user_id": current_user.id,
+            "nickname": payload.nickname.strip(),
+            "account_type": account_type,
+            "account_last4": random_last4(),
+            "routing_number": routing_number,
+            "status": "open",
+            "available_balance_cents": 0,
+            "current_balance_cents": 0,
+            "close_eligible": False,
+        },
+    )
+    return map_account(created)
 
 
 @router.get("/transactions", response_model=list[Transaction])
