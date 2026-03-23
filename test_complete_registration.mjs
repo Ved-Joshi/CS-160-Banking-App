@@ -35,8 +35,8 @@ const res = await fetch(`${url}/functions/v1/complete_registration`, {
   },
   body: JSON.stringify({
     email,
-    username: `test_user_${Date.now()}`,
     first_name: "Test",
+    middle_name: "A",
     last_name: "User",
     mobile_phone_e164: randomPhone,
     street_address: "1 Main St",

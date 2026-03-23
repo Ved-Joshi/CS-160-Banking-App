@@ -5,6 +5,7 @@ import { Link, Navigate, useNavigate } from 'react-router-dom';
 import { z } from 'zod';
 import { Button, Card, Field, InlineAlert, PageHeader } from '../../components/ui';
 import { authService } from '../../lib/mockApi';
+import { supabase } from '../../lib/supabaseClient';
 import type { RegistrationInput } from '../../types/banking';
 import { useAuth } from './useAuth';
 import { SESSION_KEY, writeStorage } from '../../lib/storage';
@@ -258,6 +259,9 @@ export function MfaPage() {
 }
 
 const registerSchema = z.object({
+  firstName: z.string().min(1, 'First name is required.'),
+  middleName: z.string().optional(),
+  lastName: z.string().min(1, 'Last name is required.'),
   email: z.string().email(),
   mobilePhone: z.string().refine((value) => {
     const digits = value.replace(/\D/g, '');
@@ -272,7 +276,6 @@ const registerSchema = z.object({
     const parsed = Date.parse(value);
     return !Number.isNaN(parsed) && parsed < Date.now();
   }, 'Enter a valid date of birth.'),
-  username: z.string().min(3).max(32).regex(/^[A-Za-z0-9._-]+$/, 'Use letters, numbers, periods, underscores, or hyphens.'),
   password: z.string().min(8),
   passwordConfirmation: z.string().min(8),
   taxId: z.string().refine((value) => value.replace(/\D/g, '').length === 9, 'Enter a valid 9-digit SSN or TIN.'),
@@ -289,6 +292,9 @@ export function RegisterPage() {
   const form = useForm<RegistrationInput>({
     resolver: zodResolver(registerSchema),
     defaultValues: {
+      firstName: '',
+      middleName: '',
+      lastName: '',
       email: '',
       mobilePhone: '',
       streetAddress: '',
@@ -297,7 +303,6 @@ export function RegisterPage() {
       state: '',
       zipCode: '',
       dateOfBirth: '',
-      username: '',
       password: '',
       passwordConfirmation: '',
       taxId: '',
@@ -323,7 +328,18 @@ export function RegisterPage() {
         >
           <PageHeader title="Enroll in online banking" eyebrow="New customer" subtitle="Create secure online access for your personal banking profile." />
           {serverError ? <InlineAlert title="Unable to create access" tone="warning">{serverError}</InlineAlert> : null}
-          {submitted ? <InlineAlert title="Enrollment started" tone="success">We sent a verification code to your phone to finish enrollment.</InlineAlert> : null}
+          {submitted ? <InlineAlert title="Enrollment started" tone="success">Your online banking access has been created successfully.</InlineAlert> : null}
+          <div className="grid-two">
+            <Field label="First name" error={form.formState.errors.firstName?.message}>
+              <input {...form.register('firstName')} autoComplete="given-name" />
+            </Field>
+            <Field label="Middle name (optional)" error={form.formState.errors.middleName?.message}>
+              <input {...form.register('middleName')} autoComplete="additional-name" />
+            </Field>
+            <Field label="Last name" error={form.formState.errors.lastName?.message}>
+              <input {...form.register('lastName')} autoComplete="family-name" />
+            </Field>
+          </div>
           <div className="grid-two">
             <Field label="Email address" error={form.formState.errors.email?.message}>
               <input {...form.register('email')} autoComplete="email" type="email" />
@@ -362,14 +378,9 @@ export function RegisterPage() {
               </Field>
             </div>
           </div>
-          <div className="grid-two">
-            <Field label="Username" error={form.formState.errors.username?.message}>
-              <input {...form.register('username')} autoComplete="username" />
-            </Field>
-            <Field label="Social Security Number (SSN) or Tax Identification Number (TIN)" error={form.formState.errors.taxId?.message}>
-              <input {...form.register('taxId')} autoComplete="off" inputMode="numeric" />
-            </Field>
-          </div>
+          <Field label="Social Security Number (SSN) or Tax Identification Number (TIN)" error={form.formState.errors.taxId?.message}>
+            <input {...form.register('taxId')} autoComplete="off" inputMode="numeric" />
+          </Field>
           <div className="grid-two">
             <Field label="Password" error={form.formState.errors.password?.message}>
               <input {...form.register('password')} autoComplete="new-password" type="password" />

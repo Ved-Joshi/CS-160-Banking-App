@@ -1,7 +1,14 @@
-from pydantic_settings import BaseSettings
 from typing import Optional
 
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
 class Settings(BaseSettings):
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        case_sensitive=True,
+        extra="ignore",
+    )
+
     # Server Configuration
     DEBUG: bool = True
     HOST: str = "0.0.0.0"
@@ -15,9 +22,9 @@ class Settings(BaseSettings):
     JWT_ALG: str = "HS256"
     JWT_EXPIRES_MIN: int = 60
 
-    class Config:
-        env_file = ".env"
-        case_sensitive = True
+    # Supabase configuration for backend banking APIs
+    SUPABASE_URL: Optional[str] = None
+    SUPABASE_SERVICE_ROLE_KEY: Optional[str] = None
 
 settings = Settings()
 
