@@ -1,5 +1,6 @@
 from pathlib import PurePosixPath
 from datetime import datetime, timezone
+import logging
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -28,6 +29,7 @@ from schemas.banking import (
 from utils.supabase import SupabaseUser, amount_to_cents, cents_to_amount, random_last4, supabase_client
 
 router = APIRouter(prefix="/api", tags=["banking"])
+logger = logging.getLogger(__name__)
 
 
 def map_account_type(value: str) -> str:
@@ -68,6 +70,25 @@ def map_transaction_status(value: str) -> str:
         "failed": "FAILED",
         "reversed": "FAILED",
     }.get(value, "PENDING")
+
+
+def normalize_transaction_filter(value: str | None) -> str | None:
+    return {
+        "Deposit": "eq.deposit",
+        "Transfer": "eq.transfer",
+        "Bill Pay": "eq.bill_payment",
+        "Interest": "eq.interest",
+        "Withdrawal": "in.(fee,adjustment)",
+        "ATM": "eq.adjustment",
+    }.get(value or "")
+
+
+def normalize_transaction_status_filter(value: str | None) -> str | None:
+    return {
+        "PENDING": "eq.pending",
+        "COMPLETED": "eq.posted",
+        "FAILED": "in.(failed,reversed)",
+    }.get(value or "")
 
 
 def map_payment_cadence(value: str) -> str:
@@ -240,8 +261,8 @@ def format_address(profile: dict) -> str:
     return ", ".join(part for part in [street, locality] if part) or "—"
 
 
-def require_owned_account(account_id: str, user_id: str) -> dict:
-    rows = supabase_client.select_rows(
+async def require_owned_account(account_id: str, user_id: str) -> dict:
+    rows = await supabase_client.select_rows(
         "accounts",
         filters={
             "id": f"eq.{account_id}",
@@ -254,8 +275,8 @@ def require_owned_account(account_id: str, user_id: str) -> dict:
     return rows[0]
 
 
-def require_owned_payee(payee_id: str, user_id: str) -> dict:
-    rows = supabase_client.select_rows(
+async def require_owned_payee(payee_id: str, user_id: str) -> dict:
+    rows = await supabase_client.select_rows(
         "payees",
         filters={
             "id": f"eq.{payee_id}",
@@ -286,7 +307,7 @@ def parse_transfer_date(value: str) -> str:
 
 @router.get("/me/profile", response_model=CustomerProfile)
 async def get_profile(current_user: SupabaseUser = Depends(get_current_user)) -> CustomerProfile:
-    rows = supabase_client.select_rows(
+    rows = await supabase_client.select_rows(
         "profiles",
         filters={"id": f"eq.{current_user.id}"},
         limit=1,
@@ -318,7 +339,7 @@ async def get_profile(current_user: SupabaseUser = Depends(get_current_user)) ->
 
 @router.get("/accounts", response_model=list[BankAccount])
 async def list_accounts(current_user: SupabaseUser = Depends(get_current_user)) -> list[BankAccount]:
-    rows = supabase_client.select_rows(
+    rows = await supabase_client.select_rows(
         "accounts",
         filters={"user_id": f"eq.{current_user.id}"},
         order="opened_at.asc",
@@ -328,7 +349,7 @@ async def list_accounts(current_user: SupabaseUser = Depends(get_current_user)) 
 
 @router.get("/accounts/{account_id}", response_model=BankAccount)
 async def get_account(account_id: str, current_user: SupabaseUser = Depends(get_current_user)) -> BankAccount:
-    rows = supabase_client.select_rows(
+    rows = await supabase_client.select_rows(
         "accounts",
         filters={
             "id": f"eq.{account_id}",
@@ -346,7 +367,7 @@ async def create_account(
     payload: CreateBankAccountIn,
     current_user: SupabaseUser = Depends(get_current_user),
 ) -> BankAccount:
-    profile_rows = supabase_client.select_rows(
+    profile_rows = await supabase_client.select_rows(
         "profiles",
         filters={"id": f"eq.{current_user.id}"},
         limit=1,
@@ -359,7 +380,7 @@ async def create_account(
 
     account_type = normalize_account_type(payload.type)
     routing_number = "121000358" if account_type in {"checking", "savings"} else None
-    created = supabase_client.insert_row(
+    created = await supabase_client.insert_row(
         "accounts",
         {
             "user_id": current_user.id,
@@ -379,7 +400,7 @@ async def create_account(
 @router.get("/transactions", response_model=list[Transaction])
 async def list_transactions(
     account_id: str | None = Query(default=None),
-    type: str | None = Query(default=None),
+    transaction_type: str | None = Query(default=None, alias="type"),
     status_filter: str | None = Query(default=None, alias="status"),
     limit: int = Query(default=100, ge=1, le=250),
     current_user: SupabaseUser = Depends(get_current_user),
@@ -387,21 +408,20 @@ async def list_transactions(
     filters = {"user_id": f"eq.{current_user.id}"}
     if account_id:
         filters["account_id"] = f"eq.{account_id}"
+    normalized_type = normalize_transaction_filter(transaction_type)
+    if normalized_type:
+        filters["type"] = normalized_type
+    normalized_status = normalize_transaction_status_filter(status_filter)
+    if normalized_status:
+        filters["status"] = normalized_status
 
-    rows = supabase_client.select_rows(
+    rows = await supabase_client.select_rows(
         "transactions",
         filters=filters,
         order="posted_at.desc.nullslast,created_at.desc",
         limit=limit,
     )
-    mapped = [map_transaction(row) for row in rows]
-
-    if type:
-        mapped = [row for row in mapped if row.type == type]
-    if status_filter:
-        mapped = [row for row in mapped if row.status == status_filter]
-
-    return mapped
+    return [map_transaction(row) for row in rows]
 
 
 @router.post("/transfers", response_model=TransferResult, status_code=status.HTTP_201_CREATED)
@@ -410,7 +430,7 @@ async def create_transfer(
     current_user: SupabaseUser = Depends(get_current_user),
 ) -> TransferResult:
     try:
-        result = supabase_client.rpc(
+        result = await supabase_client.rpc(
             "submit_internal_transfer",
             {
                 "p_user_id": current_user.id,
@@ -439,7 +459,7 @@ async def create_transfer(
 
 @router.get("/payees", response_model=list[Payee])
 async def list_payees(current_user: SupabaseUser = Depends(get_current_user)) -> list[Payee]:
-    rows = supabase_client.select_rows(
+    rows = await supabase_client.select_rows(
         "payees",
         filters={
             "user_id": f"eq.{current_user.id}",
@@ -452,7 +472,7 @@ async def list_payees(current_user: SupabaseUser = Depends(get_current_user)) ->
 
 @router.get("/payments", response_model=list[ScheduledPayment])
 async def list_payments(current_user: SupabaseUser = Depends(get_current_user)) -> list[ScheduledPayment]:
-    rows = supabase_client.select_rows(
+    rows = await supabase_client.select_rows(
         "bill_payments",
         select="id,payee_id,account_id,amount_cents,cadence,deliver_by,status,created_at,payee:payee_id(name)",
         filters={"user_id": f"eq.{current_user.id}"},
@@ -466,10 +486,10 @@ async def create_payment(
     payload: CreateScheduledPaymentIn,
     current_user: SupabaseUser = Depends(get_current_user),
 ) -> ScheduledPayment:
-    account = require_owned_account(payload.accountId, current_user.id)
-    payee = require_owned_payee(payload.payeeId, current_user.id)
+    account = await require_owned_account(payload.accountId, current_user.id)
+    payee = await require_owned_payee(payload.payeeId, current_user.id)
 
-    created = supabase_client.insert_row(
+    created = await supabase_client.insert_row(
         "bill_payments",
         {
             "user_id": current_user.id,
@@ -488,7 +508,7 @@ async def create_payment(
 
 @router.get("/deposits", response_model=list[Deposit])
 async def list_deposits(current_user: SupabaseUser = Depends(get_current_user)) -> list[Deposit]:
-    rows = supabase_client.select_rows(
+    rows = await supabase_client.select_rows(
         "deposits",
         filters={"user_id": f"eq.{current_user.id}"},
         order="submitted_at.desc",
@@ -498,7 +518,7 @@ async def list_deposits(current_user: SupabaseUser = Depends(get_current_user)) 
 
 @router.get("/deposits/{deposit_id}", response_model=Deposit)
 async def get_deposit(deposit_id: str, current_user: SupabaseUser = Depends(get_current_user)) -> Deposit:
-    rows = supabase_client.select_rows(
+    rows = await supabase_client.select_rows(
         "deposits",
         filters={
             "id": f"eq.{deposit_id}",
@@ -521,8 +541,8 @@ async def create_deposit_upload_urls(
     back_name = sanitize_file_name(payload.backFileName)
     front_path = f"{current_user.id}/{deposit_id}/front-{front_name}"
     back_path = f"{current_user.id}/{deposit_id}/back-{back_name}"
-    front_target = supabase_client.create_signed_upload_url("deposit-check-images", front_path)
-    back_target = supabase_client.create_signed_upload_url("deposit-check-images", back_path)
+    front_target = await supabase_client.create_signed_upload_url("deposit-check-images", front_path)
+    back_target = await supabase_client.create_signed_upload_url("deposit-check-images", back_path)
 
     return DepositUploadUrls(
         bucket="deposit-check-images",
@@ -544,7 +564,7 @@ async def create_deposit(
     payload: CreateDepositIn,
     current_user: SupabaseUser = Depends(get_current_user),
 ) -> Deposit:
-    account = require_owned_account(payload.accountId, current_user.id)
+    account = await require_owned_account(payload.accountId, current_user.id)
     for image_path in [payload.frontImagePath, payload.backImagePath]:
         if not image_path.startswith(f"{current_user.id}/"):
             raise HTTPException(
@@ -552,7 +572,7 @@ async def create_deposit(
                 detail="Deposit image paths must belong to the authenticated user.",
             )
 
-    created = supabase_client.insert_row(
+    created = await supabase_client.insert_row(
         "deposits",
         {
             "user_id": current_user.id,
@@ -564,21 +584,24 @@ async def create_deposit(
             "back_image_path": payload.backImagePath,
         },
     )
-    supabase_client.insert_row(
-        "notifications",
-        {
-            "user_id": current_user.id,
-            "type": "deposit",
-            "title": "Deposit pending review",
-            "body": f"Your deposit to {account.get('nickname') or 'your account'} is now under review.",
-        },
-    )
+    try:
+        await supabase_client.insert_row(
+            "notifications",
+            {
+                "user_id": current_user.id,
+                "type": "deposit",
+                "title": "Deposit pending review",
+                "body": f"Your deposit to {account.get('nickname') or 'your account'} is now under review.",
+            },
+        )
+    except HTTPException as exc:
+        logger.warning("Notification insert failed after deposit creation: %s", exc.detail)
     return map_deposit(created)
 
 
 @router.get("/notifications", response_model=list[NotificationItem])
 async def list_notifications(current_user: SupabaseUser = Depends(get_current_user)) -> list[NotificationItem]:
-    rows = supabase_client.select_rows(
+    rows = await supabase_client.select_rows(
         "notifications",
         filters={"user_id": f"eq.{current_user.id}"},
         order="created_at.desc",
@@ -591,7 +614,7 @@ async def mark_notification_read(
     notification_id: str,
     current_user: SupabaseUser = Depends(get_current_user),
 ) -> NotificationItem:
-    rows = supabase_client.update_rows(
+    rows = await supabase_client.update_rows(
         "notifications",
         {"read_at": datetime.now(timezone.utc).isoformat()},
         filters={
@@ -606,7 +629,7 @@ async def mark_notification_read(
 
 @router.get("/atms", response_model=list[AtmLocation])
 async def list_atms() -> list[AtmLocation]:
-    rows = supabase_client.select_rows(
+    rows = await supabase_client.select_rows(
         "atm_locations",
         filters={"is_active": "eq.true"},
         order="city.asc,name.asc",

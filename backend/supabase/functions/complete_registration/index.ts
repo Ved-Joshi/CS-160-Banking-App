@@ -74,6 +74,8 @@ const getEnvAny = (keys: string[]) => {
 
 const normalizeEmail = (email: string) => email.trim().toLowerCase();
 const normalizeState = (state: string) => state.trim().toUpperCase();
+const isTruthy = (value: string | undefined | null) =>
+  Boolean(value && ["1", "true", "yes", "on"].includes(value.trim().toLowerCase()));
 const normalizePhone = (phone: string) => {
   const trimmed = phone.trim();
   const digits = trimmed.replace(/\D/g, "");
@@ -226,6 +228,7 @@ serve(async (req) => {
 
   const taxCiphertext = await encryptTaxId(taxDigits, encryptionKey);
   const taxLast4 = taxDigits.slice(-4);
+  const allowSkipMfa = isTruthy(Deno.env.get("ALLOW_SKIP_MFA")) || isTruthy(Deno.env.get("RELAX_MFA"));
 
   const { error: profileError, data: profileRows } = await supabaseAdmin
     .from("profiles")
@@ -242,8 +245,8 @@ serve(async (req) => {
       state,
       zip_code: zip,
       date_of_birth: payload.date_of_birth,
-      onboarding_status: "active",
-      mfa_required: false,
+      onboarding_status: allowSkipMfa ? "active" : "mfa_pending",
+      mfa_required: !allowSkipMfa,
     })
     .select("id, email, first_name, middle_name, last_name, onboarding_status")
     .single();

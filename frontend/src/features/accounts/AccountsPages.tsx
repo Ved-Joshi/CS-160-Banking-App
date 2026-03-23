@@ -1,5 +1,6 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { Link, useParams } from 'react-router-dom';
 import { z } from 'zod';
@@ -14,6 +15,7 @@ const createAccountSchema = z.object({
 
 export function AccountsPage() {
   const queryClient = useQueryClient();
+  const [createdAccountName, setCreatedAccountName] = useState<string | null>(null);
   const { data: accounts = [] } = useQuery({ queryKey: ['accounts'], queryFn: accountsService.list });
   const createAccount = useMutation({
     mutationFn: accountsService.create,
@@ -47,7 +49,9 @@ export function AccountsPage() {
           <form
             className="stack-lg"
             onSubmit={form.handleSubmit(async (values) => {
-              await createAccount.mutateAsync(values);
+              createAccount.reset();
+              const created = await createAccount.mutateAsync(values);
+              setCreatedAccountName(created.nickname);
               form.reset({ nickname: '', type: values.type });
             })}
           >
@@ -57,16 +61,16 @@ export function AccountsPage() {
                 {createAccount.error instanceof Error ? createAccount.error.message : 'Something went wrong.'}
               </InlineAlert>
             ) : null}
-            {createAccount.data ? (
+            {createdAccountName ? (
               <InlineAlert title="Account created" tone="success">
-                {createAccount.data.nickname} is now available in your account list.
+                {createdAccountName} is now available in your account list.
               </InlineAlert>
             ) : null}
             <Field label="Account nickname" error={form.formState.errors.nickname?.message}>
-              <input {...form.register('nickname')} placeholder="Everyday Checking" />
+              <input {...form.register('nickname')} onChange={() => setCreatedAccountName(null)} placeholder="Everyday Checking" />
             </Field>
             <Field label="Account type" error={form.formState.errors.type?.message}>
-              <select {...form.register('type')}>
+              <select {...form.register('type')} onChange={() => setCreatedAccountName(null)}>
                 <option value="Checking">Checking</option>
                 <option value="Savings">Savings</option>
                 <option value="Credit">Credit</option>

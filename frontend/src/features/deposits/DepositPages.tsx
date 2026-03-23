@@ -38,37 +38,47 @@ export function DepositsPage() {
         throw new Error('Choose front and back check images before submitting.');
       }
 
-      const uploadTargets = await depositsService.createUploadUrls({
-        frontFileName: values.frontFileName,
-        backFileName: values.backFileName,
-      });
+      let uploadTargets: Awaited<ReturnType<typeof depositsService.createUploadUrls>> | null = null;
+      const uploadedPaths: string[] = [];
 
-      const [frontUpload, backUpload] = await Promise.all([
-        supabase.storage
+      try {
+        uploadTargets = await depositsService.createUploadUrls({
+          frontFileName: values.frontFileName,
+          backFileName: values.backFileName,
+        });
+
+        const frontUpload = await supabase.storage
           .from(uploadTargets.bucket)
           .uploadToSignedUrl(uploadTargets.front.path, uploadTargets.front.token, selectedUploadFiles.front, {
             contentType: selectedUploadFiles.front.type,
-          }),
-        supabase.storage
+          });
+        if (frontUpload.error) {
+          throw new Error(frontUpload.error.message);
+        }
+        uploadedPaths.push(uploadTargets.front.path);
+
+        const backUpload = await supabase.storage
           .from(uploadTargets.bucket)
           .uploadToSignedUrl(uploadTargets.back.path, uploadTargets.back.token, selectedUploadFiles.back, {
             contentType: selectedUploadFiles.back.type,
-          }),
-      ]);
+          });
+        if (backUpload.error) {
+          throw new Error(backUpload.error.message);
+        }
+        uploadedPaths.push(uploadTargets.back.path);
 
-      if (frontUpload.error) {
-        throw new Error(frontUpload.error.message);
+        return await depositsService.create({
+          accountId: values.accountId,
+          amount: values.amount,
+          frontImagePath: uploadTargets.front.path,
+          backImagePath: uploadTargets.back.path,
+        });
+      } catch (error) {
+        if (uploadTargets && uploadedPaths.length > 0) {
+          await supabase.storage.from(uploadTargets.bucket).remove(uploadedPaths);
+        }
+        throw error;
       }
-      if (backUpload.error) {
-        throw new Error(backUpload.error.message);
-      }
-
-      return depositsService.create({
-        accountId: values.accountId,
-        amount: values.amount,
-        frontImagePath: uploadTargets.front.path,
-        backImagePath: uploadTargets.back.path,
-      });
     },
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['deposits'] }),
   });

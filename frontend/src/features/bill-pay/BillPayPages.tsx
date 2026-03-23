@@ -4,7 +4,7 @@ import { useEffect } from 'react';
 import { useForm } from 'react-hook-form';
 import { Link } from 'react-router-dom';
 import { z } from 'zod';
-import { Button, Card, DataTable, EmptyState, Field, PageHeader, StatusChip } from '../../components/ui';
+import { Button, Card, DataTable, EmptyState, Field, InlineAlert, PageHeader, StatusChip } from '../../components/ui';
 import { accountsService, payeesService, paymentsService } from '../../lib/bankingApi';
 import { formatCurrency, formatDate } from '../../lib/format';
 
@@ -74,11 +74,20 @@ export function BillPayPage() {
             className="stack-lg"
             onSubmit={form.handleSubmit(async (values) => {
               if (!canSchedule) return;
-              await mutation.mutateAsync(values);
+              try {
+                await mutation.mutateAsync(values);
+              } catch {
+                return;
+              }
               form.reset({ ...values, amount: 0 });
             })}
           >
             <h3>Schedule payment</h3>
+            {mutation.error instanceof Error ? (
+              <InlineAlert title="Unable to schedule payment" tone="warning">
+                {mutation.error.message}
+              </InlineAlert>
+            ) : null}
             <Field label="Payee" error={form.formState.errors.payeeId?.message}>
               <select {...form.register('payeeId')} disabled={!canSchedule}>
                 {payees.map((payee) => (

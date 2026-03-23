@@ -17,4 +17,4 @@ async def get_current_user(authorization: str | None = Header(default=None)) -> 
             detail="Missing bearer token.",
         )
 
-    return supabase_client.get_authenticated_user(access_token)
+    return await supabase_client.get_authenticated_user(access_token)

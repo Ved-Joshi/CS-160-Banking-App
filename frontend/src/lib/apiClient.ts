@@ -13,6 +13,19 @@ type ApiRequestOptions = {
   query?: Record<string, string | number | undefined | null>;
 };
 
+function normalizeErrorDetail(detail: unknown, fallback: string): string {
+  if (typeof detail === 'string' && detail.trim()) {
+    return detail;
+  }
+  if (Array.isArray(detail) && detail.length) {
+    return detail.map((item) => (typeof item === 'string' ? item : JSON.stringify(item))).join(', ');
+  }
+  if (detail && typeof detail === 'object') {
+    return JSON.stringify(detail);
+  }
+  return fallback;
+}
+
 function buildUrl(path: string, query?: ApiRequestOptions['query']) {
   const url = new URL(path, apiBaseUrl);
   for (const [key, value] of Object.entries(query ?? {})) {
@@ -67,8 +80,8 @@ export async function apiRequest<T>(path: string, options: ApiRequestOptions = {
   if (!response.ok) {
     let detail = `${response.status} ${response.statusText}`;
     try {
-      const payload = (await response.json()) as { detail?: string };
-      detail = payload.detail || detail;
+      const payload = (await response.json()) as { detail?: unknown };
+      detail = normalizeErrorDetail(payload.detail, detail);
     } catch {
       // Ignore non-JSON error bodies and fall back to the HTTP status.
     }

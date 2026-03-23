@@ -26,6 +26,14 @@ declare
   effective_ts timestamptz := timezone('utc', now());
   transfer_description text;
 begin
+  if p_transfer_date is null then
+    raise exception 'Transfer date is required.';
+  end if;
+
+  if p_transfer_date <> current_date then
+    raise exception 'Only same-day transfers are supported.';
+  end if;
+
   if p_from_account_id = p_to_account_id then
     raise exception 'Choose two different accounts.';
   end if;
@@ -34,25 +42,30 @@ begin
     raise exception 'Transfer amount must be greater than zero.';
   end if;
 
+  perform 1
+  from public.accounts
+  where id in (p_from_account_id, p_to_account_id)
+    and user_id = p_user_id
+  order by id
+  for update;
+
   select *
   into from_account
   from public.accounts
   where id = p_from_account_id
-    and user_id = p_user_id
-  for update;
-
-  if not found then
-    raise exception 'Source account not found.';
-  end if;
+    and user_id = p_user_id;
 
   select *
   into to_account
   from public.accounts
   where id = p_to_account_id
-    and user_id = p_user_id
-  for update;
+    and user_id = p_user_id;
 
-  if not found then
+  if from_account.id is null then
+    raise exception 'Source account not found.';
+  end if;
+
+  if to_account.id is null then
     raise exception 'Destination account not found.';
   end if;
 

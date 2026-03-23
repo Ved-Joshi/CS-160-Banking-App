@@ -3,9 +3,9 @@ import random
 from dataclasses import dataclass
 from decimal import Decimal, ROUND_HALF_UP
 from typing import Any, Iterable, Optional
-from urllib.error import HTTPError, URLError
 from urllib.parse import parse_qs, quote, urlencode, urlparse
-from urllib.request import Request, urlopen
+
+import httpx
 
 from fastapi import HTTPException, status
 
@@ -47,7 +47,7 @@ class SupabaseClient:
             detail="Supabase backend configuration is missing. Set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY.",
         )
 
-    def _request(
+    async def _request(
         self,
         method: str,
         path: str,
@@ -80,29 +80,34 @@ class SupabaseClient:
             payload = json.dumps(body).encode("utf-8")
             headers["Content-Type"] = "application/json"
 
-        request = Request(url, data=payload, headers=headers, method=method)
         try:
-            with urlopen(request) as response:
-                raw = response.read().decode("utf-8")
-                if not raw:
-                    return None
-                return json.loads(raw)
-        except HTTPError as exc:
-            detail = exc.reason
+            async with httpx.AsyncClient(timeout=httpx.Timeout(20.0)) as client:
+                response = await client.request(method, url, content=payload, headers=headers)
+            response.raise_for_status()
+            if not response.text:
+                return None
+            return response.json()
+        except httpx.HTTPStatusError as exc:
+            detail: Any = exc.response.reason_phrase
             try:
-                payload = json.loads(exc.read().decode("utf-8"))
+                payload = exc.response.json()
                 detail = payload.get("message") or payload.get("msg") or payload
-            except Exception:
+            except ValueError:
                 pass
-            raise HTTPException(status_code=exc.code, detail=detail) from exc
-        except URLError as exc:
+            raise HTTPException(status_code=exc.response.status_code, detail=detail) from exc
+        except httpx.TimeoutException as exc:
             raise HTTPException(
                 status_code=status.HTTP_502_BAD_GATEWAY,
-                detail=f"Unable to reach Supabase: {exc.reason}",
+                detail="Supabase request timed out.",
+            ) from exc
+        except httpx.RequestError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail=f"Unable to reach Supabase: {exc}",
             ) from exc
 
-    def get_authenticated_user(self, access_token: str) -> SupabaseUser:
-        payload = self._request("GET", "/auth/v1/user", auth_token=access_token)
+    async def get_authenticated_user(self, access_token: str) -> SupabaseUser:
+        payload = await self._request("GET", "/auth/v1/user", auth_token=access_token)
         return SupabaseUser(
             id=payload["id"],
             email=payload.get("email") or "",
@@ -111,7 +116,7 @@ class SupabaseClient:
             created_at=payload.get("created_at") or "",
         )
 
-    def select_rows(
+    async def select_rows(
         self,
         table: str,
         *,
@@ -128,10 +133,10 @@ class SupabaseClient:
             query.append(("order", order))
         if limit is not None:
             query.append(("limit", str(limit)))
-        return self._request("GET", f"/rest/v1/{table}", query=query) or []
+        return await self._request("GET", f"/rest/v1/{table}", query=query) or []
 
-    def insert_row(self, table: str, values: dict[str, Any]) -> dict[str, Any]:
-        rows = self._request(
+    async def insert_row(self, table: str, values: dict[str, Any]) -> dict[str, Any]:
+        rows = await self._request(
             "POST",
             f"/rest/v1/{table}",
             body=values,
@@ -144,7 +149,7 @@ class SupabaseClient:
             )
         return rows[0]
 
-    def update_rows(
+    async def update_rows(
         self,
         table: str,
         values: dict[str, Any],
@@ -154,7 +159,7 @@ class SupabaseClient:
         query: list[tuple[str, str]] = []
         for key, value in filters.items():
             query.append((key, value))
-        rows = self._request(
+        rows = await self._request(
             "PATCH",
             f"/rest/v1/{table}",
             query=query,
@@ -163,7 +168,7 @@ class SupabaseClient:
         ) or []
         return rows
 
-    def create_signed_upload_url(
+    async def create_signed_upload_url(
         self,
         bucket: str,
         path: str,
@@ -171,7 +176,7 @@ class SupabaseClient:
         upsert: bool = False,
     ) -> dict[str, Any]:
         encoded_path = quote(path, safe="/")
-        response = self._request(
+        response = await self._request(
             "POST",
             f"/storage/v1/object/upload/sign/{bucket}/{encoded_path}",
             body={},
@@ -186,8 +191,8 @@ class SupabaseClient:
             "signedUrl": f"{self.base_url}/storage/v1{relative_url}",
         }
 
-    def rpc(self, function_name: str, values: dict[str, Any]) -> Any:
-        return self._request(
+    async def rpc(self, function_name: str, values: dict[str, Any]) -> Any:
+        return await self._request(
             "POST",
             f"/rest/v1/rpc/{function_name}",
             body=values,

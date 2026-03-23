@@ -27,6 +27,10 @@ type MfaChallengeState = {
   challengeId: string;
 };
 
+const relaxMfa = import.meta.env.DEV
+  ? import.meta.env.VITE_RELAX_MFA !== 'false'
+  : import.meta.env.VITE_RELAX_MFA === 'true';
+
 function storeMfaChallenge(state: MfaChallengeState) {
   writeStorage(MFA_CHALLENGE_KEY, state);
 }
@@ -65,7 +69,7 @@ export const authService = {
     }
 
     clearMfaChallenge();
-    return { user: mapUser(data.user), mfaRequired: false };
+    return { user: mapUser(data.user), mfaRequired: !relaxMfa && Boolean(await getPhoneFactorId()) };
   },
   async register(input: RegistrationInput): Promise<{ user: User; mfaRequired: boolean }> {
     const { data, error } = await supabase.auth.signUp({
@@ -112,10 +116,11 @@ export const authService = {
     });
 
     if (!registrationResponse.ok) {
+      const raw = await registrationResponse.text().catch(() => '');
       let payload: { error?: string; message?: string } | null = null;
 
       try {
-        payload = await registrationResponse.json() as { error?: string; message?: string };
+        payload = raw ? JSON.parse(raw) as { error?: string; message?: string } : null;
       } catch {
         payload = null;
       }
@@ -125,16 +130,15 @@ export const authService = {
         throw new Error(message);
       }
 
-      const text = await registrationResponse.clone().text().catch(() => '');
-      if (text) {
-        throw new Error(text);
+      if (raw) {
+        throw new Error(raw);
       }
 
       throw new Error(`Registration failed with status ${registrationResponse.status}.`);
     }
 
     clearMfaChallenge();
-    return { user: mapUser(data.user), mfaRequired: false };
+    return { user: mapUser(data.user), mfaRequired: !relaxMfa };
   },
   async requestReset(email: string): Promise<{ email: string }> {
     const { error } = await supabase.auth.resetPasswordForEmail(email, {

@@ -17,14 +17,14 @@ export interface User {
   email: string;
   username?: string;
   firstName: string;
-  middleName?: string;
+  middleName?: string | null;
   lastName: string;
 }
 
 export interface CustomerProfile {
   id: string;
   firstName: string;
-  middleName?: string;
+  middleName?: string | null;
   lastName: string;
   fullName: string;
   email: string;
