@@ -12,6 +12,8 @@ import type {
   Payee,
   ScheduledPayment,
   Transaction,
+  TransferRequest,
+  TransferResult,
 } from '../types/banking';
 import { apiRequest } from './apiClient';
 
@@ -103,6 +105,15 @@ export const notificationsService = {
   markRead(notificationId: string): Promise<NotificationItem> {
     return apiRequest(`/api/notifications/${notificationId}/read`, {
       method: 'POST',
+    });
+  },
+};
+
+export const transfersService = {
+  submit(input: TransferRequest): Promise<TransferResult> {
+    return apiRequest('/api/transfers', {
+      method: 'POST',
+      body: input,
     });
   },
 };

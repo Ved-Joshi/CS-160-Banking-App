@@ -1,12 +1,11 @@
 import { zodResolver } from '@hookform/resolvers/zod';
-import { useMutation, useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { Link } from 'react-router-dom';
 import { z } from 'zod';
 import { Button, Card, EmptyState, Field, InlineAlert, PageHeader, StatusChip } from '../../components/ui';
-import { accountsService } from '../../lib/bankingApi';
-import { transfersService } from '../../lib/mockApi';
+import { accountsService, transfersService } from '../../lib/bankingApi';
 import { formatCurrency } from '../../lib/format';
 
 const transferSchema = z.object({
@@ -18,16 +17,26 @@ const transferSchema = z.object({
 });
 
 export function TransfersPage() {
+  const queryClient = useQueryClient();
   const { data: accounts = [] } = useQuery({ queryKey: ['accounts'], queryFn: accountsService.list });
   const [review, setReview] = useState<z.infer<typeof transferSchema> | null>(null);
-  const mutation = useMutation({ mutationFn: transfersService.submit });
+  const mutation = useMutation({
+    mutationFn: transfersService.submit,
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['accounts'] }),
+        queryClient.invalidateQueries({ queryKey: ['transactions'] }),
+        queryClient.invalidateQueries({ queryKey: ['notifications'] }),
+      ]);
+    },
+  });
   const form = useForm<z.infer<typeof transferSchema>>({
     resolver: zodResolver(transferSchema),
     defaultValues: {
       fromAccountId: '',
       toAccountId: '',
-      amount: 250,
-      memo: 'Monthly reserve',
+      amount: 0,
+      memo: '',
       transferDate: new Date().toISOString().slice(0, 10),
     },
   });
@@ -124,11 +133,13 @@ export function TransfersPage() {
                 onClick={async () => {
                   if (review && hasTransferAccounts) {
                     await mutation.mutateAsync(review);
+                    setReview(null);
                   }
                 }}
+                disabled={mutation.isPending}
                 type="button"
               >
-                Submit transfer
+                {mutation.isPending ? 'Submitting transfer...' : 'Submit transfer'}
               </Button>
             </div>
           ) : (

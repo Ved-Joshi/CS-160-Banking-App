@@ -12,6 +12,7 @@ from schemas.banking import (
     CreateDepositIn,
     CreateDepositUploadUrlsIn,
     CreateScheduledPaymentIn,
+    CreateTransferIn,
     CustomerProfile,
     Deposit,
     DepositImage,
@@ -22,6 +23,7 @@ from schemas.banking import (
     ScheduledPayment,
     SignedUploadTarget,
     Transaction,
+    TransferResult,
 )
 from utils.supabase import SupabaseUser, amount_to_cents, cents_to_amount, random_last4, supabase_client
 
@@ -112,6 +114,15 @@ def map_notification_type(value: str) -> str:
         "transfer": "transfer",
         "security": "security",
     }.get(value, "security")
+
+
+def map_transfer_status(value: str) -> str:
+    return {
+        "pending": "PENDING",
+        "completed": "COMPLETED",
+        "failed": "FAILED",
+        "cancelled": "FAILED",
+    }.get(value, "PENDING")
 
 
 def map_account(row: dict) -> BankAccount:
@@ -263,6 +274,16 @@ def sanitize_file_name(file_name: str) -> str:
     return cleaned or "image.jpg"
 
 
+def parse_transfer_date(value: str) -> str:
+    try:
+        return datetime.strptime(value, "%Y-%m-%d").date().isoformat()
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Transfer date must be in YYYY-MM-DD format.",
+        ) from exc
+
+
 @router.get("/me/profile", response_model=CustomerProfile)
 async def get_profile(current_user: SupabaseUser = Depends(get_current_user)) -> CustomerProfile:
     rows = supabase_client.select_rows(
@@ -381,6 +402,39 @@ async def list_transactions(
         mapped = [row for row in mapped if row.status == status_filter]
 
     return mapped
+
+
+@router.post("/transfers", response_model=TransferResult, status_code=status.HTTP_201_CREATED)
+async def create_transfer(
+    payload: CreateTransferIn,
+    current_user: SupabaseUser = Depends(get_current_user),
+) -> TransferResult:
+    try:
+        result = supabase_client.rpc(
+            "submit_internal_transfer",
+            {
+                "p_user_id": current_user.id,
+                "p_from_account_id": payload.fromAccountId,
+                "p_to_account_id": payload.toAccountId,
+                "p_amount_cents": amount_to_cents(payload.amount),
+                "p_transfer_date": parse_transfer_date(payload.transferDate),
+                "p_memo": payload.memo,
+            },
+        )
+    except HTTPException as exc:
+        detail = exc.detail
+        if isinstance(detail, dict):
+            detail = detail.get("message") or detail.get("details") or detail
+        if isinstance(detail, list) and detail:
+            detail = detail[0]
+        raise HTTPException(status_code=exc.status_code, detail=detail) from exc
+
+    row = result[0] if isinstance(result, list) else result
+    return TransferResult(
+        id=row["id"],
+        status=map_transfer_status(row.get("status", "pending")),
+        submittedAt=row.get("submitted_at") or datetime.now(timezone.utc).isoformat(),
+    )
 
 
 @router.get("/payees", response_model=list[Payee])

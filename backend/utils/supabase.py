@@ -186,5 +186,12 @@ class SupabaseClient:
             "signedUrl": f"{self.base_url}/storage/v1{relative_url}",
         }
 
+    def rpc(self, function_name: str, values: dict[str, Any]) -> Any:
+        return self._request(
+            "POST",
+            f"/rest/v1/rpc/{function_name}",
+            body=values,
+        )
+
 
 supabase_client = SupabaseClient()

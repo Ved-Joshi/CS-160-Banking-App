@@ -10,6 +10,7 @@ DepositStatus = Literal["PENDING_REVIEW", "APPROVED", "DECLINED"]
 PaymentStatus = Literal["SCHEDULED", "PROCESSING", "COMPLETED", "FAILED", "CANCELLED"]
 NotificationType = Literal["deposit", "payment", "transfer", "security"]
 PaymentCadence = Literal["Once", "Weekly", "Biweekly", "Monthly"]
+TransferStatus = Literal["PENDING", "COMPLETED", "FAILED"]
 
 
 class BalanceSummary(BaseModel):
@@ -51,6 +52,20 @@ class Transaction(BaseModel):
     status: TransactionStatus
     type: TransactionType
     postedAt: str
+
+
+class CreateTransferIn(BaseModel):
+    fromAccountId: str
+    toAccountId: str
+    amount: float = Field(gt=0)
+    memo: Optional[str] = Field(default=None, max_length=80)
+    transferDate: str
+
+
+class TransferResult(BaseModel):
+    id: str
+    status: TransferStatus
+    submittedAt: str
 
 
 class Payee(BaseModel):
