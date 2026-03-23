@@ -1,4 +1,4 @@
-import type { AtmLocation, BankAccount, CustomerProfile, Transaction } from '../types/banking';
+import type { AtmLocation, BankAccount, CustomerProfile, Deposit, ScheduledPayment, Transaction } from '../types/banking';
 import { apiRequest } from './apiClient';
 
 export const profileService = {
@@ -34,6 +34,18 @@ export const transactionsService = {
         limit: filters.limit,
       },
     });
+  },
+};
+
+export const paymentsService = {
+  list(): Promise<ScheduledPayment[]> {
+    return apiRequest('/api/payments');
+  },
+};
+
+export const depositsService = {
+  list(): Promise<Deposit[]> {
+    return apiRequest('/api/deposits');
   },
 };
 
