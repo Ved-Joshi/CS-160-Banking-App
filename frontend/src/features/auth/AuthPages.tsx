@@ -194,6 +194,7 @@ export function MfaPage() {
   const navigate = useNavigate();
   const { completeMfa } = useAuth();
   const [serverError, setServerError] = useState('');
+  const [infoMessage, setInfoMessage] = useState('');
   const form = useForm<z.infer<typeof codeSchema>>({
     resolver: zodResolver(codeSchema),
     defaultValues: { code: '' },
@@ -207,6 +208,7 @@ export function MfaPage() {
           onSubmit={form.handleSubmit(async (values) => {
             try {
               setServerError('');
+              setInfoMessage('');
               await completeMfa(values.code);
               navigate('/app/dashboard');
             } catch (error) {
@@ -214,8 +216,9 @@ export function MfaPage() {
             }
           })}
         >
-          <PageHeader title="Multi-factor authentication" eyebrow="Security check" subtitle="Complete verification to finish signing in to your account." />
+          <PageHeader title="Multi-factor authentication" eyebrow="Security check" subtitle="Enter the SMS code sent to your phone to finish signing in." />
           {serverError ? <InlineAlert title="Verification failed" tone="warning">{serverError}</InlineAlert> : null}
+          {infoMessage ? <InlineAlert title="Code sent" tone="success">{infoMessage}</InlineAlert> : null}
           <Field label="Security code" error={form.formState.errors.code?.message}>
             <input {...form.register('code')} inputMode="numeric" />
           </Field>
@@ -223,9 +226,32 @@ export function MfaPage() {
             <Button type="submit">Verify and continue</Button>
           </div>
           <div className="auth-secondary-action">
-            <Link className="text-link" to="/login">
+            <button
+              className="text-link"
+              type="button"
+              onClick={async () => {
+                await supabase.auth.signOut();
+                writeStorage(SESSION_KEY, null);
+                navigate('/login');
+              }}
+            >
               Back to sign in
-            </Link>
+            </button>
+            <button
+              className="text-link"
+              type="button"
+              onClick={async () => {
+                try {
+                  setServerError('');
+                  await authService.resendMfa();
+                  setInfoMessage('A new SMS code was sent to your phone.');
+                } catch (error) {
+                  setServerError(error instanceof Error ? error.message : 'Unable to resend the code.');
+                }
+              }}
+            >
+              Resend code
+            </button>
           </div>
         </form>
       </Card>

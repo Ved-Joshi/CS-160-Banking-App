@@ -188,6 +188,13 @@ export const authService = {
     clearMfaChallenge();
     return mapUser(data?.user ?? (await supabase.auth.getUser()).data.user);
   },
+  async resendMfa(): Promise<void> {
+    const factorId = await getPhoneFactorId();
+    if (!factorId) {
+      throw new Error('No phone factor enrolled yet.');
+    }
+    await createPhoneChallenge(factorId);
+  },
   async getProfile(): Promise<CustomerProfile> {
     const { data, error } = await supabase.auth.getUser();
 
