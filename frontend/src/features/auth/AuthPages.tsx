@@ -131,7 +131,7 @@ export function WelcomePage() {
 
 export function LoginPage() {
   const navigate = useNavigate();
-  const { user, signIn } = useAuth();
+  const { user, signIn, mfaPending } = useAuth();
   const [serverError, setServerError] = useState('');
   const form = useForm<z.infer<typeof loginSchema>>({
     resolver: zodResolver(loginSchema),
@@ -141,7 +141,7 @@ export function LoginPage() {
     },
   });
 
-  if (user) {
+  if (user && !mfaPending) {
     return <Navigate to="/app/dashboard" replace />;
   }
 
