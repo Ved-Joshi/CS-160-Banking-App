@@ -5,7 +5,6 @@ import { Link, Navigate, useNavigate } from 'react-router-dom';
 import { z } from 'zod';
 import { Button, Card, Field, InlineAlert, PageHeader } from '../../components/ui';
 import { authService } from '../../lib/mockApi';
-import { supabase } from '../../lib/supabaseClient';
 import type { RegistrationInput } from '../../types/banking';
 import { useAuth } from './useAuth';
 import { SESSION_KEY, writeStorage } from '../../lib/storage';
@@ -131,7 +130,7 @@ export function WelcomePage() {
 
 export function LoginPage() {
   const navigate = useNavigate();
-  const { user, signIn } = useAuth();
+  const { user, signIn, mfaPending } = useAuth();
   const [serverError, setServerError] = useState('');
   const form = useForm<z.infer<typeof loginSchema>>({
     resolver: zodResolver(loginSchema),
@@ -141,7 +140,7 @@ export function LoginPage() {
     },
   });
 
-  if (user) {
+  if (user && !mfaPending) {
     return <Navigate to="/app/dashboard" replace />;
   }
 
@@ -153,8 +152,8 @@ export function LoginPage() {
           onSubmit={form.handleSubmit(async (values) => {
             try {
               setServerError('');
-              await signIn(values.email, values.password);
-              navigate('/app/dashboard');
+              const result = await signIn(values.email, values.password);
+              navigate(result === 'mfa' ? '/mfa' : '/app/dashboard');
             } catch (error) {
               setServerError(error instanceof Error ? error.message : 'Sign in failed.');
             }
@@ -192,8 +191,9 @@ const codeSchema = z.object({
 
 export function MfaPage() {
   const navigate = useNavigate();
-  const { completeMfa } = useAuth();
+  const { completeMfa, signOut } = useAuth();
   const [serverError, setServerError] = useState('');
+  const [infoMessage, setInfoMessage] = useState('');
   const form = useForm<z.infer<typeof codeSchema>>({
     resolver: zodResolver(codeSchema),
     defaultValues: { code: '' },
@@ -207,6 +207,7 @@ export function MfaPage() {
           onSubmit={form.handleSubmit(async (values) => {
             try {
               setServerError('');
+              setInfoMessage('');
               await completeMfa(values.code);
               navigate('/app/dashboard');
             } catch (error) {
@@ -214,8 +215,9 @@ export function MfaPage() {
             }
           })}
         >
-          <PageHeader title="Multi-factor authentication" eyebrow="Security check" subtitle="Complete verification to finish signing in to your account." />
+          <PageHeader title="Multi-factor authentication" eyebrow="Security check" subtitle="Enter the SMS code sent to your phone to finish signing in." />
           {serverError ? <InlineAlert title="Verification failed" tone="warning">{serverError}</InlineAlert> : null}
+          {infoMessage ? <InlineAlert title="Code sent" tone="success">{infoMessage}</InlineAlert> : null}
           <Field label="Security code" error={form.formState.errors.code?.message}>
             <input {...form.register('code')} inputMode="numeric" />
           </Field>
@@ -223,9 +225,31 @@ export function MfaPage() {
             <Button type="submit">Verify and continue</Button>
           </div>
           <div className="auth-secondary-action">
-            <Link className="text-link" to="/login">
+            <button
+              className="text-link"
+              type="button"
+              onClick={async () => {
+                await signOut();
+                navigate('/login');
+              }}
+            >
               Back to sign in
-            </Link>
+            </button>
+            <button
+              className="text-link"
+              type="button"
+              onClick={async () => {
+                try {
+                  setServerError('');
+                  await authService.resendMfa();
+                  setInfoMessage('A new SMS code was sent to your phone.');
+                } catch (error) {
+                  setServerError(error instanceof Error ? error.message : 'Unable to resend the code.');
+                }
+              }}
+            >
+              Resend code
+            </button>
           </div>
         </form>
       </Card>
@@ -260,6 +284,8 @@ const registerSchema = z.object({
 export function RegisterPage() {
   const navigate = useNavigate();
   const { register } = useAuth();
+  const [serverError, setServerError] = useState('');
+  const [submitted, setSubmitted] = useState(false);
   const form = useForm<RegistrationInput>({
     resolver: zodResolver(registerSchema),
     defaultValues: {
@@ -284,11 +310,20 @@ export function RegisterPage() {
         <form
           className="stack-lg"
           onSubmit={form.handleSubmit(async (values) => {
-            await register(values);
-            navigate('/app/dashboard');
+            try {
+              setServerError('');
+              const result = await register(values);
+              setSubmitted(true);
+              navigate(result === 'mfa' ? '/mfa' : '/app/dashboard');
+            } catch (error) {
+              setSubmitted(false);
+              setServerError(error instanceof Error ? error.message : 'Unable to create your account.');
+            }
           })}
         >
           <PageHeader title="Enroll in online banking" eyebrow="New customer" subtitle="Create secure online access for your personal banking profile." />
+          {serverError ? <InlineAlert title="Unable to create access" tone="warning">{serverError}</InlineAlert> : null}
+          {submitted ? <InlineAlert title="Enrollment started" tone="success">We sent a verification code to your phone to finish enrollment.</InlineAlert> : null}
           <div className="grid-two">
             <Field label="Email address" error={form.formState.errors.email?.message}>
               <input {...form.register('email')} autoComplete="email" type="email" />

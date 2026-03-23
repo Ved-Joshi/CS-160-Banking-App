@@ -34,6 +34,11 @@ dist-ssr
 # Project documents
 overview.md
 supabase-implementation-plan.md
+STATUS.md
+
+# Supabase CLI temp artifacts
+supabase/.temp/
+backend/supabase/.temp/
 
 # SQLite ignores
 bank.db

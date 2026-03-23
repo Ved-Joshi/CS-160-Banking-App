@@ -1,6 +1,6 @@
 import { mockAccounts, mockAtms, mockDeposits, mockNotifications, mockPayments, mockPayees, mockTransactions } from '../mocks/data';
 import { supabase } from './supabaseClient';
-import { readStorage, writeStorage } from './storage';
+import { readStorage, writeStorage, MFA_CHALLENGE_KEY } from './storage';
 import type {
   AtmLocation,
   BankAccount,
@@ -53,39 +53,106 @@ function formatAddress(metadata: Record<string, string>): string {
   return [streetParts, locality].filter(Boolean).join(', ');
 }
 
+type MfaChallengeState = {
+  factorId: string;
+  challengeId: string;
+};
+
+function storeMfaChallenge(state: MfaChallengeState) {
+  writeStorage(MFA_CHALLENGE_KEY, state);
+}
+
+function readMfaChallenge(): MfaChallengeState | null {
+  return readStorage<MfaChallengeState | null>(MFA_CHALLENGE_KEY, null);
+}
+
+function clearMfaChallenge() {
+  writeStorage(MFA_CHALLENGE_KEY, null);
+}
+
+async function createPhoneChallenge(factorId: string) {
+  const { data, error } = await supabase.auth.mfa.challenge({ factorId });
+  if (error || !data) {
+    throw new Error(error?.message ?? 'Unable to start MFA challenge.');
+  }
+  storeMfaChallenge({ factorId, challengeId: data.id });
+}
+
+async function getPhoneFactorId(): Promise<string | null> {
+  const { data, error } = await supabase.auth.mfa.listFactors();
+  if (error || !data) return null;
+  const phoneFactor =
+    data.phone?.[0] ??
+    data.all?.find((factor) => factor.factor_type === 'phone') ??
+    null;
+  return phoneFactor?.id ?? null;
+}
+
 export const authService = {
-  async login(email: string, password: string): Promise<User> {
+  async login(email: string, password: string): Promise<{ user: User; mfaRequired: boolean }> {
     const { data, error } = await supabase.auth.signInWithPassword({ email, password });
     if (error) {
       throw new Error(error.message);
     }
 
-    return mapUser(data.user);
+    const session = data.session;
+    const user = mapUser(data.user);
+    if (session?.aal === 'aal2') {
+      return { user, mfaRequired: false };
+    }
+
+    const factorId = await getPhoneFactorId();
+    if (!factorId) {
+      return { user, mfaRequired: false };
+    }
+
+    await createPhoneChallenge(factorId);
+    return { user, mfaRequired: true };
   },
-  async register(input: RegistrationInput): Promise<User> {
+  async register(input: RegistrationInput): Promise<{ user: User; mfaRequired: boolean }> {
     const { data, error } = await supabase.auth.signUp({
       email: input.email,
       password: input.password,
-      options: {
-        data: {
-          username: input.username,
-          mobilePhone: input.mobilePhone,
-          streetAddress: input.streetAddress,
-          apartmentUnit: input.apartmentUnit ?? '',
-          city: input.city,
-          state: input.state,
-          zipCode: input.zipCode,
-          // Keep high-risk onboarding fields out of auth metadata.
-          taxIdLast4: input.taxId.slice(-4),
-        },
-      },
     });
 
     if (error) {
       throw new Error(error.message);
     }
 
-    return mapUser(data.user);
+    const { error: regError } = await supabase.functions.invoke('complete_registration', {
+      body: {
+        email: input.email,
+        username: input.username.toLowerCase(),
+        first_name: input.username || 'User',
+        last_name: 'User',
+        mobile_phone_e164: input.mobilePhone,
+        street_address: input.streetAddress,
+        apartment_unit: input.apartmentUnit ?? null,
+        city: input.city,
+        state: input.state,
+        zip_code: input.zipCode,
+        date_of_birth: input.dateOfBirth,
+        tax_identifier_raw: input.taxId,
+      },
+    });
+
+    if (regError) {
+      throw new Error(regError.message);
+    }
+
+    const enrollResult = await supabase.auth.mfa.enroll({
+      factorType: 'phone',
+      phone: input.mobilePhone,
+      friendlyName: 'Primary phone',
+    });
+
+    if (enrollResult.error || !enrollResult.data) {
+      throw new Error(enrollResult.error?.message ?? 'Unable to enroll phone MFA.');
+    }
+
+    await createPhoneChallenge(enrollResult.data.id);
+
+    return { user: mapUser(data.user), mfaRequired: true };
   },
   async requestReset(email: string): Promise<{ email: string }> {
     const { error } = await supabase.auth.resetPasswordForEmail(email, {
@@ -103,24 +170,30 @@ export const authService = {
       throw new Error('Enter the 6-digit security code.');
     }
 
-    const currentUser = (await supabase.auth.getUser()).data.user;
-    const email = currentUser?.email;
-
-    if (!email) {
+    const challenge = readMfaChallenge();
+    if (!challenge) {
       throw new Error('No pending verification. Start sign-in again.');
     }
 
-    const { data, error } = await supabase.auth.verifyOtp({
-      email,
-      token: code,
-      type: 'email',
+    const { data, error } = await supabase.auth.mfa.verify({
+      factorId: challenge.factorId,
+      challengeId: challenge.challengeId,
+      code,
     });
 
     if (error) {
       throw new Error(error.message);
     }
 
-    return mapUser(data.user ?? currentUser);
+    clearMfaChallenge();
+    return mapUser(data?.user ?? (await supabase.auth.getUser()).data.user);
+  },
+  async resendMfa(): Promise<void> {
+    const factorId = await getPhoneFactorId();
+    if (!factorId) {
+      throw new Error('No phone factor enrolled yet.');
+    }
+    await createPhoneChallenge(factorId);
   },
   async getProfile(): Promise<CustomerProfile> {
     const { data, error } = await supabase.auth.getUser();
