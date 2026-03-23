@@ -179,10 +179,18 @@ export function AccountDetailPage() {
           </div>
         </Card>
       </div>
-      <Card>
-        <h3>Recent activity</h3>
-        <DataTable headers={['Date', 'Description', 'Type', 'Status', 'Amount']} rows={rows} />
-      </Card>
+      {rows.length ? (
+        <Card>
+          <h3>Recent activity</h3>
+          <DataTable headers={['Date', 'Description', 'Type', 'Status', 'Amount']} rows={rows} />
+        </Card>
+      ) : (
+        <EmptyState
+          title="No recent activity"
+          description="This account does not have any posted transactions yet. New transfers, deposits, and payments will appear here once activity is available."
+          action={<Link className="button button--secondary" to="/app/transactions">View all activity</Link>}
+        />
+      )}
     </div>
   );
 }
