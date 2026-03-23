@@ -260,6 +260,8 @@ const registerSchema = z.object({
 export function RegisterPage() {
   const navigate = useNavigate();
   const { register } = useAuth();
+  const [serverError, setServerError] = useState('');
+  const [submitted, setSubmitted] = useState(false);
   const form = useForm<RegistrationInput>({
     resolver: zodResolver(registerSchema),
     defaultValues: {
@@ -284,11 +286,20 @@ export function RegisterPage() {
         <form
           className="stack-lg"
           onSubmit={form.handleSubmit(async (values) => {
-            const result = await register(values);
-            navigate(result === 'mfa' ? '/mfa' : '/app/dashboard');
+            try {
+              setServerError('');
+              const result = await register(values);
+              setSubmitted(true);
+              navigate(result === 'mfa' ? '/mfa' : '/app/dashboard');
+            } catch (error) {
+              setSubmitted(false);
+              setServerError(error instanceof Error ? error.message : 'Unable to create your account.');
+            }
           })}
         >
           <PageHeader title="Enroll in online banking" eyebrow="New customer" subtitle="Create secure online access for your personal banking profile." />
+          {serverError ? <InlineAlert title="Unable to create access" tone="warning">{serverError}</InlineAlert> : null}
+          {submitted ? <InlineAlert title="Enrollment started" tone="success">We sent a verification code to your phone to finish enrollment.</InlineAlert> : null}
           <div className="grid-two">
             <Field label="Email address" error={form.formState.errors.email?.message}>
               <input {...form.register('email')} autoComplete="email" type="email" />
