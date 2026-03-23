@@ -34,6 +34,14 @@ class CreateBankAccountIn(BaseModel):
     type: AccountType
 
 
+class CreateScheduledPaymentIn(BaseModel):
+    payeeId: str
+    accountId: str
+    amount: float = Field(gt=0)
+    cadence: PaymentCadence
+    deliverBy: str
+
+
 class Transaction(BaseModel):
     id: str
     accountId: str
@@ -82,6 +90,30 @@ class Deposit(BaseModel):
     status: DepositStatus
     note: Optional[str] = None
     images: DepositImages
+
+
+class CreateDepositUploadUrlsIn(BaseModel):
+    frontFileName: str = Field(min_length=1, max_length=255)
+    backFileName: str = Field(min_length=1, max_length=255)
+
+
+class SignedUploadTarget(BaseModel):
+    path: str
+    token: str
+    signedUrl: str
+
+
+class DepositUploadUrls(BaseModel):
+    bucket: str
+    front: SignedUploadTarget
+    back: SignedUploadTarget
+
+
+class CreateDepositIn(BaseModel):
+    accountId: str
+    amount: float = Field(gt=0)
+    frontImagePath: str = Field(min_length=1)
+    backImagePath: str = Field(min_length=1)
 
 
 class NotificationItem(BaseModel):

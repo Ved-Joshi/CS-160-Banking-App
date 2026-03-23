@@ -5,9 +5,9 @@ import { useForm } from 'react-hook-form';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { z } from 'zod';
 import { Button, Card, DataTable, EmptyState, Field, PageHeader, StatusChip } from '../../components/ui';
-import { accountsService } from '../../lib/bankingApi';
-import { depositsService } from '../../lib/mockApi';
+import { accountsService, depositsService } from '../../lib/bankingApi';
 import { formatCurrency, formatDateTime } from '../../lib/format';
+import { supabase } from '../../lib/supabaseClient';
 
 const depositSchema = z.object({
   accountId: z.string().min(1),
@@ -19,6 +19,13 @@ const depositSchema = z.object({
 export function DepositsPage() {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
+  const [selectedUploadFiles, setSelectedUploadFiles] = useState<{
+    front: File | null;
+    back: File | null;
+  }>({
+    front: null,
+    back: null,
+  });
   const [selectedFiles, setSelectedFiles] = useState({
     front: 'No file selected',
     back: 'No file selected',
@@ -26,7 +33,43 @@ export function DepositsPage() {
   const { data: deposits = [] } = useQuery({ queryKey: ['deposits'], queryFn: depositsService.list });
   const { data: accounts = [] } = useQuery({ queryKey: ['accounts'], queryFn: accountsService.list });
   const mutation = useMutation({
-    mutationFn: depositsService.create,
+    mutationFn: async (values: z.infer<typeof depositSchema>) => {
+      if (!selectedUploadFiles.front || !selectedUploadFiles.back) {
+        throw new Error('Choose front and back check images before submitting.');
+      }
+
+      const uploadTargets = await depositsService.createUploadUrls({
+        frontFileName: values.frontFileName,
+        backFileName: values.backFileName,
+      });
+
+      const [frontUpload, backUpload] = await Promise.all([
+        supabase.storage
+          .from(uploadTargets.bucket)
+          .uploadToSignedUrl(uploadTargets.front.path, uploadTargets.front.token, selectedUploadFiles.front, {
+            contentType: selectedUploadFiles.front.type,
+          }),
+        supabase.storage
+          .from(uploadTargets.bucket)
+          .uploadToSignedUrl(uploadTargets.back.path, uploadTargets.back.token, selectedUploadFiles.back, {
+            contentType: selectedUploadFiles.back.type,
+          }),
+      ]);
+
+      if (frontUpload.error) {
+        throw new Error(frontUpload.error.message);
+      }
+      if (backUpload.error) {
+        throw new Error(backUpload.error.message);
+      }
+
+      return depositsService.create({
+        accountId: values.accountId,
+        amount: values.amount,
+        frontImagePath: uploadTargets.front.path,
+        backImagePath: uploadTargets.back.path,
+      });
+    },
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['deposits'] }),
   });
   const form = useForm<z.infer<typeof depositSchema>>({
@@ -67,10 +110,15 @@ export function DepositsPage() {
             onSubmit={form.handleSubmit(async (values) => {
               if (!hasAccounts) return;
               const created = await mutation.mutateAsync(values);
+              setSelectedUploadFiles({ front: null, back: null });
+              setSelectedFiles({ front: 'No file selected', back: 'No file selected' });
               navigate(`/app/deposits/${created.id}`);
             })}
           >
             <h3>Deposit a check</h3>
+            {mutation.error instanceof Error ? (
+              <p className="muted">{mutation.error.message}</p>
+            ) : null}
             <Field label="Deposit into" error={form.formState.errors.accountId?.message}>
               <select {...form.register('accountId')} disabled={!hasAccounts}>
                 {accounts.map((account) => (
@@ -90,8 +138,13 @@ export function DepositsPage() {
                   className="file-upload__input"
                   disabled={!hasAccounts}
                   onChange={(event) => {
-                    const fileName = event.target.files?.[0]?.name ?? '';
+                    const file = event.target.files?.[0] ?? null;
+                    const fileName = file?.name ?? '';
                     form.setValue('frontFileName', fileName, { shouldValidate: true });
+                    setSelectedUploadFiles((current) => ({
+                      ...current,
+                      front: file,
+                    }));
                     setSelectedFiles((current) => ({
                       ...current,
                       front: fileName || 'No file selected',
@@ -110,8 +163,13 @@ export function DepositsPage() {
                   className="file-upload__input"
                   disabled={!hasAccounts}
                   onChange={(event) => {
-                    const fileName = event.target.files?.[0]?.name ?? '';
+                    const file = event.target.files?.[0] ?? null;
+                    const fileName = file?.name ?? '';
                     form.setValue('backFileName', fileName, { shouldValidate: true });
+                    setSelectedUploadFiles((current) => ({
+                      ...current,
+                      back: file,
+                    }));
                     setSelectedFiles((current) => ({
                       ...current,
                       back: fileName || 'No file selected',
@@ -130,7 +188,9 @@ export function DepositsPage() {
                 action={<Link className="button button--secondary" to="/app/accounts">Open account</Link>}
               />
             ) : null}
-            <Button disabled={!hasAccounts} type="submit">Submit deposit</Button>
+            <Button disabled={!hasAccounts || mutation.isPending} type="submit">
+              {mutation.isPending ? 'Submitting deposit...' : 'Submit deposit'}
+            </Button>
           </form>
         </Card>
         <Card>
@@ -142,10 +202,17 @@ export function DepositsPage() {
           </ol>
         </Card>
       </div>
-      <Card>
-        <h3>Recent deposits</h3>
-        <DataTable headers={['Reference', 'Submitted', 'Amount', 'Status']} rows={rows} />
-      </Card>
+      {rows.length ? (
+        <Card>
+          <h3>Recent deposits</h3>
+          <DataTable headers={['Reference', 'Submitted', 'Amount', 'Status']} rows={rows} />
+        </Card>
+      ) : (
+        <EmptyState
+          title="No deposits yet"
+          description="Submitted mobile check deposits will appear here once you upload one."
+        />
+      )}
     </div>
   );
 }

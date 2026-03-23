@@ -1,4 +1,18 @@
-import type { AtmLocation, BankAccount, CreateBankAccountInput, CustomerProfile, Deposit, ScheduledPayment, Transaction } from '../types/banking';
+import type {
+  AtmLocation,
+  BankAccount,
+  CreateBankAccountInput,
+  CreateDepositInput,
+  CreateDepositUploadUrlsInput,
+  CreateScheduledPaymentInput,
+  CustomerProfile,
+  Deposit,
+  DepositUploadUrls,
+  NotificationItem,
+  Payee,
+  ScheduledPayment,
+  Transaction,
+} from '../types/banking';
 import { apiRequest } from './apiClient';
 
 export const profileService = {
@@ -47,11 +61,49 @@ export const paymentsService = {
   list(): Promise<ScheduledPayment[]> {
     return apiRequest('/api/payments');
   },
+  create(input: CreateScheduledPaymentInput): Promise<ScheduledPayment> {
+    return apiRequest('/api/payments', {
+      method: 'POST',
+      body: input,
+    });
+  },
 };
 
 export const depositsService = {
   list(): Promise<Deposit[]> {
     return apiRequest('/api/deposits');
+  },
+  get(depositId: string): Promise<Deposit> {
+    return apiRequest(`/api/deposits/${depositId}`);
+  },
+  createUploadUrls(input: CreateDepositUploadUrlsInput): Promise<DepositUploadUrls> {
+    return apiRequest('/api/deposits/upload-urls', {
+      method: 'POST',
+      body: input,
+    });
+  },
+  create(input: CreateDepositInput): Promise<Deposit> {
+    return apiRequest('/api/deposits', {
+      method: 'POST',
+      body: input,
+    });
+  },
+};
+
+export const payeesService = {
+  list(): Promise<Payee[]> {
+    return apiRequest('/api/payees');
+  },
+};
+
+export const notificationsService = {
+  list(): Promise<NotificationItem[]> {
+    return apiRequest('/api/notifications');
+  },
+  markRead(notificationId: string): Promise<NotificationItem> {
+    return apiRequest(`/api/notifications/${notificationId}/read`, {
+      method: 'POST',
+    });
   },
 };
 

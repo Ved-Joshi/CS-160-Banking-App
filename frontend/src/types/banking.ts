@@ -116,6 +116,14 @@ export interface ScheduledPayment {
   status: PaymentStatus;
 }
 
+export interface CreateScheduledPaymentInput {
+  payeeId: string;
+  accountId: string;
+  amount: number;
+  cadence: 'Once' | 'Weekly' | 'Biweekly' | 'Monthly';
+  deliverBy: string;
+}
+
 export interface DepositImage {
   id: string;
   fileName: string;
@@ -133,6 +141,30 @@ export interface Deposit {
     front?: DepositImage;
     back?: DepositImage;
   };
+}
+
+export interface DepositUploadTarget {
+  path: string;
+  token: string;
+  signedUrl: string;
+}
+
+export interface DepositUploadUrls {
+  bucket: string;
+  front: DepositUploadTarget;
+  back: DepositUploadTarget;
+}
+
+export interface CreateDepositUploadUrlsInput {
+  frontFileName: string;
+  backFileName: string;
+}
+
+export interface CreateDepositInput {
+  accountId: string;
+  amount: number;
+  frontImagePath: string;
+  backImagePath: string;
 }
 
 export interface AtmLocation {

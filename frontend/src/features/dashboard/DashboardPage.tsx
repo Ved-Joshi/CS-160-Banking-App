@@ -9,8 +9,8 @@ export function DashboardPage() {
   const { user } = useAuth();
   const { data: accounts = [] } = useQuery({ queryKey: ['accounts'], queryFn: accountsService.list });
   const { data: transactions = [] } = useQuery({ queryKey: ['transactions'], queryFn: transactionsService.list });
-  const { data: payments = [] } = useQuery({ queryKey: ['payments', 'api'], queryFn: paymentsService.list });
-  const { data: deposits = [] } = useQuery({ queryKey: ['deposits', 'api'], queryFn: depositsService.list });
+  const { data: payments = [] } = useQuery({ queryKey: ['payments'], queryFn: paymentsService.list });
+  const { data: deposits = [] } = useQuery({ queryKey: ['deposits'], queryFn: depositsService.list });
 
   const displayName = [user?.firstName, user?.lastName].filter(Boolean).join(' ') || user?.username || user?.email || accounts[0]?.nickname || 'Welcome';
   const totalAvailable = accounts.reduce((sum, account) => sum + account.balances.availableBalance, 0);

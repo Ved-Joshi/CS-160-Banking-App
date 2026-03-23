@@ -1,10 +1,29 @@
 from pathlib import PurePosixPath
+from datetime import datetime, timezone
+from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from dependencies.auth import get_current_user
-from schemas.banking import AtmLocation, BankAccount, CreateBankAccountIn, CustomerProfile, Deposit, DepositImage, DepositImages, NotificationItem, Payee, ScheduledPayment, Transaction
-from utils.supabase import SupabaseUser, cents_to_amount, random_last4, supabase_client
+from schemas.banking import (
+    AtmLocation,
+    BankAccount,
+    CreateBankAccountIn,
+    CreateDepositIn,
+    CreateDepositUploadUrlsIn,
+    CreateScheduledPaymentIn,
+    CustomerProfile,
+    Deposit,
+    DepositImage,
+    DepositImages,
+    DepositUploadUrls,
+    NotificationItem,
+    Payee,
+    ScheduledPayment,
+    SignedUploadTarget,
+    Transaction,
+)
+from utils.supabase import SupabaseUser, amount_to_cents, cents_to_amount, random_last4, supabase_client
 
 router = APIRouter(prefix="/api", tags=["banking"])
 
@@ -66,6 +85,15 @@ def map_payment_status(value: str) -> str:
         "failed": "FAILED",
         "cancelled": "CANCELLED",
     }.get(value, "SCHEDULED")
+
+
+def normalize_payment_cadence(value: str) -> str:
+    return {
+        "Once": "once",
+        "Weekly": "weekly",
+        "Biweekly": "biweekly",
+        "Monthly": "monthly",
+    }.get(value, "once")
 
 
 def map_deposit_status(value: str) -> str:
@@ -199,6 +227,40 @@ def format_address(profile: dict) -> str:
     street = ", ".join(part for part in [profile.get("street_address"), profile.get("apartment_unit")] if part)
     locality = ", ".join(part for part in [profile.get("city"), profile.get("state"), profile.get("zip_code")] if part)
     return ", ".join(part for part in [street, locality] if part) or "—"
+
+
+def require_owned_account(account_id: str, user_id: str) -> dict:
+    rows = supabase_client.select_rows(
+        "accounts",
+        filters={
+            "id": f"eq.{account_id}",
+            "user_id": f"eq.{user_id}",
+        },
+        limit=1,
+    )
+    if not rows:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Account not found.")
+    return rows[0]
+
+
+def require_owned_payee(payee_id: str, user_id: str) -> dict:
+    rows = supabase_client.select_rows(
+        "payees",
+        filters={
+            "id": f"eq.{payee_id}",
+            "user_id": f"eq.{user_id}",
+            "is_active": "eq.true",
+        },
+        limit=1,
+    )
+    if not rows:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Payee not found.")
+    return rows[0]
+
+
+def sanitize_file_name(file_name: str) -> str:
+    cleaned = "".join(char for char in file_name.strip() if char.isalnum() or char in {".", "-", "_"})
+    return cleaned or "image.jpg"
 
 
 @router.get("/me/profile", response_model=CustomerProfile)
@@ -345,6 +407,31 @@ async def list_payments(current_user: SupabaseUser = Depends(get_current_user)) 
     return [map_payment(row) for row in rows]
 
 
+@router.post("/payments", response_model=ScheduledPayment, status_code=status.HTTP_201_CREATED)
+async def create_payment(
+    payload: CreateScheduledPaymentIn,
+    current_user: SupabaseUser = Depends(get_current_user),
+) -> ScheduledPayment:
+    account = require_owned_account(payload.accountId, current_user.id)
+    payee = require_owned_payee(payload.payeeId, current_user.id)
+
+    created = supabase_client.insert_row(
+        "bill_payments",
+        {
+            "user_id": current_user.id,
+            "payee_id": payee["id"],
+            "account_id": account["id"],
+            "amount_cents": amount_to_cents(payload.amount),
+            "cadence": normalize_payment_cadence(payload.cadence),
+            "deliver_by": payload.deliverBy,
+            "status": "scheduled",
+            "next_run_at": f"{payload.deliverBy}T00:00:00+00:00",
+        },
+    )
+    created["payee"] = {"name": payee.get("name")}
+    return map_payment(created)
+
+
 @router.get("/deposits", response_model=list[Deposit])
 async def list_deposits(current_user: SupabaseUser = Depends(get_current_user)) -> list[Deposit]:
     rows = supabase_client.select_rows(
@@ -370,6 +457,71 @@ async def get_deposit(deposit_id: str, current_user: SupabaseUser = Depends(get_
     return map_deposit(rows[0])
 
 
+@router.post("/deposits/upload-urls", response_model=DepositUploadUrls)
+async def create_deposit_upload_urls(
+    payload: CreateDepositUploadUrlsIn,
+    current_user: SupabaseUser = Depends(get_current_user),
+) -> DepositUploadUrls:
+    deposit_id = str(uuid4())
+    front_name = sanitize_file_name(payload.frontFileName)
+    back_name = sanitize_file_name(payload.backFileName)
+    front_path = f"{current_user.id}/{deposit_id}/front-{front_name}"
+    back_path = f"{current_user.id}/{deposit_id}/back-{back_name}"
+    front_target = supabase_client.create_signed_upload_url("deposit-check-images", front_path)
+    back_target = supabase_client.create_signed_upload_url("deposit-check-images", back_path)
+
+    return DepositUploadUrls(
+        bucket="deposit-check-images",
+        front=SignedUploadTarget(
+            path=front_target["path"],
+            token=front_target["token"],
+            signedUrl=front_target["signedUrl"],
+        ),
+        back=SignedUploadTarget(
+            path=back_target["path"],
+            token=back_target["token"],
+            signedUrl=back_target["signedUrl"],
+        ),
+    )
+
+
+@router.post("/deposits", response_model=Deposit, status_code=status.HTTP_201_CREATED)
+async def create_deposit(
+    payload: CreateDepositIn,
+    current_user: SupabaseUser = Depends(get_current_user),
+) -> Deposit:
+    account = require_owned_account(payload.accountId, current_user.id)
+    for image_path in [payload.frontImagePath, payload.backImagePath]:
+        if not image_path.startswith(f"{current_user.id}/"):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Deposit image paths must belong to the authenticated user.",
+            )
+
+    created = supabase_client.insert_row(
+        "deposits",
+        {
+            "user_id": current_user.id,
+            "account_id": account["id"],
+            "amount_cents": amount_to_cents(payload.amount),
+            "status": "under_review",
+            "note": "Submitted successfully. Review typically completes in 1 business day.",
+            "front_image_path": payload.frontImagePath,
+            "back_image_path": payload.backImagePath,
+        },
+    )
+    supabase_client.insert_row(
+        "notifications",
+        {
+            "user_id": current_user.id,
+            "type": "deposit",
+            "title": "Deposit pending review",
+            "body": f"Your deposit to {account.get('nickname') or 'your account'} is now under review.",
+        },
+    )
+    return map_deposit(created)
+
+
 @router.get("/notifications", response_model=list[NotificationItem])
 async def list_notifications(current_user: SupabaseUser = Depends(get_current_user)) -> list[NotificationItem]:
     rows = supabase_client.select_rows(
@@ -378,6 +530,24 @@ async def list_notifications(current_user: SupabaseUser = Depends(get_current_us
         order="created_at.desc",
     )
     return [map_notification(row) for row in rows]
+
+
+@router.post("/notifications/{notification_id}/read", response_model=NotificationItem)
+async def mark_notification_read(
+    notification_id: str,
+    current_user: SupabaseUser = Depends(get_current_user),
+) -> NotificationItem:
+    rows = supabase_client.update_rows(
+        "notifications",
+        {"read_at": datetime.now(timezone.utc).isoformat()},
+        filters={
+            "id": f"eq.{notification_id}",
+            "user_id": f"eq.{current_user.id}",
+        },
+    )
+    if not rows:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Notification not found.")
+    return map_notification(rows[0])
 
 
 @router.get("/atms", response_model=list[AtmLocation])

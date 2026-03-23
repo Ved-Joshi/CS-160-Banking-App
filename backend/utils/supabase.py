@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from decimal import Decimal, ROUND_HALF_UP
 from typing import Any, Iterable, Optional
 from urllib.error import HTTPError, URLError
-from urllib.parse import urlencode
+from urllib.parse import parse_qs, quote, urlencode, urlparse
 from urllib.request import Request, urlopen
 
 from fastapi import HTTPException, status
@@ -56,6 +56,7 @@ class SupabaseClient:
         query: Optional[Iterable[tuple[str, str]]] = None,
         body: Optional[dict[str, Any]] = None,
         prefer: Optional[str] = None,
+        extra_headers: Optional[dict[str, str]] = None,
     ) -> Any:
         self.ensure_configured()
         url = f"{self.base_url}{path}"
@@ -71,6 +72,8 @@ class SupabaseClient:
         }
         if prefer:
             headers["Prefer"] = prefer
+        if extra_headers:
+            headers.update(extra_headers)
 
         payload = None
         if body is not None:
@@ -140,6 +143,48 @@ class SupabaseClient:
                 detail=f"Supabase did not return the created {table} row.",
             )
         return rows[0]
+
+    def update_rows(
+        self,
+        table: str,
+        values: dict[str, Any],
+        *,
+        filters: dict[str, str],
+    ) -> list[dict[str, Any]]:
+        query: list[tuple[str, str]] = []
+        for key, value in filters.items():
+            query.append((key, value))
+        rows = self._request(
+            "PATCH",
+            f"/rest/v1/{table}",
+            query=query,
+            body=values,
+            prefer="return=representation",
+        ) or []
+        return rows
+
+    def create_signed_upload_url(
+        self,
+        bucket: str,
+        path: str,
+        *,
+        upsert: bool = False,
+    ) -> dict[str, Any]:
+        encoded_path = quote(path, safe="/")
+        response = self._request(
+            "POST",
+            f"/storage/v1/object/upload/sign/{bucket}/{encoded_path}",
+            body={},
+            extra_headers={"x-upsert": "true"} if upsert else None,
+        )
+        relative_url = response.get("url") or ""
+        parsed = urlparse(relative_url)
+        token = parse_qs(parsed.query).get("token", [""])[0]
+        return {
+            "path": path,
+            "token": token,
+            "signedUrl": f"{self.base_url}/storage/v1{relative_url}",
+        }
 
 
 supabase_client = SupabaseClient()
