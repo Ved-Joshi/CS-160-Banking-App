@@ -1,7 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { useMemo, useState } from 'react';
 import { Card, DataTable, Field, PageHeader, StatusChip } from '../../components/ui';
-import { accountsService, transactionsService } from '../../lib/mockApi';
+import { accountsService, transactionsService } from '../../lib/bankingApi';
 import { formatCurrency, formatDate } from '../../lib/format';
 
 export function TransactionsPage() {

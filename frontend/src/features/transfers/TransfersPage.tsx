@@ -1,10 +1,11 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useMutation, useQuery } from '@tanstack/react-query';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { z } from 'zod';
 import { Button, Card, Field, InlineAlert, PageHeader, StatusChip } from '../../components/ui';
-import { accountsService, transfersService } from '../../lib/mockApi';
+import { accountsService } from '../../lib/bankingApi';
+import { transfersService } from '../../lib/mockApi';
 import { formatCurrency } from '../../lib/format';
 
 const transferSchema = z.object({
@@ -22,13 +23,30 @@ export function TransfersPage() {
   const form = useForm<z.infer<typeof transferSchema>>({
     resolver: zodResolver(transferSchema),
     defaultValues: {
-      fromAccountId: 'acct-checking',
-      toAccountId: 'acct-savings',
+      fromAccountId: '',
+      toAccountId: '',
       amount: 250,
       memo: 'Monthly reserve',
       transferDate: new Date().toISOString().slice(0, 10),
     },
   });
+  const hasTransferAccounts = accounts.length >= 2;
+
+  useEffect(() => {
+    if (!hasTransferAccounts) return;
+    const currentFrom = form.getValues('fromAccountId');
+    const currentTo = form.getValues('toAccountId');
+    const nextFrom = accounts[0]?.id ?? '';
+    const nextTo = accounts[1]?.id ?? '';
+
+    if (!currentFrom || !accounts.some((account) => account.id === currentFrom)) {
+      form.setValue('fromAccountId', nextFrom);
+    }
+
+    if (!currentTo || !accounts.some((account) => account.id === currentTo) || currentTo === nextFrom) {
+      form.setValue('toAccountId', nextTo);
+    }
+  }, [accounts, form, hasTransferAccounts]);
 
   return (
     <div className="stack-xl">
@@ -37,7 +55,7 @@ export function TransfersPage() {
         <Card>
           <form className="stack-lg" onSubmit={form.handleSubmit((values) => setReview(values))}>
             <Field label="From account" error={form.formState.errors.fromAccountId?.message}>
-              <select {...form.register('fromAccountId')}>
+              <select {...form.register('fromAccountId')} disabled={!hasTransferAccounts}>
                 {accounts.map((account) => (
                   <option key={account.id} value={account.id}>
                     {account.nickname} ({account.maskedNumber})
@@ -46,7 +64,7 @@ export function TransfersPage() {
               </select>
             </Field>
             <Field label="To account" error={form.formState.errors.toAccountId?.message}>
-              <select {...form.register('toAccountId')}>
+              <select {...form.register('toAccountId')} disabled={!hasTransferAccounts}>
                 {accounts.map((account) => (
                   <option key={account.id} value={account.id}>
                     {account.nickname} ({account.maskedNumber})
@@ -55,15 +73,16 @@ export function TransfersPage() {
               </select>
             </Field>
             <Field label="Amount" error={form.formState.errors.amount?.message}>
-              <input {...form.register('amount', { valueAsNumber: true })} min="0" step="0.01" type="number" />
+              <input {...form.register('amount', { valueAsNumber: true })} disabled={!hasTransferAccounts} min="0" step="0.01" type="number" />
             </Field>
             <Field label="Memo" error={form.formState.errors.memo?.message}>
-              <input {...form.register('memo')} />
+              <input {...form.register('memo')} disabled={!hasTransferAccounts} />
             </Field>
             <Field label="Transfer date" error={form.formState.errors.transferDate?.message}>
-              <input {...form.register('transferDate')} type="date" />
+              <input {...form.register('transferDate')} disabled={!hasTransferAccounts} type="date" />
             </Field>
-            <Button type="submit">Review transfer</Button>
+            {!hasTransferAccounts ? <p className="muted">At least two accounts are required before transfers can be reviewed.</p> : null}
+            <Button disabled={!hasTransferAccounts} type="submit">Review transfer</Button>
           </form>
         </Card>
         <Card>

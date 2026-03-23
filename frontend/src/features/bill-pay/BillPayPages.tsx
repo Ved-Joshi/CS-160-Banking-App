@@ -1,10 +1,12 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useEffect } from 'react';
 import { useForm } from 'react-hook-form';
 import { Link } from 'react-router-dom';
 import { z } from 'zod';
 import { Button, Card, DataTable, Field, PageHeader, StatusChip } from '../../components/ui';
-import { accountsService, billPayService } from '../../lib/mockApi';
+import { accountsService } from '../../lib/bankingApi';
+import { billPayService } from '../../lib/mockApi';
 import { formatCurrency, formatDate } from '../../lib/format';
 
 const paymentSchema = z.object({
@@ -30,12 +32,21 @@ export function BillPayPage() {
     resolver: zodResolver(paymentSchema),
     defaultValues: {
       payeeId: 'payee-1',
-      accountId: 'acct-checking',
+      accountId: '',
       amount: 145,
       cadence: 'Monthly',
       deliverBy: new Date().toISOString().slice(0, 10),
     },
   });
+  const hasAccounts = accounts.length > 0;
+
+  useEffect(() => {
+    if (!hasAccounts) return;
+    const currentAccountId = form.getValues('accountId');
+    if (!currentAccountId || !accounts.some((account) => account.id === currentAccountId)) {
+      form.setValue('accountId', accounts[0]?.id ?? '');
+    }
+  }, [accounts, form, hasAccounts]);
 
   const rows = payments.map((payment) => [
     payment.payeeName,
@@ -68,7 +79,7 @@ export function BillPayPage() {
               </select>
             </Field>
             <Field label="Pay from" error={form.formState.errors.accountId?.message}>
-              <select {...form.register('accountId')}>
+              <select {...form.register('accountId')} disabled={!hasAccounts}>
                 {accounts.map((account) => (
                   <option key={account.id} value={account.id}>
                     {account.nickname}
@@ -77,19 +88,20 @@ export function BillPayPage() {
               </select>
             </Field>
             <Field label="Amount" error={form.formState.errors.amount?.message}>
-              <input {...form.register('amount', { valueAsNumber: true })} step="0.01" type="number" />
+              <input {...form.register('amount', { valueAsNumber: true })} disabled={!hasAccounts} step="0.01" type="number" />
             </Field>
             <Field label="Cadence" error={form.formState.errors.cadence?.message}>
-              <select {...form.register('cadence')}>
+              <select {...form.register('cadence')} disabled={!hasAccounts}>
                 <option value="Once">One time</option>
                 <option value="Monthly">Monthly</option>
                 <option value="Biweekly">Biweekly</option>
               </select>
             </Field>
             <Field label="Deliver by" error={form.formState.errors.deliverBy?.message}>
-              <input {...form.register('deliverBy')} type="date" />
+              <input {...form.register('deliverBy')} disabled={!hasAccounts} type="date" />
             </Field>
-            <Button type="submit">Schedule payment</Button>
+            {!hasAccounts ? <p className="muted">Add an account before scheduling a payment.</p> : null}
+            <Button disabled={!hasAccounts} type="submit">Schedule payment</Button>
           </form>
         </Card>
         <Card>

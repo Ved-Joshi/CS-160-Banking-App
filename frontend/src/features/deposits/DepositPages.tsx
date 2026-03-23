@@ -1,11 +1,12 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { z } from 'zod';
 import { Button, Card, DataTable, EmptyState, Field, PageHeader, StatusChip } from '../../components/ui';
-import { accountsService, depositsService } from '../../lib/mockApi';
+import { accountsService } from '../../lib/bankingApi';
+import { depositsService } from '../../lib/mockApi';
 import { formatCurrency, formatDateTime } from '../../lib/format';
 
 const depositSchema = z.object({
@@ -31,12 +32,21 @@ export function DepositsPage() {
   const form = useForm<z.infer<typeof depositSchema>>({
     resolver: zodResolver(depositSchema),
     defaultValues: {
-      accountId: 'acct-checking',
+      accountId: '',
       amount: 250,
       frontFileName: '',
       backFileName: '',
     },
   });
+  const hasAccounts = accounts.length > 0;
+
+  useEffect(() => {
+    if (!hasAccounts) return;
+    const currentAccountId = form.getValues('accountId');
+    if (!currentAccountId || !accounts.some((account) => account.id === currentAccountId)) {
+      form.setValue('accountId', accounts[0]?.id ?? '');
+    }
+  }, [accounts, form, hasAccounts]);
 
   const rows = deposits.map((deposit) => [
     <Link key={`${deposit.id}-link`} className="text-link" to={`/app/deposits/${deposit.id}`}>
@@ -61,7 +71,7 @@ export function DepositsPage() {
           >
             <h3>Deposit a check</h3>
             <Field label="Deposit into" error={form.formState.errors.accountId?.message}>
-              <select {...form.register('accountId')}>
+              <select {...form.register('accountId')} disabled={!hasAccounts}>
                 {accounts.map((account) => (
                   <option key={account.id} value={account.id}>
                     {account.nickname}
@@ -70,13 +80,14 @@ export function DepositsPage() {
               </select>
             </Field>
             <Field label="Amount" error={form.formState.errors.amount?.message}>
-              <input {...form.register('amount', { valueAsNumber: true })} type="number" step="0.01" />
+              <input {...form.register('amount', { valueAsNumber: true })} disabled={!hasAccounts} type="number" step="0.01" />
             </Field>
             <Field label="Front image upload" error={form.formState.errors.frontFileName?.message}>
               <label className="file-upload">
                 <input
                   accept="image/*"
                   className="file-upload__input"
+                  disabled={!hasAccounts}
                   onChange={(event) => {
                     const fileName = event.target.files?.[0]?.name ?? '';
                     form.setValue('frontFileName', fileName, { shouldValidate: true });
@@ -96,6 +107,7 @@ export function DepositsPage() {
                 <input
                   accept="image/*"
                   className="file-upload__input"
+                  disabled={!hasAccounts}
                   onChange={(event) => {
                     const fileName = event.target.files?.[0]?.name ?? '';
                     form.setValue('backFileName', fileName, { shouldValidate: true });
@@ -110,7 +122,8 @@ export function DepositsPage() {
                 <span className="file-upload__name">{selectedFiles.back}</span>
               </label>
             </Field>
-            <Button type="submit">Submit deposit</Button>
+            {!hasAccounts ? <p className="muted">Add an account before submitting a mobile deposit.</p> : null}
+            <Button disabled={!hasAccounts} type="submit">Submit deposit</Button>
           </form>
         </Card>
         <Card>

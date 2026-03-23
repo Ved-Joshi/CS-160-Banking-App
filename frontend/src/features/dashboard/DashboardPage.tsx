@@ -1,7 +1,8 @@
 import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { Card, InlineAlert, PageHeader, StatusChip } from '../../components/ui';
-import { accountsService, billPayService, depositsService, transactionsService } from '../../lib/mockApi';
+import { accountsService, transactionsService } from '../../lib/bankingApi';
+import { billPayService, depositsService } from '../../lib/mockApi';
 import { formatCurrency, formatDate } from '../../lib/format';
 import { useAuth } from '../auth/useAuth';
 

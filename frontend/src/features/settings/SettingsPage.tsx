@@ -1,10 +1,10 @@
 import { useQuery } from '@tanstack/react-query';
 import { Card, PageHeader, StatusChip } from '../../components/ui';
-import { authService } from '../../lib/mockApi';
+import { profileService } from '../../lib/bankingApi';
 import { formatDate } from '../../lib/format';
 
 export function SettingsPage() {
-  const { data: profile } = useQuery({ queryKey: ['profile'], queryFn: authService.getProfile });
+  const { data: profile } = useQuery({ queryKey: ['profile'], queryFn: profileService.get });
 
   return (
     <div className="stack-xl">
