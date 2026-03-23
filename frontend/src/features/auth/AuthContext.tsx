@@ -11,10 +11,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const loading = false;
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data }) => {
+    supabase.auth.getSession().then(async ({ data }) => {
       const session = data.session;
       if (!session?.user) return;
-      if (session.aal !== 'aal2') {
+      const { data: assurance } = await supabase.auth.mfa.getAuthenticatorAssuranceLevel();
+      if (assurance?.currentLevel !== 'aal2') {
         setMfaPending(true);
         writeStorage(SESSION_KEY, null);
         setUser(null);

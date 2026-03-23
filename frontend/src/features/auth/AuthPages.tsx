@@ -5,6 +5,7 @@ import { Link, Navigate, useNavigate } from 'react-router-dom';
 import { z } from 'zod';
 import { Button, Card, Field, InlineAlert, PageHeader } from '../../components/ui';
 import { authService } from '../../lib/mockApi';
+import { supabase } from '../../lib/supabaseClient';
 import type { RegistrationInput } from '../../types/banking';
 import { useAuth } from './useAuth';
 import { SESSION_KEY, writeStorage } from '../../lib/storage';

@@ -95,9 +95,9 @@ export const authService = {
       throw new Error(error.message);
     }
 
-    const session = data.session;
     const user = mapUser(data.user);
-    if (session?.aal === 'aal2') {
+    const { data: assurance } = await supabase.auth.mfa.getAuthenticatorAssuranceLevel();
+    if (assurance?.currentLevel === 'aal2') {
       return { user, mfaRequired: false };
     }
 
