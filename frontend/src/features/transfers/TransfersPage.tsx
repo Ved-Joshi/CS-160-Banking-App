@@ -2,8 +2,9 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
 import { useForm } from 'react-hook-form';
+import { Link } from 'react-router-dom';
 import { z } from 'zod';
-import { Button, Card, Field, InlineAlert, PageHeader, StatusChip } from '../../components/ui';
+import { Button, Card, EmptyState, Field, InlineAlert, PageHeader, StatusChip } from '../../components/ui';
 import { accountsService } from '../../lib/bankingApi';
 import { transfersService } from '../../lib/mockApi';
 import { formatCurrency } from '../../lib/format';
@@ -53,7 +54,13 @@ export function TransfersPage() {
       <PageHeader title="Transfers" eyebrow="Move money" subtitle="Transfer funds between your own accounts with a review step before submission." />
       <div className="grid-two">
         <Card>
-          <form className="stack-lg" onSubmit={form.handleSubmit((values) => setReview(values))}>
+          <form
+            className="stack-lg"
+            onSubmit={form.handleSubmit((values) => {
+              if (!hasTransferAccounts) return;
+              setReview(values);
+            })}
+          >
             <Field label="From account" error={form.formState.errors.fromAccountId?.message}>
               <select {...form.register('fromAccountId')} disabled={!hasTransferAccounts}>
                 {accounts.map((account) => (
@@ -81,7 +88,13 @@ export function TransfersPage() {
             <Field label="Transfer date" error={form.formState.errors.transferDate?.message}>
               <input {...form.register('transferDate')} disabled={!hasTransferAccounts} type="date" />
             </Field>
-            {!hasTransferAccounts ? <p className="muted">At least two accounts are required before transfers can be reviewed.</p> : null}
+            {!hasTransferAccounts ? (
+              <EmptyState
+                title="Transfers require two accounts"
+                description="Open at least two accounts before reviewing or submitting transfers between them."
+                action={<Link className="button button--secondary" to="/app/accounts">Open account</Link>}
+              />
+            ) : null}
             <Button disabled={!hasTransferAccounts} type="submit">Review transfer</Button>
           </form>
         </Card>
@@ -109,7 +122,7 @@ export function TransfersPage() {
               </dl>
               <Button
                 onClick={async () => {
-                  if (review) {
+                  if (review && hasTransferAccounts) {
                     await mutation.mutateAsync(review);
                   }
                 }}

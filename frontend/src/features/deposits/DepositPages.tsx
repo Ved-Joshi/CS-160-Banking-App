@@ -65,6 +65,7 @@ export function DepositsPage() {
           <form
             className="stack-lg"
             onSubmit={form.handleSubmit(async (values) => {
+              if (!hasAccounts) return;
               const created = await mutation.mutateAsync(values);
               navigate(`/app/deposits/${created.id}`);
             })}
@@ -122,7 +123,13 @@ export function DepositsPage() {
                 <span className="file-upload__name">{selectedFiles.back}</span>
               </label>
             </Field>
-            {!hasAccounts ? <p className="muted">Add an account before submitting a mobile deposit.</p> : null}
+            {!hasAccounts ? (
+              <EmptyState
+                title="Deposits need an account"
+                description="Open an account before submitting a mobile check deposit."
+                action={<Link className="button button--secondary" to="/app/accounts">Open account</Link>}
+              />
+            ) : null}
             <Button disabled={!hasAccounts} type="submit">Submit deposit</Button>
           </form>
         </Card>

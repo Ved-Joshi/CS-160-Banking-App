@@ -4,7 +4,7 @@ import { useEffect } from 'react';
 import { useForm } from 'react-hook-form';
 import { Link } from 'react-router-dom';
 import { z } from 'zod';
-import { Button, Card, DataTable, Field, PageHeader, StatusChip } from '../../components/ui';
+import { Button, Card, DataTable, EmptyState, Field, PageHeader, StatusChip } from '../../components/ui';
 import { accountsService } from '../../lib/bankingApi';
 import { billPayService } from '../../lib/mockApi';
 import { formatCurrency, formatDate } from '../../lib/format';
@@ -64,13 +64,14 @@ export function BillPayPage() {
           <form
             className="stack-lg"
             onSubmit={form.handleSubmit(async (values) => {
+              if (!hasAccounts) return;
               await mutation.mutateAsync(values);
               form.reset({ ...values, amount: 0 });
             })}
           >
             <h3>Schedule payment</h3>
             <Field label="Payee" error={form.formState.errors.payeeId?.message}>
-              <select {...form.register('payeeId')}>
+              <select {...form.register('payeeId')} disabled={!hasAccounts}>
                 {payees.map((payee) => (
                   <option key={payee.id} value={payee.id}>
                     {payee.name}
@@ -100,7 +101,13 @@ export function BillPayPage() {
             <Field label="Deliver by" error={form.formState.errors.deliverBy?.message}>
               <input {...form.register('deliverBy')} disabled={!hasAccounts} type="date" />
             </Field>
-            {!hasAccounts ? <p className="muted">Add an account before scheduling a payment.</p> : null}
+            {!hasAccounts ? (
+              <EmptyState
+                title="Bill pay needs an account"
+                description="Open an account before scheduling payments to your payees."
+                action={<Link className="button button--secondary" to="/app/accounts">Open account</Link>}
+              />
+            ) : null}
             <Button disabled={!hasAccounts} type="submit">Schedule payment</Button>
           </form>
         </Card>
