@@ -50,11 +50,19 @@ export async function apiRequest<T>(path: string, options: ApiRequestOptions = {
     payload = JSON.stringify(body);
   }
 
-  const response = await fetch(buildUrl(path, query), {
-    method,
-    headers,
-    body: payload,
-  });
+  let response: Response;
+  try {
+    response = await fetch(buildUrl(path, query), {
+      method,
+      headers,
+      body: payload,
+    });
+  } catch (error) {
+    throw new Error(
+      `Unable to reach the backend API at ${apiBaseUrl}. Start the FastAPI server and confirm VITE_API_URL is correct.`,
+      { cause: error },
+    );
+  }
 
   if (!response.ok) {
     let detail = `${response.status} ${response.statusText}`;

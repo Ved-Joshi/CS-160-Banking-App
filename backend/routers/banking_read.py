@@ -258,6 +258,17 @@ async def create_account(
     payload: CreateBankAccountIn,
     current_user: SupabaseUser = Depends(get_current_user),
 ) -> BankAccount:
+    profile_rows = supabase_client.select_rows(
+        "profiles",
+        filters={"id": f"eq.{current_user.id}"},
+        limit=1,
+    )
+    if not profile_rows:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Your banking profile is not fully provisioned yet. Complete registration before opening an account.",
+        )
+
     account_type = normalize_account_type(payload.type)
     routing_number = "121000358" if account_type in {"checking", "savings"} else None
     created = supabase_client.insert_row(
