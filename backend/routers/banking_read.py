@@ -1,7 +1,9 @@
+from pathlib import PurePosixPath
+
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from dependencies.auth import get_current_user
-from schemas.banking import BankAccount, CustomerProfile, Transaction
+from schemas.banking import AtmLocation, BankAccount, CustomerProfile, Deposit, DepositImage, DepositImages, NotificationItem, Payee, ScheduledPayment, Transaction
 from utils.supabase import SupabaseUser, cents_to_amount, supabase_client
 
 router = APIRouter(prefix="/api", tags=["banking"])
@@ -39,6 +41,43 @@ def map_transaction_status(value: str) -> str:
     }.get(value, "PENDING")
 
 
+def map_payment_cadence(value: str) -> str:
+    return {
+        "once": "Once",
+        "weekly": "Weekly",
+        "biweekly": "Biweekly",
+        "monthly": "Monthly",
+    }.get(value, "Once")
+
+
+def map_payment_status(value: str) -> str:
+    return {
+        "scheduled": "SCHEDULED",
+        "processing": "PROCESSING",
+        "completed": "COMPLETED",
+        "failed": "FAILED",
+        "cancelled": "CANCELLED",
+    }.get(value, "SCHEDULED")
+
+
+def map_deposit_status(value: str) -> str:
+    return {
+        "submitted": "PENDING_REVIEW",
+        "under_review": "PENDING_REVIEW",
+        "approved": "APPROVED",
+        "rejected": "DECLINED",
+    }.get(value, "PENDING_REVIEW")
+
+
+def map_notification_type(value: str) -> str:
+    return {
+        "deposit": "deposit",
+        "payment": "payment",
+        "transfer": "transfer",
+        "security": "security",
+    }.get(value, "security")
+
+
 def map_account(row: dict) -> BankAccount:
     nickname = row.get("nickname") or f"{map_account_type(row.get('account_type', 'checking'))} Account"
     last4 = row.get("account_last4") or "----"
@@ -70,6 +109,81 @@ def map_transaction(row: dict) -> Transaction:
         status=map_transaction_status(row.get("status", "pending")),
         type=map_transaction_type(row.get("type", "adjustment")),
         postedAt=row.get("posted_at") or row.get("created_at") or "",
+    )
+
+
+def map_payee(row: dict) -> Payee:
+    return Payee(
+        id=row["id"],
+        name=row.get("name") or "Unnamed payee",
+        category=row.get("category") or "Other",
+        accountMask=f"...{row.get('account_last4') or '----'}",
+    )
+
+
+def map_payment(row: dict) -> ScheduledPayment:
+    payee = row.get("payee") or {}
+    return ScheduledPayment(
+        id=row["id"],
+        payeeId=row["payee_id"],
+        payeeName=payee.get("name") or "Manual Payee",
+        accountId=row["account_id"],
+        amount=cents_to_amount(row.get("amount_cents")),
+        cadence=map_payment_cadence(row.get("cadence", "once")),
+        deliverBy=row.get("deliver_by") or row.get("created_at") or "",
+        status=map_payment_status(row.get("status", "scheduled")),
+    )
+
+
+def map_deposit_image(path: str | None, submitted_at: str) -> DepositImage | None:
+    if not path:
+        return None
+    file_name = PurePosixPath(path).name
+    return DepositImage(
+        id=path,
+        fileName=file_name,
+        capturedAt=submitted_at,
+    )
+
+
+def map_deposit(row: dict) -> Deposit:
+    submitted_at = row.get("submitted_at") or row.get("created_at") or ""
+    return Deposit(
+        id=row["id"],
+        accountId=row["account_id"],
+        amount=cents_to_amount(row.get("amount_cents")),
+        submittedAt=submitted_at,
+        status=map_deposit_status(row.get("status", "submitted")),
+        note=row.get("note"),
+        images=DepositImages(
+            front=map_deposit_image(row.get("front_image_path"), submitted_at),
+            back=map_deposit_image(row.get("back_image_path"), submitted_at),
+        ),
+    )
+
+
+def map_notification(row: dict) -> NotificationItem:
+    return NotificationItem(
+        id=row["id"],
+        type=map_notification_type(row.get("type", "security")),
+        title=row.get("title") or "Notification",
+        body=row.get("body") or "",
+        createdAt=row.get("created_at") or "",
+        read=bool(row.get("read_at")),
+    )
+
+
+def map_atm(row: dict) -> AtmLocation:
+    return AtmLocation(
+        id=row["id"],
+        name=row.get("name") or "ATM",
+        address=row.get("address") or "",
+        city=row.get("city") or "",
+        state=row.get("state") or "",
+        zip=row.get("zip_code") or "",
+        distanceMiles=0.0,
+        features=row.get("features") or [],
+        hours=row.get("hours_text") or "Hours unavailable",
     )
 
 
@@ -157,3 +271,72 @@ async def list_transactions(
         mapped = [row for row in mapped if row.status == status_filter]
 
     return mapped
+
+
+@router.get("/payees", response_model=list[Payee])
+async def list_payees(current_user: SupabaseUser = Depends(get_current_user)) -> list[Payee]:
+    rows = supabase_client.select_rows(
+        "payees",
+        filters={
+            "user_id": f"eq.{current_user.id}",
+            "is_active": "eq.true",
+        },
+        order="name.asc",
+    )
+    return [map_payee(row) for row in rows]
+
+
+@router.get("/payments", response_model=list[ScheduledPayment])
+async def list_payments(current_user: SupabaseUser = Depends(get_current_user)) -> list[ScheduledPayment]:
+    rows = supabase_client.select_rows(
+        "bill_payments",
+        select="id,payee_id,account_id,amount_cents,cadence,deliver_by,status,created_at,payee:payee_id(name)",
+        filters={"user_id": f"eq.{current_user.id}"},
+        order="deliver_by.asc",
+    )
+    return [map_payment(row) for row in rows]
+
+
+@router.get("/deposits", response_model=list[Deposit])
+async def list_deposits(current_user: SupabaseUser = Depends(get_current_user)) -> list[Deposit]:
+    rows = supabase_client.select_rows(
+        "deposits",
+        filters={"user_id": f"eq.{current_user.id}"},
+        order="submitted_at.desc",
+    )
+    return [map_deposit(row) for row in rows]
+
+
+@router.get("/deposits/{deposit_id}", response_model=Deposit)
+async def get_deposit(deposit_id: str, current_user: SupabaseUser = Depends(get_current_user)) -> Deposit:
+    rows = supabase_client.select_rows(
+        "deposits",
+        filters={
+            "id": f"eq.{deposit_id}",
+            "user_id": f"eq.{current_user.id}",
+        },
+        limit=1,
+    )
+    if not rows:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Deposit not found.")
+    return map_deposit(rows[0])
+
+
+@router.get("/notifications", response_model=list[NotificationItem])
+async def list_notifications(current_user: SupabaseUser = Depends(get_current_user)) -> list[NotificationItem]:
+    rows = supabase_client.select_rows(
+        "notifications",
+        filters={"user_id": f"eq.{current_user.id}"},
+        order="created_at.desc",
+    )
+    return [map_notification(row) for row in rows]
+
+
+@router.get("/atms", response_model=list[AtmLocation])
+async def list_atms() -> list[AtmLocation]:
+    rows = supabase_client.select_rows(
+        "atm_locations",
+        filters={"is_active": "eq.true"},
+        order="city.asc,name.asc",
+    )
+    return [map_atm(row) for row in rows]
