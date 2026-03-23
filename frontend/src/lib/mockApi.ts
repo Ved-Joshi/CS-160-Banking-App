@@ -1,35 +1,10 @@
-import { mockAccounts, mockAtms, mockDeposits, mockNotifications, mockPayments, mockPayees, mockTransactions } from '../mocks/data';
 import { supabase, supabaseAnonKey, supabaseUrl } from './supabaseClient';
 import { readStorage, writeStorage, MFA_CHALLENGE_KEY } from './storage';
 import type {
-  AtmLocation,
-  BankAccount,
-  CustomerProfile,
-  Deposit,
-  NotificationItem,
-  Payee,
   RegistrationInput,
-  ScheduledPayment,
-  Transaction,
-  TransferRequest,
-  TransferResult,
   User,
 } from '../types/banking';
 import type { User as SupabaseUser } from '@supabase/supabase-js';
-
-const PAYMENTS_KEY = 'sj-state-payments';
-const DEPOSITS_KEY = 'sj-state-deposits';
-const NOTIFICATIONS_KEY = 'sj-state-notifications';
-
-function delay<T>(value: T, timeout = 250): Promise<T> {
-  return new Promise((resolve) => {
-    window.setTimeout(() => resolve(value), timeout);
-  });
-}
-
-function nowIso(): string {
-  return new Date().toISOString();
-}
 
 function mapUser(user: SupabaseUser | null): User {
   if (!user) {
@@ -45,13 +20,6 @@ function mapUser(user: SupabaseUser | null): User {
     middleName: metadata.middleName ?? '',
     lastName: metadata.lastName ?? '',
   };
-}
-
-function formatAddress(metadata: Record<string, string>): string {
-  const streetParts = [metadata.streetAddress, metadata.apartmentUnit].filter(Boolean).join(', ');
-  const locality = [metadata.city, metadata.state, metadata.zipCode].filter(Boolean).join(', ').replace(', ,', ',');
-
-  return [streetParts, locality].filter(Boolean).join(', ');
 }
 
 type MfaChallengeState = {
@@ -208,130 +176,5 @@ export const authService = {
       throw new Error('No phone factor enrolled yet.');
     }
     await createPhoneChallenge(factorId);
-  },
-  async getProfile(): Promise<CustomerProfile> {
-    const { data, error } = await supabase.auth.getUser();
-
-    if (error || !data.user) {
-      throw new Error(error?.message ?? 'No authenticated user.');
-    }
-
-    const user = mapUser(data.user);
-    const metadata = (data.user.user_metadata as Record<string, string> | undefined) ?? {};
-    const fullName = [user.firstName, user.middleName, user.lastName].filter(Boolean).join(' ').trim() || user.email;
-
-    return {
-      id: user.id,
-      firstName: user.firstName,
-      middleName: user.middleName,
-      lastName: user.lastName,
-      fullName,
-      email: user.email,
-      phone: metadata.mobilePhone || data.user.phone || '—',
-      address: formatAddress(metadata) || '—',
-      memberSince: data.user.created_at,
-      mfaEnabled: false,
-    };
-  },
-};
-
-export const accountsService = {
-  async list(): Promise<BankAccount[]> {
-    return delay(mockAccounts);
-  },
-  async get(accountId: string): Promise<BankAccount | undefined> {
-    return delay(mockAccounts.find((account) => account.id === accountId));
-  },
-};
-
-export const transactionsService = {
-  async list(): Promise<Transaction[]> {
-    return delay(mockTransactions);
-  },
-};
-
-export const transfersService = {
-  async submit(request: TransferRequest): Promise<TransferResult> {
-    if (request.fromAccountId === request.toAccountId) {
-      throw new Error('Choose two different accounts.');
-    }
-
-    if (request.amount <= 0) {
-      throw new Error('Transfer amount must be greater than zero.');
-    }
-
-    return delay({
-      id: `transfer-${Date.now()}`,
-      status: request.amount > 2500 ? 'PENDING' : 'COMPLETED',
-      submittedAt: nowIso(),
-    });
-  },
-};
-
-export const billPayService = {
-  async listPayees(): Promise<Payee[]> {
-    return delay(mockPayees);
-  },
-  async listPayments(): Promise<ScheduledPayment[]> {
-    const stored = readStorage<ScheduledPayment[]>(PAYMENTS_KEY, mockPayments);
-    return delay(stored);
-  },
-  async createPayment(payment: Omit<ScheduledPayment, 'id' | 'payeeName' | 'status'>): Promise<ScheduledPayment> {
-    const payee = mockPayees.find((entry) => entry.id === payment.payeeId);
-    const current = readStorage<ScheduledPayment[]>(PAYMENTS_KEY, mockPayments);
-    const next: ScheduledPayment = {
-      ...payment,
-      id: `payment-${Date.now()}`,
-      payeeName: payee?.name ?? 'Manual Payee',
-      status: 'SCHEDULED',
-    };
-    writeStorage(PAYMENTS_KEY, [next, ...current]);
-    return delay(next);
-  },
-};
-
-export const depositsService = {
-  async list(): Promise<Deposit[]> {
-    return delay(readStorage<Deposit[]>(DEPOSITS_KEY, mockDeposits));
-  },
-  async get(depositId: string): Promise<Deposit | undefined> {
-    const items = readStorage<Deposit[]>(DEPOSITS_KEY, mockDeposits);
-    return delay(items.find((deposit) => deposit.id === depositId));
-  },
-  async create(input: Pick<Deposit, 'accountId' | 'amount'> & { frontFileName: string; backFileName: string }): Promise<Deposit> {
-    const items = readStorage<Deposit[]>(DEPOSITS_KEY, mockDeposits);
-    const created: Deposit = {
-      id: `dep-${Date.now()}`,
-      accountId: input.accountId,
-      amount: input.amount,
-      submittedAt: nowIso(),
-      status: 'PENDING_REVIEW',
-      note: 'Submitted successfully. Review typically completes in 1 business day.',
-      images: {
-        front: { id: `front-${Date.now()}`, fileName: input.frontFileName, capturedAt: nowIso() },
-        back: { id: `back-${Date.now()}`, fileName: input.backFileName, capturedAt: nowIso() },
-      },
-    };
-    writeStorage(DEPOSITS_KEY, [created, ...items]);
-    return delay(created);
-  },
-};
-
-export const atmService = {
-  async list(): Promise<AtmLocation[]> {
-    return delay(mockAtms);
-  },
-};
-
-export const notificationsService = {
-  async list(): Promise<NotificationItem[]> {
-    return delay(readStorage<NotificationItem[]>(NOTIFICATIONS_KEY, mockNotifications));
-  },
-  async markRead(id: string): Promise<void> {
-    const items = readStorage<NotificationItem[]>(NOTIFICATIONS_KEY, mockNotifications).map((item) =>
-      item.id === id ? { ...item, read: true } : item,
-    );
-    writeStorage(NOTIFICATIONS_KEY, items);
-    return delay(undefined);
   },
 };
