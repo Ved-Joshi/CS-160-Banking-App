@@ -258,6 +258,8 @@ p {
   display: flex;
   flex-direction: column;
   gap: 1.1rem;
+  min-height: 100vh;
+  padding-bottom: 8.5rem;
 }
 
 .brand-lockup {
@@ -312,6 +314,12 @@ p {
   border-radius: 18px;
   background: rgba(255, 255, 255, 0.06);
   border: 1px solid rgba(255, 255, 255, 0.08);
+  position: fixed;
+  left: 1rem;
+  bottom: 1rem;
+  width: calc(17rem - 2rem);
+  z-index: 20;
+  backdrop-filter: blur(18px);
 }
 
 .side-nav__profile {
@@ -966,10 +974,17 @@ small {
     flex-direction: row;
     overflow-x: auto;
     align-items: center;
+    min-height: auto;
+    padding-bottom: 1rem;
   }
 
   .side-nav nav {
     display: flex;
+  }
+
+  .side-nav__footer {
+    position: static;
+    width: auto;
   }
 }
 
