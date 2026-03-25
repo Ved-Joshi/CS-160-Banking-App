@@ -1,5 +1,7 @@
 import type {
   AtmLocation,
+  AtmSearchInput,
+  AtmSearchResponse,
   BankAccount,
   CreateBankAccountInput,
   CreateDepositInput,
@@ -121,5 +123,18 @@ export const transfersService = {
 export const atmService = {
   list(): Promise<AtmLocation[]> {
     return apiRequest('/api/atms', { auth: false });
+  },
+  search(input: AtmSearchInput): Promise<AtmSearchResponse> {
+    return apiRequest('/api/atms/search', {
+      auth: false,
+      query: {
+        lat: input.lat,
+        lng: input.lng,
+        query: input.query,
+        radius_miles: input.radiusMiles,
+        open_now: input.openNow === undefined ? undefined : String(input.openNow),
+        limit: input.limit,
+      },
+    });
   },
 };

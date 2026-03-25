@@ -817,6 +817,34 @@ small {
   margin-top: 0.9rem;
 }
 
+.atm-search-panel {
+  min-height: 28rem;
+}
+
+.atm-search-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.85rem;
+}
+
+.atm-search-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.85rem;
+  align-items: end;
+}
+
+.atm-search-control,
+.atm-search-toggle {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.atm-search-toggle {
+  grid-auto-flow: column;
+  align-items: center;
+}
+
 .atm-card {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
@@ -826,6 +854,13 @@ small {
   border-radius: 20px;
   padding: 1.15rem 1.2rem;
   background: linear-gradient(180deg, rgba(248, 251, 255, 0.9), rgba(243, 247, 252, 0.9));
+  text-align: left;
+  width: 100%;
+}
+
+.atm-card--selected {
+  border-color: rgba(177, 17, 31, 0.4);
+  box-shadow: 0 0 0 3px rgba(177, 17, 31, 0.08);
 }
 
 .atm-card__content {
@@ -875,60 +910,31 @@ small {
   min-height: 28rem;
 }
 
-.map-placeholder {
+.map-shell {
   position: relative;
   overflow: hidden;
   border-radius: 20px;
   min-height: 100%;
-  background:
-    linear-gradient(180deg, rgba(227, 235, 244, 0.8), rgba(208, 221, 234, 0.85)),
-    linear-gradient(45deg, rgba(177, 17, 31, 0.05), transparent);
+  background: linear-gradient(180deg, rgba(227, 235, 244, 0.8), rgba(208, 221, 234, 0.85));
 }
 
-.map-placeholder__grid {
-  position: absolute;
-  inset: 0;
-  background-image:
-    linear-gradient(rgba(255, 255, 255, 0.35) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(255, 255, 255, 0.35) 1px, transparent 1px);
-  background-size: 56px 56px;
+.map-canvas {
+  min-height: 28rem;
+  width: 100%;
 }
 
-.map-pin {
+.map-panel__status {
   position: absolute;
+  inset: 1rem;
   display: grid;
   place-items: center;
-  width: 2.25rem;
-  height: 2.25rem;
-  border-radius: 50%;
-  background: var(--red-700);
-  color: var(--white);
-  font-weight: 700;
+  pointer-events: none;
 }
 
-.map-pin--1 {
-  top: 22%;
-  left: 38%;
-}
-
-.map-pin--2 {
-  top: 42%;
-  left: 56%;
-}
-
-.map-pin--3 {
-  top: 60%;
-  left: 28%;
-}
-
-.map-legend {
-  position: absolute;
-  right: 1rem;
-  bottom: 1rem;
-  width: min(18rem, calc(100% - 2rem));
-  background: rgba(255, 255, 255, 0.9);
-  border-radius: 18px;
-  padding: 1rem;
+.map-panel__status .inline-alert,
+.map-panel__status p {
+  pointer-events: auto;
+  max-width: 24rem;
 }
 
 .timeline {
@@ -1002,6 +1008,10 @@ small {
   .atm-card {
     align-items: start;
     flex-direction: column;
+  }
+
+  .atm-search-form {
+    grid-template-columns: 1fr;
   }
 
   .auth-card {

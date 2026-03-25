@@ -147,9 +147,24 @@ class AtmLocation(BaseModel):
     city: str
     state: str
     zip: str
+    latitude: float
+    longitude: float
     distanceMiles: float
     features: list[str]
     hours: str
+    openNow: Optional[bool] = None
+    directionsUrl: str
+
+
+class AtmSearchCenter(BaseModel):
+    latitude: float
+    longitude: float
+    label: str
+
+
+class AtmSearchResponse(BaseModel):
+    center: AtmSearchCenter
+    atms: list[AtmLocation]
 
 
 class CustomerProfile(BaseModel):

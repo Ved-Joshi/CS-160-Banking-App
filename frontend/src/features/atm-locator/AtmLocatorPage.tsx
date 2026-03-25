@@ -1,79 +1,373 @@
 import { useQuery } from '@tanstack/react-query';
-import { useMemo, useState } from 'react';
-import { Button, Card, PageHeader } from '../../components/ui';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { Button, Card, EmptyState, InlineAlert, PageHeader } from '../../components/ui';
+import type { AtmSearchInput } from '../../types/banking';
 import { atmService } from '../../lib/bankingApi';
+import { isGoogleMapsConfigured, loadGoogleMaps } from '../../lib/googleMaps';
+
+type SearchTarget =
+  | { mode: 'coords'; lat: number; lng: number }
+  | { mode: 'query'; query: string }
+  | null;
+
+type LocationState = 'idle' | 'requesting' | 'ready' | 'denied' | 'error' | 'unsupported';
+type MapState = 'idle' | 'loading' | 'ready' | 'error';
+
+function buildSearchInput(target: SearchTarget, radiusMiles: number, openNow: boolean): AtmSearchInput | null {
+  if (!target) return null;
+  if (target.mode === 'coords') {
+    return {
+      lat: target.lat,
+      lng: target.lng,
+      radiusMiles,
+      openNow,
+      limit: 20,
+    };
+  }
+  return {
+    query: target.query,
+    radiusMiles,
+    openNow,
+    limit: 20,
+  };
+}
 
 export function AtmLocatorPage() {
-  const { data: atms = [] } = useQuery({ queryKey: ['atms'], queryFn: atmService.list });
-  const [query, setQuery] = useState('');
-  const [feature, setFeature] = useState('all');
+  const [searchText, setSearchText] = useState('');
+  const [radiusMiles, setRadiusMiles] = useState(10);
+  const [openNow, setOpenNow] = useState(false);
+  const [locationState, setLocationState] = useState<LocationState>('idle');
+  const [target, setTarget] = useState<SearchTarget>(null);
+  const [selectedAtmId, setSelectedAtmId] = useState<string | null>(null);
+  const [mapState, setMapState] = useState<MapState>(isGoogleMapsConfigured() ? 'idle' : 'error');
+  const mapCanvasRef = useRef<HTMLDivElement | null>(null);
+  const mapRef = useRef<google.maps.Map | null>(null);
+  const markersRef = useRef<Array<{ id: string; marker: google.maps.Marker; listener: google.maps.MapsEventListener }>>([]);
 
-  const filtered = useMemo(
-    () =>
-      atms.filter((atm) => {
-        return (
-          (!query ||
-            `${atm.name} ${atm.address} ${atm.city} ${atm.state} ${atm.zip}`.toLowerCase().includes(query.toLowerCase())) &&
-          (feature === 'all' || atm.features.includes(feature))
-        );
-      }),
-    [atms, feature, query],
-  );
+  const searchInput = useMemo(() => buildSearchInput(target, radiusMiles, openNow), [openNow, radiusMiles, target]);
+
+  const searchQuery = useQuery({
+    queryKey: ['atm-search', searchInput],
+    queryFn: () => atmService.search(searchInput!),
+    enabled: Boolean(searchInput),
+  });
+
+  const atms = searchQuery.data?.atms ?? [];
+  const center = searchQuery.data?.center;
+  const selectedAtm = atms.find((atm) => atm.id === selectedAtmId) ?? atms[0] ?? null;
+
+  useEffect(() => {
+    if (!atms.length) {
+      setSelectedAtmId(null);
+      return;
+    }
+    if (!selectedAtmId || !atms.some((atm) => atm.id === selectedAtmId)) {
+      setSelectedAtmId(atms[0].id);
+    }
+  }, [atms, selectedAtmId]);
+
+  useEffect(() => {
+    if (!isGoogleMapsConfigured()) {
+      setMapState('error');
+      return;
+    }
+    let cancelled = false;
+    setMapState('loading');
+    void loadGoogleMaps()
+      .then(() => {
+        if (!cancelled) {
+          setMapState('ready');
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setMapState('error');
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (mapState !== 'ready' || !mapCanvasRef.current || !center || !window.google?.maps) {
+      return;
+    }
+
+    const google = window.google;
+    const mapCenter = { lat: center.latitude, lng: center.longitude };
+    if (!mapRef.current) {
+      mapRef.current = new google.maps.Map(mapCanvasRef.current, {
+        center: mapCenter,
+        zoom: 12,
+        mapTypeControl: false,
+        streetViewControl: false,
+        fullscreenControl: false,
+        gestureHandling: 'greedy',
+      });
+    } else {
+      mapRef.current.setCenter(mapCenter);
+    }
+
+    markersRef.current.forEach(({ marker, listener }) => {
+      listener.remove();
+      marker.setMap(null);
+    });
+    markersRef.current = [];
+
+    if (!atms.length) {
+      mapRef.current.setZoom(12);
+      return;
+    }
+
+    const bounds = new google.maps.LatLngBounds();
+    markersRef.current = atms.map((atm, index) => {
+      const marker = new google.maps.Marker({
+        map: mapRef.current,
+        position: { lat: atm.latitude, lng: atm.longitude },
+        title: atm.name,
+        label: `${index + 1}`,
+      });
+      bounds.extend({ lat: atm.latitude, lng: atm.longitude });
+      const listener = marker.addListener('click', () => {
+        setSelectedAtmId(atm.id);
+      });
+      return { id: atm.id, marker, listener };
+    });
+
+    if (!bounds.isEmpty()) {
+      mapRef.current.fitBounds(bounds);
+    }
+  }, [atms, center, mapState]);
+
+  useEffect(() => {
+    if (!selectedAtm || !mapRef.current || !window.google?.maps) {
+      return;
+    }
+    mapRef.current.panTo({ lat: selectedAtm.latitude, lng: selectedAtm.longitude });
+    markersRef.current.forEach(({ id, marker }, index) => {
+      marker.setLabel(
+        id === selectedAtm.id
+          ? { text: `${index + 1}`, color: '#ffffff', fontWeight: '700' }
+          : `${index + 1}`,
+      );
+      marker.setAnimation(id === selectedAtm.id ? google.maps.Animation.BOUNCE : null);
+    });
+    const timeoutId = window.setTimeout(() => {
+      markersRef.current.forEach(({ marker }) => marker.setAnimation(null));
+    }, 700);
+    return () => window.clearTimeout(timeoutId);
+  }, [selectedAtm]);
+
+  useEffect(() => {
+    if (!navigator.geolocation) {
+      setLocationState('unsupported');
+      return;
+    }
+
+    setLocationState('requesting');
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        setLocationState('ready');
+        setTarget({
+          mode: 'coords',
+          lat: position.coords.latitude,
+          lng: position.coords.longitude,
+        });
+      },
+      (error) => {
+        setTarget(null);
+        if (error.code === error.PERMISSION_DENIED) {
+          setLocationState('denied');
+          return;
+        }
+        setLocationState('error');
+      },
+      {
+        enableHighAccuracy: true,
+        timeout: 10000,
+        maximumAge: 300000,
+      },
+    );
+  }, []);
+
+  const handleManualSearch = (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const nextQuery = searchText.trim();
+    if (!nextQuery) return;
+    setTarget({ mode: 'query', query: nextQuery });
+  };
+
+  const handleUseMyLocation = () => {
+    if (!navigator.geolocation) {
+      setLocationState('unsupported');
+      return;
+    }
+    setLocationState('requesting');
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        setLocationState('ready');
+        setTarget({
+          mode: 'coords',
+          lat: position.coords.latitude,
+          lng: position.coords.longitude,
+        });
+      },
+      (error) => {
+        if (error.code === error.PERMISSION_DENIED) {
+          setLocationState('denied');
+          return;
+        }
+        setLocationState('error');
+      },
+      {
+        enableHighAccuracy: true,
+        timeout: 10000,
+        maximumAge: 300000,
+      },
+    );
+  };
 
   return (
     <div className="stack-xl">
-      <PageHeader title="ATM Locator" eyebrow="Partner network" subtitle="Search nearby Chase ATM locations, then jump out for directions." />
+      <PageHeader title="ATM Locator" eyebrow="Partner network" subtitle="Search nearby Chase ATM locations, then open turn-by-turn directions." />
       <div className="grid-two atm-grid">
         <Card>
-          <div className="stack-md">
-            <input placeholder="Search by city or zip" value={query} onChange={(event) => setQuery(event.target.value)} />
-            <select value={feature} onChange={(event) => setFeature(event.target.value)}>
-              <option value="all">All ATM features</option>
-              <option value="Drive-up">Drive-up</option>
-              <option value="Walk-up">Walk-up</option>
-              <option value="Wheelchair accessible">Wheelchair accessible</option>
-              <option value="Deposit-enabled">Deposit-enabled</option>
-            </select>
-          </div>
-          <div className="list-stack">
-            {filtered.map((atm) => (
-              <div className="atm-card" key={atm.id}>
-                <div className="atm-card__content">
-                  <div className="atm-card__primary">
-                    <strong>{atm.name}</strong>
-                    <p className="muted">{atm.address}, {atm.city}, {atm.state} {atm.zip}</p>
+          <div className="atm-search-panel stack-lg">
+            <form className="atm-search-form" onSubmit={handleManualSearch}>
+              <input
+                placeholder="Search by city, ZIP, or address"
+                value={searchText}
+                onChange={(event) => setSearchText(event.target.value)}
+              />
+              <Button type="submit" variant="secondary">Search</Button>
+            </form>
+            <div className="atm-search-controls">
+              <label className="atm-search-control">
+                <span>Radius</span>
+                <select value={radiusMiles} onChange={(event) => setRadiusMiles(Number(event.target.value))}>
+                  <option value={5}>5 miles</option>
+                  <option value={10}>10 miles</option>
+                  <option value={15}>15 miles</option>
+                  <option value={25}>25 miles</option>
+                </select>
+              </label>
+              <label className="atm-search-toggle">
+                <input checked={openNow} onChange={(event) => setOpenNow(event.target.checked)} type="checkbox" />
+                <span>Open now</span>
+              </label>
+              <Button type="button" variant="secondary" onClick={handleUseMyLocation}>
+                Use my location
+              </Button>
+            </div>
+            {locationState === 'requesting' ? (
+              <InlineAlert title="Finding nearby ATMs" tone="success">
+                Requesting your location to rank nearby Chase ATMs.
+              </InlineAlert>
+            ) : null}
+            {locationState === 'denied' ? (
+              <InlineAlert title="Location access denied" tone="warning">
+                Search by city, ZIP, or address instead, or allow location access and try again.
+              </InlineAlert>
+            ) : null}
+            {locationState === 'unsupported' ? (
+              <InlineAlert title="Location unavailable" tone="warning">
+                This browser cannot share your location. Use manual search instead.
+              </InlineAlert>
+            ) : null}
+            {locationState === 'error' ? (
+              <InlineAlert title="Unable to get your location" tone="warning">
+                Search manually or try requesting your location again.
+              </InlineAlert>
+            ) : null}
+            {searchQuery.error instanceof Error ? (
+              <InlineAlert title="Unable to load ATMs" tone="warning">
+                {searchQuery.error.message}
+              </InlineAlert>
+            ) : null}
+            {center ? (
+              <p className="muted">Showing Chase ATMs near <strong>{center.label}</strong>.</p>
+            ) : null}
+            {!target && locationState !== 'requesting' ? (
+              <EmptyState
+                title="Search for nearby Chase ATMs"
+                description="Use your current location or enter a city, ZIP, or street address to load results."
+              />
+            ) : searchQuery.isPending || searchQuery.isFetching ? (
+              <p className="muted">Loading ATM results...</p>
+            ) : !atms.length ? (
+              <EmptyState
+                title="No nearby Chase ATMs found"
+                description="Try a wider radius or search a different area."
+              />
+            ) : (
+              <div className="list-stack">
+                {atms.map((atm, index) => (
+                  <div
+                    className={atm.id === selectedAtmId ? 'atm-card atm-card--selected' : 'atm-card'}
+                    key={atm.id}
+                    onClick={() => setSelectedAtmId(atm.id)}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter' || event.key === ' ') {
+                        event.preventDefault();
+                        setSelectedAtmId(atm.id);
+                      }
+                    }}
+                    role="button"
+                    tabIndex={0}
+                  >
+                    <div className="atm-card__content">
+                      <div className="atm-card__primary">
+                        <strong>{index + 1}. {atm.name}</strong>
+                        <p className="muted">{[atm.address, `${atm.city}, ${atm.state} ${atm.zip}`].filter(Boolean).join(' • ')}</p>
+                      </div>
+                      {atm.features.length ? (
+                        <div className="atm-card__features">
+                          {atm.features.map((feature) => (
+                            <span className="atm-feature" key={`${atm.id}-${feature}`}>
+                              {feature}
+                            </span>
+                          ))}
+                        </div>
+                      ) : null}
+                    </div>
+                    <div className="atm-card__meta">
+                      <div className="atm-card__distance">
+                        <strong>{atm.distanceMiles.toFixed(1)} mi</strong>
+                        <small>{atm.hours}</small>
+                      </div>
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          window.open(atm.directionsUrl, '_blank', 'noopener,noreferrer');
+                        }}
+                      >
+                        Directions
+                      </Button>
+                    </div>
                   </div>
-                  <div className="atm-card__features">
-                    {atm.features.map((feature) => (
-                      <span className="atm-feature" key={`${atm.id}-${feature}`}>
-                        {feature}
-                      </span>
-                    ))}
-                  </div>
-                </div>
-                <div className="atm-card__meta">
-                  <div className="atm-card__distance">
-                    <strong>{atm.distanceMiles.toFixed(1)} mi</strong>
-                    <small>{atm.hours}</small>
-                  </div>
-                  <Button type="button" variant="secondary">Directions</Button>
-                </div>
+                ))}
               </div>
-            ))}
+            )}
           </div>
         </Card>
         <Card className="map-panel">
-          <div className="map-placeholder">
-            <div className="map-placeholder__grid" />
-            {filtered.slice(0, 3).map((atm, index) => (
-              <span key={atm.id} className={`map-pin map-pin--${index + 1}`}>
-                {index + 1}
-              </span>
-            ))}
-            <div className="map-legend">
-              <strong>Location map</strong>
-              <p>Review nearby ATM locations on the map and compare them with the results list to choose the most convenient option.</p>
-            </div>
+          <div className="map-shell">
+            <div className="map-canvas" ref={mapCanvasRef} />
+            {mapState === 'loading' ? (
+              <div className="map-panel__status">
+                <p>Loading map...</p>
+              </div>
+            ) : null}
+            {mapState === 'error' ? (
+              <div className="map-panel__status">
+                <InlineAlert title="Map unavailable" tone="warning">
+                  The list still works, but the embedded map could not be loaded. Add `VITE_GOOGLE_MAPS_API_KEY` to enable it.
+                </InlineAlert>
+              </div>
+            ) : null}
           </div>
         </Card>
       </div>
