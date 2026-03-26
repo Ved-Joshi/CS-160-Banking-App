@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import math
 from dataclasses import dataclass
 from datetime import datetime
@@ -14,6 +15,7 @@ from config import settings
 
 GEOCODE_URL = "https://maps.googleapis.com/maps/api/geocode/json"
 PLACES_SEARCH_TEXT_URL = "https://places.googleapis.com/v1/places:searchText"
+PLACES_DETAILS_URL = "https://places.googleapis.com/v1/places"
 METERS_PER_MILE = 1609.344
 
 
@@ -146,6 +148,35 @@ def _build_directions_url(name: str, latitude: float, longitude: float, place_id
     )
 
 
+async def _google_get_json(
+    *,
+    url: str,
+    api_key: str,
+    field_mask: str,
+) -> dict[str, Any]:
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(20.0)) as client:
+            response = await client.get(
+                url,
+                headers={
+                    "X-Goog-Api-Key": api_key,
+                    "X-Goog-FieldMask": field_mask,
+                },
+            )
+            response.raise_for_status()
+    except httpx.TimeoutException as exc:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Google Place Details timed out.") from exc
+    except httpx.RequestError as exc:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"Unable to reach Google Place Details: {exc}") from exc
+    except httpx.HTTPStatusError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=_google_error_detail(exc.response, "Google Place Details request failed."),
+        ) from exc
+
+    return response.json()
+
+
 def _build_feature_chips(open_now: bool | None) -> list[str]:
     if open_now is True:
         return ["Open now"]
@@ -194,14 +225,40 @@ def _atm_priority(atm: dict[str, Any]) -> tuple[int, float]:
     open_now = atm.get("openNow")
     has_hours = atm.get("_hasHoursData", False)
     return (
-        0 if source_type == "atm" and has_hours and open_now is not None else
-        1 if source_type == "bank" and has_hours and open_now is not None else
-        2 if source_type == "atm" and has_hours else
-        3 if source_type == "bank" and has_hours else
-        4 if source_type == "atm" else
-        5,
+        0 if open_now is True and source_type == "atm" else
+        1 if open_now is True and source_type == "bank" else
+        2 if source_type == "atm" and has_hours and open_now is not None else
+        3 if source_type == "bank" and has_hours and open_now is not None else
+        4 if source_type == "atm" and has_hours else
+        5 if source_type == "bank" and has_hours else
+        6 if source_type == "atm" else
+        7,
         float(atm.get("distanceMiles") or 0.0),
     )
+
+
+def _merge_same_address_group(group: list[dict[str, Any]]) -> dict[str, Any]:
+    display_source = min(
+        group,
+        key=lambda atm: (
+            0 if str(atm.get("_sourceType") or "") == "atm" else 1,
+            float(atm.get("distanceMiles") or 0.0),
+        ),
+    )
+    status_source = min(group, key=_atm_priority)
+
+    merged = dict(display_source)
+    merged["openNow"] = status_source.get("openNow")
+    merged["hours"] = status_source.get("hours", merged.get("hours"))
+    merged["features"] = _build_feature_chips(status_source.get("openNow"))
+
+    if status_source.get("directionsUrl"):
+        merged["directionsUrl"] = status_source["directionsUrl"]
+    if status_source.get("latitude") and status_source.get("longitude"):
+        merged["latitude"] = status_source["latitude"]
+        merged["longitude"] = status_source["longitude"]
+
+    return merged
 
 
 def _map_place(place: dict[str, Any], *, center_lat: float, center_lng: float) -> dict[str, Any]:
@@ -233,6 +290,42 @@ def _map_place(place: dict[str, Any], *, center_lat: float, center_lng: float) -
         "directionsUrl": _build_directions_url(display_name, latitude, longitude, place.get("id") or ""),
         "_hasHoursData": has_hours_data,
     }
+
+
+async def _enrich_place_with_details(place: dict[str, Any], api_key: str) -> dict[str, Any]:
+    place_id = place.get("id")
+    if not place_id:
+        return place
+
+    details = await _google_get_json(
+        url=f"{PLACES_DETAILS_URL}/{place_id}",
+        api_key=api_key,
+        field_mask=",".join(
+            [
+                "id",
+                "displayName",
+                "formattedAddress",
+                "addressComponents",
+                "location",
+                "currentOpeningHours.openNow",
+                "currentOpeningHours.weekdayDescriptions",
+                "regularOpeningHours.weekdayDescriptions",
+            ]
+        ),
+    )
+
+    enriched = dict(place)
+    for key in [
+        "displayName",
+        "formattedAddress",
+        "addressComponents",
+        "location",
+        "currentOpeningHours",
+        "regularOpeningHours",
+    ]:
+        if details.get(key) is not None:
+            enriched[key] = details[key]
+    return enriched
 
 
 async def geocode_query(query: str) -> SearchCenter:
@@ -349,24 +442,36 @@ async def search_chase_atms(
             if not next_page_token:
                 break
 
-    mapped = [
-        {
-            **_map_place(place, center_lat=center.latitude, center_lng=center.longitude),
-            "_sourceType": source_type,
-        }
+    candidate_places = [
+        (source_type, place)
         for source_type, place in deduped_places.values()
         if "chase" in (((place.get("displayName") or {}).get("text")) or "").lower()
     ]
+
+    semaphore = asyncio.Semaphore(8)
+
+    async def enrich_candidate(source_type: str, place: dict[str, Any]) -> dict[str, Any]:
+        async with semaphore:
+            try:
+                enriched_place = await _enrich_place_with_details(place, api_key)
+            except HTTPException:
+                enriched_place = place
+        return {
+            **_map_place(enriched_place, center_lat=center.latitude, center_lng=center.longitude),
+            "_sourceType": source_type,
+        }
+
+    mapped = await asyncio.gather(
+        *(enrich_candidate(source_type, place) for source_type, place in candidate_places)
+    )
     mapped = [atm for atm in mapped if atm["distanceMiles"] <= radius_miles]
-    by_address: dict[str, dict[str, Any]] = {}
+    by_address: dict[str, list[dict[str, Any]]] = {}
     for atm in mapped:
         address_key = _normalized_address_key(atm)
         if not address_key:
             address_key = f"id:{atm['id']}"
-        existing = by_address.get(address_key)
-        if existing is None or _atm_priority(atm) < _atm_priority(existing):
-            by_address[address_key] = atm
-    mapped = list(by_address.values())
+        by_address.setdefault(address_key, []).append(atm)
+    mapped = [_merge_same_address_group(group) for group in by_address.values()]
     mapped.sort(key=lambda atm: atm["distanceMiles"])
     return [
         {key: value for key, value in atm.items() if not key.startswith("_")}
