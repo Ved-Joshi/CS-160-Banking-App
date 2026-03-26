@@ -26,6 +26,9 @@ class Settings(BaseSettings):
     SUPABASE_URL: Optional[str] = None
     SUPABASE_SERVICE_ROLE_KEY: Optional[str] = None
 
+    # Google Maps / Places configuration for ATM locator
+    GOOGLE_MAPS_API_KEY: Optional[str] = None
+
 settings = Settings()
 
 if not settings.DEBUG and settings.JWT_SECRET == "change-me":

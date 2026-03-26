@@ -8,6 +8,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from dependencies.auth import get_current_user
 from schemas.banking import (
     AtmLocation,
+    AtmSearchCenter,
+    AtmSearchResponse,
     BankAccount,
     CreateBankAccountIn,
     CreateDepositIn,
@@ -26,6 +28,7 @@ from schemas.banking import (
     Transaction,
     TransferResult,
 )
+from utils.google_maps import SearchCenter, geocode_query, search_chase_atms
 from utils.supabase import SupabaseUser, amount_to_cents, cents_to_amount, random_last4, supabase_client
 
 router = APIRouter(prefix="/api", tags=["banking"])
@@ -242,6 +245,8 @@ def map_notification(row: dict) -> NotificationItem:
 
 
 def map_atm(row: dict) -> AtmLocation:
+    latitude = float(row.get("latitude") or 0.0)
+    longitude = float(row.get("longitude") or 0.0)
     return AtmLocation(
         id=row["id"],
         name=row.get("name") or "ATM",
@@ -249,9 +254,13 @@ def map_atm(row: dict) -> AtmLocation:
         city=row.get("city") or "",
         state=row.get("state") or "",
         zip=row.get("zip_code") or "",
+        latitude=latitude,
+        longitude=longitude,
         distanceMiles=0.0,
         features=row.get("features") or [],
         hours=row.get("hours_text") or "Hours unavailable",
+        openNow=None,
+        directionsUrl=f"https://www.google.com/maps/dir/?api=1&destination={latitude},{longitude}",
     )
 
 
@@ -303,6 +312,27 @@ def parse_transfer_date(value: str) -> str:
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Transfer date must be in YYYY-MM-DD format.",
         ) from exc
+
+
+def build_atm_center(
+    *,
+    lat: float | None,
+    lng: float | None,
+    query: str | None,
+) -> SearchCenter:
+    if query:
+        return SearchCenter(latitude=0.0, longitude=0.0, label=query)
+    if lat is None and lng is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Provide either lat and lng or a query.",
+        )
+    if lat is None or lng is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Both lat and lng are required when searching by coordinates.",
+        )
+    return SearchCenter(latitude=lat, longitude=lng, label="Current location")
 
 
 @router.get("/me/profile", response_model=CustomerProfile)
@@ -625,6 +655,42 @@ async def mark_notification_read(
     if not rows:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Notification not found.")
     return map_notification(rows[0])
+
+
+@router.get("/atms/search", response_model=AtmSearchResponse)
+async def search_atms(
+    lat: float | None = Query(default=None),
+    lng: float | None = Query(default=None),
+    query: str | None = Query(default=None, min_length=2, max_length=120),
+    radius_miles: int = Query(default=10, ge=1, le=25),
+    open_now: bool = Query(default=False),
+    limit: int = Query(default=20, ge=1, le=50),
+) -> AtmSearchResponse:
+    query_text = query.strip() if query else None
+    if query_text and (lat is not None or lng is not None):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Provide either coordinates or a search query, not both.",
+        )
+
+    center = build_atm_center(lat=lat, lng=lng, query=query_text)
+    if query_text:
+        center = await geocode_query(query_text)
+
+    atms = await search_chase_atms(
+        center=center,
+        radius_miles=radius_miles,
+        open_now=open_now,
+        limit=limit,
+    )
+    return AtmSearchResponse(
+        center=AtmSearchCenter(
+            latitude=center.latitude,
+            longitude=center.longitude,
+            label=center.label,
+        ),
+        atms=[AtmLocation(**atm) for atm in atms],
+    )
 
 
 @router.get("/atms", response_model=list[AtmLocation])

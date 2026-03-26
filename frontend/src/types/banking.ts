@@ -174,9 +174,33 @@ export interface AtmLocation {
   city: string;
   state: string;
   zip: string;
+  latitude: number;
+  longitude: number;
   distanceMiles: number;
   features: string[];
   hours: string;
+  openNow: boolean | null;
+  directionsUrl: string;
+}
+
+export interface AtmSearchCenter {
+  latitude: number;
+  longitude: number;
+  label: string;
+}
+
+export interface AtmSearchResponse {
+  center: AtmSearchCenter;
+  atms: AtmLocation[];
+}
+
+export interface AtmSearchInput {
+  lat?: number;
+  lng?: number;
+  query?: string;
+  radiusMiles?: number;
+  openNow?: boolean;
+  limit?: number;
 }
 
 export interface NotificationItem {
