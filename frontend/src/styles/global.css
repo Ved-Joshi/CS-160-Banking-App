@@ -852,7 +852,9 @@ small {
   min-height: 0;
   max-height: 41rem;
   overflow-y: auto;
-  padding-right: 0.35rem;
+  padding-right: 0.85rem;
+  margin-right: -0.35rem;
+  scrollbar-gutter: stable;
 }
 
 .atm-results-scroll .list-stack {
