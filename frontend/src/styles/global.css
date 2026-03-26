@@ -811,10 +811,18 @@ small {
 
 .atm-grid {
   align-items: start;
+  gap: 1.25rem;
 }
 
 .atm-grid .list-stack {
-  margin-top: 0.9rem;
+  margin-top: 0.75rem;
+  gap: 0.8rem;
+}
+
+.atm-panel {
+  padding: 1.15rem;
+  border-radius: 22px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(247, 250, 255, 0.92));
 }
 
 .atm-search-panel {
@@ -822,36 +830,174 @@ small {
   height: 100%;
   display: grid;
   grid-template-rows: auto auto auto 1fr;
+  gap: 0.95rem;
 }
 
 .atm-search-form {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
-  gap: 0.85rem;
+  gap: 0.7rem;
+}
+
+.atm-filter-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem 0.85rem;
+  align-items: center;
+  justify-content: space-between;
 }
 
 .atm-search-controls {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.85rem;
-  align-items: end;
+  gap: 0.5rem;
+  align-items: center;
 }
 
-.atm-search-control,
-.atm-search-toggle {
-  display: grid;
+.atm-radius-group {
+  display: flex;
+  flex-wrap: wrap;
   gap: 0.35rem;
+  align-items: center;
+  padding: 0.25rem;
+  border: 1px solid rgba(218, 226, 236, 0.84);
+  border-radius: 999px;
+  background: rgba(248, 250, 253, 0.86);
+}
+
+.atm-filter-label {
+  font-size: 0.74rem;
+  font-weight: 600;
+  color: var(--muted);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding-inline: 0.55rem 0.25rem;
+}
+
+.atm-radius-chip {
+  border: 1px solid transparent;
+  border-radius: 999px;
+  padding: 0.42rem 0.72rem;
+  background: transparent;
+  color: var(--navy-900);
+  cursor: pointer;
+  font-size: 0.94rem;
+  font-weight: 600;
+  transition: background 120ms ease, border-color 120ms ease, color 120ms ease, box-shadow 120ms ease;
+}
+
+.atm-radius-chip:hover {
+  background: rgba(234, 240, 248, 0.88);
+  color: var(--navy-800);
+}
+
+.atm-radius-chip--active {
+  background: rgba(16, 35, 59, 0.94);
+  border-color: rgba(16, 35, 59, 0.94);
+  color: var(--white);
+  box-shadow: 0 10px 20px rgba(16, 35, 59, 0.12);
 }
 
 .atm-search-toggle {
+  display: inline-flex;
   grid-auto-flow: column;
   align-items: center;
+  gap: 0.45rem;
+  min-height: 2.35rem;
+  padding: 0.4rem 0.7rem;
+  border: 1px solid rgba(218, 226, 236, 0.9);
+  border-radius: 999px;
+  background: rgba(248, 250, 253, 0.86);
+  color: var(--navy-900);
+  font-size: 0.95rem;
+  font-weight: 600;
+  transition: border-color 120ms ease, background 120ms ease, color 120ms ease;
+}
+
+.atm-search-toggle input {
+  width: 0.95rem;
+  height: 0.95rem;
+  margin: 0;
+  accent-color: var(--navy-900);
+}
+
+.atm-search-toggle--active {
+  border-color: rgba(49, 82, 126, 0.24);
+  background: rgba(232, 240, 250, 0.95);
+}
+
+.atm-search-toggle:hover {
+  border-color: rgba(49, 82, 126, 0.22);
+}
+
+.atm-search-input {
+  border-radius: 16px;
+  border-color: rgba(206, 216, 228, 0.95);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(246, 249, 253, 0.96));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.8);
+}
+
+.atm-button {
+  min-height: 2.7rem;
+  padding: 0.7rem 0.95rem;
+  border-radius: 999px;
+  font-weight: 700;
+  box-shadow: none;
+}
+
+.atm-button--search {
+  background: linear-gradient(135deg, var(--navy-900), var(--navy-700));
+  color: var(--white);
+}
+
+.atm-button--search:hover {
+  box-shadow: 0 10px 20px rgba(16, 35, 59, 0.14);
+}
+
+.atm-button--locate,
+.atm-button--directions {
+  border: 1px solid rgba(49, 82, 126, 0.16);
+  background: rgba(245, 249, 255, 0.78);
+  color: var(--navy-900);
+}
+
+.atm-button--locate {
+  min-height: 2.35rem;
+  padding: 0.45rem 0.82rem;
+  font-weight: 600;
+  background: rgba(255, 255, 255, 0.55);
+  border-color: rgba(215, 223, 233, 0.9);
+}
+
+.atm-button--locate:hover {
+  border-color: rgba(49, 82, 126, 0.24);
+  background: rgba(242, 247, 253, 0.92);
+}
+
+.atm-results-summary {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+  align-items: center;
+}
+
+.atm-results-count {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 0.35rem 0.7rem;
+  background: rgba(16, 35, 59, 0.06);
+  color: var(--navy-900);
+  font-size: 0.8rem;
+  font-weight: 700;
 }
 
 .atm-results-scroll {
   min-height: 0;
   max-height: 41rem;
   overflow-y: auto;
+  padding-top: 0.35rem;
   padding-right: 0.85rem;
   margin-right: -0.35rem;
   scrollbar-gutter: stable;
@@ -864,14 +1010,21 @@ small {
 .atm-card {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
-  gap: 1.25rem;
+  gap: 1rem;
   align-items: center;
-  border: 1px solid rgba(212, 221, 232, 0.8);
-  border-radius: 20px;
-  padding: 1.15rem 1.2rem;
-  background: linear-gradient(180deg, rgba(248, 251, 255, 0.9), rgba(243, 247, 252, 0.9));
+  border: 1px solid rgba(218, 227, 237, 0.9);
+  border-radius: 18px;
+  padding: 0.95rem 1rem;
+  background: linear-gradient(180deg, rgba(251, 253, 255, 0.98), rgba(244, 248, 253, 0.95));
   text-align: left;
   width: 100%;
+  transition: transform 120ms ease, box-shadow 120ms ease, border-color 120ms ease;
+}
+
+.atm-card:hover {
+  transform: translateY(-1px);
+  border-color: rgba(177, 17, 31, 0.22);
+  box-shadow: 0 12px 24px rgba(16, 35, 59, 0.08);
 }
 
 .atm-card--selected {
@@ -886,12 +1039,17 @@ small {
 
 .atm-card__primary {
   display: grid;
-  gap: 0.3rem;
+  gap: 0.2rem;
+}
+
+.atm-card__primary strong {
+  font-size: 1rem;
+  line-height: 1.25;
 }
 
 .atm-card__features {
   display: flex;
-  gap: 0.5rem;
+  gap: 0.4rem;
   flex-wrap: wrap;
 }
 
@@ -899,16 +1057,16 @@ small {
   display: inline-flex;
   align-items: center;
   border-radius: 999px;
-  padding: 0.4rem 0.7rem;
-  background: rgba(16, 35, 59, 0.08);
+  padding: 0.3rem 0.6rem;
+  background: rgba(16, 35, 59, 0.06);
   color: var(--navy-900);
-  font-size: 0.82rem;
+  font-size: 0.75rem;
   font-weight: 700;
 }
 
 .atm-card__meta {
   display: grid;
-  gap: 0.75rem;
+  gap: 0.6rem;
   justify-items: end;
 }
 
@@ -919,23 +1077,23 @@ small {
 }
 
 .atm-card__distance strong {
-  font-size: 1.25rem;
+  font-size: 1.1rem;
 }
 
 .map-panel {
-  min-height: 28rem;
+  min-height: 30rem;
 }
 
 .map-shell {
   position: relative;
   overflow: hidden;
-  border-radius: 20px;
+  border-radius: 18px;
   min-height: 100%;
   background: linear-gradient(180deg, rgba(227, 235, 244, 0.8), rgba(208, 221, 234, 0.85));
 }
 
 .map-canvas {
-  min-height: 28rem;
+  min-height: 30rem;
   width: 100%;
 }
 
@@ -1008,6 +1166,23 @@ small {
     position: static;
     width: auto;
   }
+
+  .atm-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .atm-panel--results {
+    order: 2;
+  }
+
+  .map-panel {
+    order: 1;
+    min-height: 24rem;
+  }
+
+  .map-canvas {
+    min-height: 24rem;
+  }
 }
 
 @media (max-width: 720px) {
@@ -1028,6 +1203,44 @@ small {
 
   .atm-search-form {
     grid-template-columns: 1fr;
+  }
+
+  .atm-search-controls {
+    display: grid;
+    grid-template-columns: 1fr;
+    align-items: stretch;
+  }
+
+  .atm-filter-bar {
+    align-items: stretch;
+  }
+
+  .atm-radius-group {
+    width: 100%;
+  }
+
+  .atm-results-summary {
+    flex-direction: column;
+    align-items: start;
+  }
+
+  .atm-card {
+    grid-template-columns: 1fr;
+  }
+
+  .atm-card__meta {
+    width: 100%;
+    justify-items: stretch;
+  }
+
+  .atm-card__distance {
+    text-align: left;
+  }
+
+  .atm-button--directions,
+  .atm-button--locate,
+  .atm-button--search {
+    width: 100%;
   }
 
   .auth-card {

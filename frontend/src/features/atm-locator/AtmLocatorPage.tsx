@@ -21,14 +21,12 @@ function buildSearchInput(target: SearchTarget, radiusMiles: number, openNow: bo
       lng: target.lng,
       radiusMiles,
       openNow,
-      limit: 20,
     };
   }
   return {
     query: target.query,
     radiusMiles,
     openNow,
-    limit: 20,
   };
 }
 
@@ -256,33 +254,40 @@ export function AtmLocatorPage() {
     <div className="stack-xl">
       <PageHeader title="ATM Locator" eyebrow="Partner network" subtitle="Search nearby Chase ATM locations, then open turn-by-turn directions." />
       <div className="grid-two atm-grid">
-        <Card>
+        <Card className="atm-panel atm-panel--results">
           <div className="atm-search-panel stack-lg">
             <form className="atm-search-form" onSubmit={handleManualSearch}>
               <input
+                className="atm-search-input"
                 placeholder="Search by city, ZIP, or address"
                 value={searchText}
                 onChange={(event) => setSearchText(event.target.value)}
               />
-              <Button type="submit" variant="secondary">Search</Button>
+              <Button className="atm-button atm-button--search" type="submit" variant="secondary">Search</Button>
             </form>
-            <div className="atm-search-controls">
-              <label className="atm-search-control">
-                <span>Radius</span>
-                <select value={radiusMiles} onChange={(event) => setRadiusMiles(Number(event.target.value))}>
-                  <option value={5}>5 miles</option>
-                  <option value={10}>10 miles</option>
-                  <option value={15}>15 miles</option>
-                  <option value={25}>25 miles</option>
-                </select>
-              </label>
-              <label className="atm-search-toggle">
+            <div className="atm-filter-bar">
+              <div className="atm-radius-group" aria-label="Radius" role="group">
+                <span className="atm-filter-label">Within</span>
+                {[5, 10, 15].map((radius) => (
+                  <button
+                    key={radius}
+                    className={radiusMiles === radius ? 'atm-radius-chip atm-radius-chip--active' : 'atm-radius-chip'}
+                    onClick={() => setRadiusMiles(radius)}
+                    type="button"
+                  >
+                    {radius} mi
+                  </button>
+                ))}
+              </div>
+              <div className="atm-search-controls">
+              <label className={openNow ? 'atm-search-toggle atm-search-toggle--active' : 'atm-search-toggle'}>
                 <input checked={openNow} onChange={(event) => setOpenNow(event.target.checked)} type="checkbox" />
                 <span>Open now</span>
               </label>
-              <Button type="button" variant="secondary" onClick={handleUseMyLocation}>
+              <Button className="atm-button atm-button--locate" type="button" variant="secondary" onClick={handleUseMyLocation}>
                 Use my location
               </Button>
+              </div>
             </div>
             {locationState === 'requesting' ? (
               <InlineAlert title="Finding nearby ATMs" tone="success">
@@ -310,7 +315,10 @@ export function AtmLocatorPage() {
               </InlineAlert>
             ) : null}
             {center ? (
-              <p className="muted">Showing Chase ATMs near <strong>{center.label}</strong>.</p>
+              <div className="atm-results-summary">
+                <p className="muted">Showing Chase ATMs near <strong>{center.label}</strong>.</p>
+                {atms.length ? <span className="atm-results-count">{atms.length} results</span> : null}
+              </div>
             ) : null}
             <div className="atm-results-scroll">
               {!target && locationState !== 'requesting' ? (
@@ -365,6 +373,7 @@ export function AtmLocatorPage() {
                           <small>{atm.hours}</small>
                         </div>
                         <Button
+                          className="atm-button atm-button--directions"
                           type="button"
                           variant="secondary"
                           onClick={(event) => {
@@ -382,7 +391,7 @@ export function AtmLocatorPage() {
             </div>
           </div>
         </Card>
-        <Card className="map-panel">
+        <Card className="atm-panel map-panel">
           <div className="map-shell">
             <div className="map-canvas" ref={mapCanvasRef} />
             {mapState === 'loading' ? (
