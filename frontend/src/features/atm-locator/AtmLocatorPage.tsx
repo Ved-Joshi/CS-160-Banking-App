@@ -43,6 +43,8 @@ export function AtmLocatorPage() {
   const mapCanvasRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<google.maps.Map | null>(null);
   const markersRef = useRef<Array<{ id: string; marker: google.maps.Marker; listener: google.maps.MapsEventListener }>>([]);
+  const cardRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  const lastScrolledAtmIdRef = useRef<string | null>(null);
 
   const searchInput = useMemo(() => buildSearchInput(target, radiusMiles, openNow), [openNow, radiusMiles, target]);
 
@@ -158,6 +160,25 @@ export function AtmLocatorPage() {
     }, 700);
     return () => window.clearTimeout(timeoutId);
   }, [selectedAtm]);
+
+  useEffect(() => {
+    if (!selectedAtmId) {
+      lastScrolledAtmIdRef.current = null;
+      return;
+    }
+    if (lastScrolledAtmIdRef.current === null) {
+      lastScrolledAtmIdRef.current = selectedAtmId;
+      return;
+    }
+    if (lastScrolledAtmIdRef.current === selectedAtmId) {
+      return;
+    }
+    cardRefs.current[selectedAtmId]?.scrollIntoView({
+      behavior: 'smooth',
+      block: 'nearest',
+    });
+    lastScrolledAtmIdRef.current = selectedAtmId;
+  }, [selectedAtmId]);
 
   useEffect(() => {
     if (!navigator.geolocation) {
@@ -288,69 +309,74 @@ export function AtmLocatorPage() {
             {center ? (
               <p className="muted">Showing Chase ATMs near <strong>{center.label}</strong>.</p>
             ) : null}
-            {!target && locationState !== 'requesting' ? (
-              <EmptyState
-                title="Search for nearby Chase ATMs"
-                description="Use your current location or enter a city, ZIP, or street address to load results."
-              />
-            ) : searchQuery.isPending || searchQuery.isFetching ? (
-              <p className="muted">Loading ATM results...</p>
-            ) : !atms.length ? (
-              <EmptyState
-                title="No nearby Chase ATMs found"
-                description="Try a wider radius or search a different area."
-              />
-            ) : (
-              <div className="list-stack">
-                {atms.map((atm, index) => (
-                  <div
-                    className={atm.id === selectedAtmId ? 'atm-card atm-card--selected' : 'atm-card'}
-                    key={atm.id}
-                    onClick={() => setSelectedAtmId(atm.id)}
-                    onKeyDown={(event) => {
-                      if (event.key === 'Enter' || event.key === ' ') {
-                        event.preventDefault();
-                        setSelectedAtmId(atm.id);
-                      }
-                    }}
-                    role="button"
-                    tabIndex={0}
-                  >
-                    <div className="atm-card__content">
-                      <div className="atm-card__primary">
-                        <strong>{index + 1}. {atm.name}</strong>
-                        <p className="muted">{[atm.address, `${atm.city}, ${atm.state} ${atm.zip}`].filter(Boolean).join(' • ')}</p>
-                      </div>
-                      {atm.features.length ? (
-                        <div className="atm-card__features">
-                          {atm.features.map((feature) => (
-                            <span className="atm-feature" key={`${atm.id}-${feature}`}>
-                              {feature}
-                            </span>
-                          ))}
+            <div className="atm-results-scroll">
+              {!target && locationState !== 'requesting' ? (
+                <EmptyState
+                  title="Search for nearby Chase ATMs"
+                  description="Use your current location or enter a city, ZIP, or street address to load results."
+                />
+              ) : searchQuery.isPending || searchQuery.isFetching ? (
+                <p className="muted">Loading ATM results...</p>
+              ) : !atms.length ? (
+                <EmptyState
+                  title="No nearby Chase ATMs found"
+                  description="Try a wider radius or search a different area."
+                />
+              ) : (
+                <div className="list-stack">
+                  {atms.map((atm, index) => (
+                    <div
+                      className={atm.id === selectedAtmId ? 'atm-card atm-card--selected' : 'atm-card'}
+                      key={atm.id}
+                      ref={(element) => {
+                        cardRefs.current[atm.id] = element;
+                      }}
+                      onClick={() => setSelectedAtmId(atm.id)}
+                      onKeyDown={(event) => {
+                        if (event.key === 'Enter' || event.key === ' ') {
+                          event.preventDefault();
+                          setSelectedAtmId(atm.id);
+                        }
+                      }}
+                      role="button"
+                      tabIndex={0}
+                    >
+                      <div className="atm-card__content">
+                        <div className="atm-card__primary">
+                          <strong>{index + 1}. {atm.name}</strong>
+                          <p className="muted">{[atm.address, `${atm.city}, ${atm.state} ${atm.zip}`].filter(Boolean).join(' • ')}</p>
                         </div>
-                      ) : null}
-                    </div>
-                    <div className="atm-card__meta">
-                      <div className="atm-card__distance">
-                        <strong>{atm.distanceMiles.toFixed(1)} mi</strong>
-                        <small>{atm.hours}</small>
+                        {atm.features.length ? (
+                          <div className="atm-card__features">
+                            {atm.features.map((feature) => (
+                              <span className="atm-feature" key={`${atm.id}-${feature}`}>
+                                {feature}
+                              </span>
+                            ))}
+                          </div>
+                        ) : null}
                       </div>
-                      <Button
-                        type="button"
-                        variant="secondary"
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          window.open(atm.directionsUrl, '_blank', 'noopener,noreferrer');
-                        }}
-                      >
-                        Directions
-                      </Button>
+                      <div className="atm-card__meta">
+                        <div className="atm-card__distance">
+                          <strong>{atm.distanceMiles.toFixed(1)} mi</strong>
+                          <small>{atm.hours}</small>
+                        </div>
+                        <Button
+                          type="button"
+                          variant="secondary"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            window.open(atm.directionsUrl, '_blank', 'noopener,noreferrer');
+                          }}
+                        >
+                          Directions
+                        </Button>
+                      </div>
                     </div>
-                  </div>
-                ))}
-              </div>
-            )}
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
         </Card>
         <Card className="map-panel">

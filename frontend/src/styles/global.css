@@ -819,6 +819,9 @@ small {
 
 .atm-search-panel {
   min-height: 28rem;
+  height: 100%;
+  display: grid;
+  grid-template-rows: auto auto auto 1fr;
 }
 
 .atm-search-form {
@@ -843,6 +846,17 @@ small {
 .atm-search-toggle {
   grid-auto-flow: column;
   align-items: center;
+}
+
+.atm-results-scroll {
+  min-height: 0;
+  max-height: 41rem;
+  overflow-y: auto;
+  padding-right: 0.35rem;
+}
+
+.atm-results-scroll .list-stack {
+  margin-top: 0;
 }
 
 .atm-card {

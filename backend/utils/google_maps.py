@@ -32,6 +32,34 @@ def _ensure_configured() -> str:
     )
 
 
+def _google_error_detail(response: httpx.Response, fallback: str) -> str:
+    try:
+        payload = response.json()
+    except ValueError:
+        return fallback
+
+    error = payload.get("error")
+    if isinstance(error, dict):
+        message = error.get("message")
+        status_text = error.get("status")
+        if message and status_text:
+            return f"{message} ({status_text})"
+        if message:
+            return str(message)
+        return str(error)
+
+    status_value = payload.get("status")
+    error_message = payload.get("error_message")
+    if error_message and status_value:
+        return f"{error_message} ({status_value})"
+    if error_message:
+        return str(error_message)
+    if status_value:
+        return str(status_value)
+
+    return fallback
+
+
 def _distance_miles(lat1: float, lng1: float, lat2: float, lng2: float) -> float:
     lat1_rad = math.radians(lat1)
     lat2_rad = math.radians(lat2)
@@ -44,6 +72,38 @@ def _distance_miles(lat1: float, lng1: float, lat2: float, lng2: float) -> float
     )
     earth_radius_miles = 3958.7613
     return earth_radius_miles * (2 * math.atan2(math.sqrt(haversine), math.sqrt(1 - haversine)))
+
+
+def _clamp_latitude(value: float) -> float:
+    return max(-90.0, min(90.0, value))
+
+
+def _normalize_longitude(value: float) -> float:
+    while value < -180.0:
+        value += 360.0
+    while value > 180.0:
+        value -= 360.0
+    return value
+
+
+def _rectangle_for_radius(center: SearchCenter, radius_miles: int) -> dict[str, dict[str, float]]:
+    lat_delta = radius_miles / 69.0
+    lng_divisor = max(math.cos(math.radians(center.latitude)), 0.01)
+    lng_delta = radius_miles / (69.172 * lng_divisor)
+    low_lat = _clamp_latitude(center.latitude - lat_delta)
+    high_lat = _clamp_latitude(center.latitude + lat_delta)
+    low_lng = _normalize_longitude(center.longitude - lng_delta)
+    high_lng = _normalize_longitude(center.longitude + lng_delta)
+    return {
+        "low": {
+            "latitude": low_lat,
+            "longitude": low_lng,
+        },
+        "high": {
+            "latitude": high_lat,
+            "longitude": high_lng,
+        },
+    }
 
 
 def _first_component(components: list[dict[str, Any]], component_type: str, *, short: bool = False) -> str:
@@ -93,6 +153,18 @@ def _build_feature_chips(open_now: bool | None) -> list[str]:
     return []
 
 
+def _normalized_address_key(atm: dict[str, Any]) -> str:
+    return "|".join(
+        str(atm.get(part, "")).strip().lower()
+        for part in ["address", "city", "state", "zip"]
+    )
+
+
+def _atm_priority(atm: dict[str, Any]) -> tuple[int, float]:
+    source_type = str(atm.get("_sourceType") or "")
+    return (0 if source_type == "atm" else 1, float(atm.get("distanceMiles") or 0.0))
+
+
 def _map_place(place: dict[str, Any], *, center_lat: float, center_lng: float) -> dict[str, Any]:
     location = place.get("location") or {}
     latitude = float(location.get("latitude") or 0.0)
@@ -132,7 +204,10 @@ async def geocode_query(query: str) -> SearchCenter:
     except httpx.RequestError as exc:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"Unable to reach Google geocoding: {exc}") from exc
     except httpx.HTTPStatusError as exc:
-        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Google geocoding request failed.") from exc
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=_google_error_detail(exc.response, "Google geocoding request failed."),
+        ) from exc
 
     payload = response.json()
     if payload.get("status") != "OK" or not payload.get("results"):
@@ -155,72 +230,98 @@ async def search_chase_atms(
     limit: int,
 ) -> list[dict[str, Any]]:
     api_key = _ensure_configured()
-    remaining = limit
-    next_page_token: str | None = None
-    places: list[dict[str, Any]] = []
+    rectangle = _rectangle_for_radius(center, radius_miles)
+    query_variants = [
+        {"textQuery": "Chase ATM", "includedType": "atm"},
+        {"textQuery": "Chase Bank", "includedType": "bank"},
+    ]
+    deduped_places: dict[str, tuple[str, dict[str, Any]]] = {}
 
-    while remaining > 0:
-        body: dict[str, Any] = {
-            "textQuery": "Chase ATM",
-            "pageSize": min(20, remaining),
-            "includedType": "atm",
-            "strictTypeFiltering": True,
-            "rankPreference": "DISTANCE",
-            "locationRestriction": {
-                "circle": {
-                    "center": {
-                        "latitude": center.latitude,
-                        "longitude": center.longitude,
-                    },
-                    "radius": float(radius_miles * METERS_PER_MILE),
-                }
-            },
-        }
-        if open_now:
-            body["openNow"] = True
-        if next_page_token:
-            body["pageToken"] = next_page_token
+    for variant in query_variants:
+        next_page_token: str | None = None
+        remaining_pages = 3
 
-        try:
-            async with httpx.AsyncClient(timeout=httpx.Timeout(20.0)) as client:
-                response = await client.post(
-                    PLACES_SEARCH_TEXT_URL,
-                    headers={
-                        "X-Goog-Api-Key": api_key,
-                        "X-Goog-FieldMask": ",".join(
-                            [
-                                "places.id",
-                                "places.displayName",
-                                "places.formattedAddress",
-                                "places.addressComponents",
-                                "places.location",
-                                "places.currentOpeningHours.openNow",
-                                "nextPageToken",
-                            ]
-                        ),
-                    },
-                    json=body,
-                )
-                response.raise_for_status()
-        except httpx.TimeoutException as exc:
-            raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Google Places ATM search timed out.") from exc
-        except httpx.RequestError as exc:
-            raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"Unable to reach Google Places: {exc}") from exc
-        except httpx.HTTPStatusError as exc:
-            raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Google Places ATM search failed.") from exc
+        while remaining_pages > 0:
+            body: dict[str, Any] = {
+                "textQuery": variant["textQuery"],
+                "pageSize": 20,
+                "includedType": variant["includedType"],
+                "strictTypeFiltering": False,
+                "rankPreference": "DISTANCE",
+                "regionCode": "US",
+                "locationRestriction": {
+                    "rectangle": rectangle,
+                },
+            }
+            if open_now:
+                body["openNow"] = True
+            if next_page_token:
+                body["pageToken"] = next_page_token
 
-        payload = response.json()
-        results = payload.get("places") or []
-        places.extend(results)
-        remaining = limit - len(places)
-        next_page_token = payload.get("nextPageToken")
-        if not next_page_token or not results:
-            break
+            try:
+                async with httpx.AsyncClient(timeout=httpx.Timeout(20.0)) as client:
+                    response = await client.post(
+                        PLACES_SEARCH_TEXT_URL,
+                        headers={
+                            "X-Goog-Api-Key": api_key,
+                            "X-Goog-FieldMask": ",".join(
+                                [
+                                    "places.id",
+                                    "places.displayName",
+                                    "places.formattedAddress",
+                                    "places.addressComponents",
+                                    "places.location",
+                                    "places.currentOpeningHours.openNow",
+                                    "nextPageToken",
+                                ]
+                            ),
+                        },
+                        json=body,
+                    )
+                    response.raise_for_status()
+            except httpx.TimeoutException as exc:
+                raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Google Places ATM search timed out.") from exc
+            except httpx.RequestError as exc:
+                raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"Unable to reach Google Places: {exc}") from exc
+            except httpx.HTTPStatusError as exc:
+                raise HTTPException(
+                    status_code=status.HTTP_502_BAD_GATEWAY,
+                    detail=_google_error_detail(exc.response, "Google Places ATM search failed."),
+                ) from exc
+
+            payload = response.json()
+            places = payload.get("places") or []
+            for place in places:
+                place_id = place.get("id") or place.get("name")
+                if not place_id:
+                    continue
+                deduped_places[place_id] = (variant["includedType"], place)
+
+            next_page_token = payload.get("nextPageToken")
+            remaining_pages -= 1
+            if not next_page_token:
+                break
 
     mapped = [
-        _map_place(place, center_lat=center.latitude, center_lng=center.longitude)
-        for place in places
+        {
+            **_map_place(place, center_lat=center.latitude, center_lng=center.longitude),
+            "_sourceType": source_type,
+        }
+        for source_type, place in deduped_places.values()
         if "chase" in (((place.get("displayName") or {}).get("text")) or "").lower()
     ]
+    mapped = [atm for atm in mapped if atm["distanceMiles"] <= radius_miles]
+    by_address: dict[str, dict[str, Any]] = {}
+    for atm in mapped:
+        address_key = _normalized_address_key(atm)
+        if not address_key:
+            address_key = f"id:{atm['id']}"
+        existing = by_address.get(address_key)
+        if existing is None or _atm_priority(atm) < _atm_priority(existing):
+            by_address[address_key] = atm
+    mapped = list(by_address.values())
     mapped.sort(key=lambda atm: atm["distanceMiles"])
-    return mapped[:limit]
+    return [
+        {key: value for key, value in atm.items() if not key.startswith("_")}
+        for atm in mapped[:limit]
+    ]
