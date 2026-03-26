@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any
 from urllib.parse import urlencode
 
@@ -153,6 +154,34 @@ def _build_feature_chips(open_now: bool | None) -> list[str]:
     return []
 
 
+def _format_hours(place: dict[str, Any], open_now: bool | None) -> str:
+    current_hours = place.get("currentOpeningHours") or {}
+    regular_hours = place.get("regularOpeningHours") or {}
+    weekday_descriptions = (
+        current_hours.get("weekdayDescriptions")
+        or regular_hours.get("weekdayDescriptions")
+        or []
+    )
+    if weekday_descriptions:
+        today_name = datetime.now().strftime("%A")
+        today_entry = next(
+            (
+                description
+                for description in weekday_descriptions
+                if str(description).startswith(f"{today_name}:")
+            ),
+            None,
+        )
+        if today_entry:
+            return str(today_entry)
+        return str(weekday_descriptions[0])
+    if open_now is True:
+        return "Open now"
+    if open_now is False:
+        return "Closed now"
+    return "Hours unavailable"
+
+
 def _normalized_address_key(atm: dict[str, Any]) -> str:
     return "|".join(
         str(atm.get(part, "")).strip().lower()
@@ -162,7 +191,17 @@ def _normalized_address_key(atm: dict[str, Any]) -> str:
 
 def _atm_priority(atm: dict[str, Any]) -> tuple[int, float]:
     source_type = str(atm.get("_sourceType") or "")
-    return (0 if source_type == "atm" else 1, float(atm.get("distanceMiles") or 0.0))
+    open_now = atm.get("openNow")
+    has_hours = atm.get("_hasHoursData", False)
+    return (
+        0 if source_type == "atm" and has_hours and open_now is not None else
+        1 if source_type == "bank" and has_hours and open_now is not None else
+        2 if source_type == "atm" and has_hours else
+        3 if source_type == "bank" and has_hours else
+        4 if source_type == "atm" else
+        5,
+        float(atm.get("distanceMiles") or 0.0),
+    )
 
 
 def _map_place(place: dict[str, Any], *, center_lat: float, center_lng: float) -> dict[str, Any]:
@@ -171,6 +210,11 @@ def _map_place(place: dict[str, Any], *, center_lat: float, center_lng: float) -
     longitude = float(location.get("longitude") or 0.0)
     display_name = ((place.get("displayName") or {}).get("text")) or "Chase ATM"
     open_now = (place.get("currentOpeningHours") or {}).get("openNow")
+    has_hours_data = bool(
+        (place.get("currentOpeningHours") or {}).get("weekdayDescriptions")
+        or (place.get("regularOpeningHours") or {}).get("weekdayDescriptions")
+        or open_now is not None
+    )
     street, city, state, zip_code = _build_address_fields(place)
 
     return {
@@ -184,9 +228,10 @@ def _map_place(place: dict[str, Any], *, center_lat: float, center_lng: float) -
         "longitude": longitude,
         "distanceMiles": round(_distance_miles(center_lat, center_lng, latitude, longitude), 1),
         "features": _build_feature_chips(open_now),
-        "hours": "Open now" if open_now is True else "Closed now" if open_now is False else "Hours unavailable",
+        "hours": _format_hours(place, open_now),
         "openNow": open_now,
         "directionsUrl": _build_directions_url(display_name, latitude, longitude, place.get("id") or ""),
+        "_hasHoursData": has_hours_data,
     }
 
 
@@ -272,6 +317,8 @@ async def search_chase_atms(
                                     "places.addressComponents",
                                     "places.location",
                                     "places.currentOpeningHours.openNow",
+                                    "places.currentOpeningHours.weekdayDescriptions",
+                                    "places.regularOpeningHours.weekdayDescriptions",
                                     "nextPageToken",
                                 ]
                             ),
