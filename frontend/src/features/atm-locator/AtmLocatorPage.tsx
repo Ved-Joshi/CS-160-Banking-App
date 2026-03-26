@@ -52,6 +52,7 @@ export function AtmLocatorPage() {
     queryKey: ['atm-search', searchInput],
     queryFn: () => atmService.search(searchInput!),
     enabled: Boolean(searchInput),
+    staleTime: 10 * 60 * 1000,
   });
 
   const atms = searchQuery.data?.atms ?? [];
@@ -190,6 +191,7 @@ export function AtmLocatorPage() {
     navigator.geolocation.getCurrentPosition(
       (position) => {
         setLocationState('ready');
+        setSearchText('');
         setTarget({
           mode: 'coords',
           lat: position.coords.latitude,
@@ -228,6 +230,7 @@ export function AtmLocatorPage() {
     navigator.geolocation.getCurrentPosition(
       (position) => {
         setLocationState('ready');
+        setSearchText('');
         setTarget({
           mode: 'coords',
           lat: position.coords.latitude,
