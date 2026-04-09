@@ -65,6 +65,8 @@ export interface BankAccount {
   routingNumber: string;
   openedAt: string;
   closeEligible: boolean;
+  canClose: boolean;
+  closeReasons: string[];
   balances: BalanceSummary;
 }
 

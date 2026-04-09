@@ -1,14 +1,20 @@
 import { useQuery } from '@tanstack/react-query';
 import { useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { Card, DataTable, EmptyState, Field, PageHeader, StatusChip } from '../../components/ui';
 import { accountsService, transactionsService } from '../../lib/bankingApi';
 import { formatCurrency, formatDate } from '../../lib/format';
 
 export function TransactionsPage() {
+  const [searchParams] = useSearchParams();
   const { data: accounts = [] } = useQuery({ queryKey: ['accounts'], queryFn: accountsService.list });
   const { data: transactions = [] } = useQuery({ queryKey: ['transactions'], queryFn: transactionsService.list });
-  const [accountId, setAccountId] = useState('all');
+  const requestedAccountId = searchParams.get('accountId') ?? 'all';
+  const derivedAccountId = requestedAccountId === 'all' || accounts.some((account) => account.id === requestedAccountId)
+    ? requestedAccountId
+    : 'all';
+  const [accountIdOverride, setAccountIdOverride] = useState('');
+  const accountId = accountIdOverride || derivedAccountId;
   const [type, setType] = useState('all');
   const [status, setStatus] = useState('all');
 
@@ -43,7 +49,7 @@ export function TransactionsPage() {
       <Card>
         <div className="grid-three">
           <Field label="Account">
-            <select disabled={!accounts.length} value={accountId} onChange={(event) => setAccountId(event.target.value)}>
+            <select disabled={!accounts.length} value={accountId} onChange={(event) => setAccountIdOverride(event.target.value)}>
               <option value="all">All accounts</option>
               {accounts.map((account) => (
                 <option key={account.id} value={account.id}>

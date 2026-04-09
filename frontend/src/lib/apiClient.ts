@@ -21,6 +21,16 @@ function normalizeErrorDetail(detail: unknown, fallback: string): string {
     return detail.map((item) => (typeof item === 'string' ? item : JSON.stringify(item))).join(', ');
   }
   if (detail && typeof detail === 'object') {
+    const message = 'message' in detail && typeof detail.message === 'string' ? detail.message : '';
+    const reasons = 'reasons' in detail && Array.isArray(detail.reasons)
+      ? detail.reasons.filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
+      : [];
+    if (message && reasons.length) {
+      return `${message} ${reasons.join(' ')}`;
+    }
+    if (message) {
+      return message;
+    }
     return JSON.stringify(detail);
   }
   return fallback;

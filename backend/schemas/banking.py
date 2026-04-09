@@ -27,6 +27,8 @@ class BankAccount(BaseModel):
     routingNumber: str
     openedAt: str
     closeEligible: bool
+    canClose: bool
+    closeReasons: list[str]
     balances: BalanceSummary
 
 

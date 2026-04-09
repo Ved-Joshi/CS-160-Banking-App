@@ -2,7 +2,7 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
 import { useForm } from 'react-hook-form';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { z } from 'zod';
 import { Button, Card, EmptyState, Field, InlineAlert, PageHeader, StatusChip } from '../../components/ui';
 import { accountsService, transfersService } from '../../lib/bankingApi';
@@ -18,6 +18,8 @@ const transferSchema = z.object({
 
 export function TransfersPage() {
   const queryClient = useQueryClient();
+  const [searchParams] = useSearchParams();
+  const preferredFromAccountId = searchParams.get('fromAccountId') ?? '';
   const { data: accounts = [] } = useQuery({ queryKey: ['accounts'], queryFn: accountsService.list });
   const [review, setReview] = useState<z.infer<typeof transferSchema> | null>(null);
   const mutation = useMutation({
@@ -46,8 +48,11 @@ export function TransfersPage() {
     if (!hasTransferAccounts) return;
     const currentFrom = form.getValues('fromAccountId');
     const currentTo = form.getValues('toAccountId');
-    const nextFrom = accounts[0]?.id ?? '';
-    const nextTo = accounts[1]?.id ?? '';
+    const requestedFrom = accounts.some((account) => account.id === preferredFromAccountId)
+      ? preferredFromAccountId
+      : '';
+    const nextFrom = requestedFrom || accounts[0]?.id || '';
+    const nextTo = accounts.find((account) => account.id !== nextFrom)?.id ?? '';
 
     if (!currentFrom || !accounts.some((account) => account.id === currentFrom)) {
       form.setValue('fromAccountId', nextFrom);
@@ -56,7 +61,7 @@ export function TransfersPage() {
     if (!currentTo || !accounts.some((account) => account.id === currentTo) || currentTo === nextFrom) {
       form.setValue('toAccountId', nextTo);
     }
-  }, [accounts, form, hasTransferAccounts]);
+  }, [accounts, form, hasTransferAccounts, preferredFromAccountId]);
 
   return (
     <div className="stack-xl">

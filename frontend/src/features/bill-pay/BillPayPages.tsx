@@ -2,7 +2,7 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect } from 'react';
 import { useForm } from 'react-hook-form';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { z } from 'zod';
 import { Button, Card, DataTable, EmptyState, Field, InlineAlert, PageHeader, StatusChip } from '../../components/ui';
 import { accountsService, payeesService, paymentsService } from '../../lib/bankingApi';
@@ -18,6 +18,8 @@ const paymentSchema = z.object({
 
 export function BillPayPage() {
   const queryClient = useQueryClient();
+  const [searchParams] = useSearchParams();
+  const preferredAccountId = searchParams.get('accountId') ?? '';
   const { data: payees = [] } = useQuery({ queryKey: ['payees'], queryFn: payeesService.list });
   const { data: payments = [] } = useQuery({ queryKey: ['payments'], queryFn: paymentsService.list });
   const { data: accounts = [] } = useQuery({ queryKey: ['accounts'], queryFn: accountsService.list });
@@ -44,10 +46,13 @@ export function BillPayPage() {
   useEffect(() => {
     if (!hasAccounts) return;
     const currentAccountId = form.getValues('accountId');
+    const requestedAccountId = accounts.some((account) => account.id === preferredAccountId)
+      ? preferredAccountId
+      : '';
     if (!currentAccountId || !accounts.some((account) => account.id === currentAccountId)) {
-      form.setValue('accountId', accounts[0]?.id ?? '');
+      form.setValue('accountId', requestedAccountId || accounts[0]?.id || '');
     }
-  }, [accounts, form, hasAccounts]);
+  }, [accounts, form, hasAccounts, preferredAccountId]);
 
   useEffect(() => {
     if (!hasPayees) return;

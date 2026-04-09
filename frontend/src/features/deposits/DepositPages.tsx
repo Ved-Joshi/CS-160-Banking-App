@@ -2,7 +2,7 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
 import { useForm } from 'react-hook-form';
-import { Link, useNavigate, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { z } from 'zod';
 import { Button, Card, DataTable, EmptyState, Field, PageHeader, StatusChip } from '../../components/ui';
 import { accountsService, depositsService } from '../../lib/bankingApi';
@@ -19,6 +19,8 @@ const depositSchema = z.object({
 export function DepositsPage() {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const preferredAccountId = searchParams.get('accountId') ?? '';
   const [selectedUploadFiles, setSelectedUploadFiles] = useState<{
     front: File | null;
     back: File | null;
@@ -96,10 +98,13 @@ export function DepositsPage() {
   useEffect(() => {
     if (!hasAccounts) return;
     const currentAccountId = form.getValues('accountId');
+    const requestedAccountId = accounts.some((account) => account.id === preferredAccountId)
+      ? preferredAccountId
+      : '';
     if (!currentAccountId || !accounts.some((account) => account.id === currentAccountId)) {
-      form.setValue('accountId', accounts[0]?.id ?? '');
+      form.setValue('accountId', requestedAccountId || accounts[0]?.id || '');
     }
-  }, [accounts, form, hasAccounts]);
+  }, [accounts, form, hasAccounts, preferredAccountId]);
 
   const rows = deposits.map((deposit) => [
     <Link key={`${deposit.id}-link`} className="text-link" to={`/app/deposits/${deposit.id}`}>
