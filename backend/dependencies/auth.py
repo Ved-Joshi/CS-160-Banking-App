@@ -1,4 +1,4 @@
-from fastapi import Header, HTTPException, status
+from fastapi import Depends, Header, HTTPException, status
 
 from utils.supabase import SupabaseUser, supabase_client
 

@@ -149,9 +149,87 @@ def map_transfer_status(value: str) -> str:
     }.get(value, "PENDING")
 
 
-def map_account(row: dict) -> BankAccount:
+def build_close_reasons(
+    row: dict,
+    *,
+    pending_transaction_accounts: set[str],
+    pending_deposit_accounts: set[str],
+    blocked_payment_accounts: set[str],
+) -> list[str]:
+    reasons: list[str] = []
+    status_value = row.get("status", "open")
+    if status_value != "open":
+        reasons.append("Only open accounts can be closed.")
+
+    available_balance_cents = int(row.get("available_balance_cents") or 0)
+    current_balance_cents = int(row.get("current_balance_cents") or 0)
+    if available_balance_cents != 0 or current_balance_cents != 0:
+        reasons.append("Available and current balances must both be $0.00.")
+
+    account_id = row.get("id")
+    if account_id in pending_transaction_accounts:
+        reasons.append("Pending transactions must clear before you close this account.")
+    if account_id in pending_deposit_accounts:
+        reasons.append("Pending deposits must finish review before you close this account.")
+    if account_id in blocked_payment_accounts:
+        reasons.append("Scheduled or processing bill payments must be resolved before you close this account.")
+    return reasons
+
+
+async def get_close_eligibility_context(user_id: str) -> dict[str, set[str]]:
+    pending_transactions = await supabase_client.select_rows(
+        "transactions",
+        select="account_id",
+        filters={
+            "user_id": f"eq.{user_id}",
+            "status": "eq.pending",
+        },
+    )
+    pending_deposits = await supabase_client.select_rows(
+        "deposits",
+        select="account_id",
+        filters={
+            "user_id": f"eq.{user_id}",
+            "status": "in.(submitted,under_review)",
+        },
+    )
+    blocked_payments = await supabase_client.select_rows(
+        "bill_payments",
+        select="account_id",
+        filters={
+            "user_id": f"eq.{user_id}",
+            "status": "in.(scheduled,processing)",
+        },
+    )
+    return {
+        "pending_transaction_accounts": {
+            row["account_id"] for row in pending_transactions if row.get("account_id")
+        },
+        "pending_deposit_accounts": {
+            row["account_id"] for row in pending_deposits if row.get("account_id")
+        },
+        "blocked_payment_accounts": {
+            row["account_id"] for row in blocked_payments if row.get("account_id")
+        },
+    }
+
+
+def map_account(
+    row: dict,
+    *,
+    pending_transaction_accounts: set[str] | None = None,
+    pending_deposit_accounts: set[str] | None = None,
+    blocked_payment_accounts: set[str] | None = None,
+) -> BankAccount:
     nickname = row.get("nickname") or f"{map_account_type(row.get('account_type', 'checking'))} Account"
     last4 = row.get("account_last4") or "----"
+    close_reasons = build_close_reasons(
+        row,
+        pending_transaction_accounts=pending_transaction_accounts or set(),
+        pending_deposit_accounts=pending_deposit_accounts or set(),
+        blocked_payment_accounts=blocked_payment_accounts or set(),
+    )
+    can_close = len(close_reasons) == 0
     return BankAccount(
         id=row["id"],
         nickname=nickname,
@@ -160,7 +238,9 @@ def map_account(row: dict) -> BankAccount:
         status=map_account_status(row.get("status", "open")),
         routingNumber=row.get("routing_number") or "N/A",
         openedAt=row.get("opened_at") or row.get("created_at") or "",
-        closeEligible=bool(row.get("close_eligible")),
+        closeEligible=can_close,
+        canClose=can_close,
+        closeReasons=close_reasons,
         balances={
             "availableBalance": cents_to_amount(row.get("available_balance_cents")),
             "currentBalance": cents_to_amount(row.get("current_balance_cents")),
@@ -270,17 +350,18 @@ def format_address(profile: dict) -> str:
     return ", ".join(part for part in [street, locality] if part) or "—"
 
 
-async def require_owned_account(account_id: str, user_id: str) -> dict:
-    rows = await supabase_client.select_rows(
-        "accounts",
-        filters={
-            "id": f"eq.{account_id}",
-            "user_id": f"eq.{user_id}",
-        },
-        limit=1,
-    )
+async def require_owned_account(account_id: str, user_id: str, *, require_open: bool = False) -> dict:
+    filters = {
+        "id": f"eq.{account_id}",
+        "user_id": f"eq.{user_id}",
+    }
+    if require_open:
+        filters["status"] = "eq.open"
+
+    rows = await supabase_client.select_rows("accounts", filters=filters, limit=1)
     if not rows:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Account not found.")
+        detail = "Open account not found." if require_open else "Account not found."
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=detail)
     return rows[0]
 
 
@@ -370,10 +451,22 @@ async def get_profile(current_user: SupabaseUser = Depends(get_current_user)) ->
 async def list_accounts(current_user: SupabaseUser = Depends(get_current_user)) -> list[BankAccount]:
     rows = await supabase_client.select_rows(
         "accounts",
-        filters={"user_id": f"eq.{current_user.id}"},
+        filters={
+            "user_id": f"eq.{current_user.id}",
+            "status": "eq.open",
+        },
         order="opened_at.asc",
     )
-    return [map_account(row) for row in rows]
+    close_context = await get_close_eligibility_context(current_user.id)
+    return [
+        map_account(
+            row,
+            pending_transaction_accounts=close_context["pending_transaction_accounts"],
+            pending_deposit_accounts=close_context["pending_deposit_accounts"],
+            blocked_payment_accounts=close_context["blocked_payment_accounts"],
+        )
+        for row in rows
+    ]
 
 
 @router.get("/accounts/{account_id}", response_model=BankAccount)
@@ -383,12 +476,19 @@ async def get_account(account_id: str, current_user: SupabaseUser = Depends(get_
         filters={
             "id": f"eq.{account_id}",
             "user_id": f"eq.{current_user.id}",
+            "status": "eq.open",
         },
         limit=1,
     )
     if not rows:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Account not found.")
-    return map_account(rows[0])
+    close_context = await get_close_eligibility_context(current_user.id)
+    return map_account(
+        rows[0],
+        pending_transaction_accounts=close_context["pending_transaction_accounts"],
+        pending_deposit_accounts=close_context["pending_deposit_accounts"],
+        blocked_payment_accounts=close_context["blocked_payment_accounts"],
+    )
 
 
 @router.post("/accounts", response_model=BankAccount, status_code=status.HTTP_201_CREATED)
@@ -424,6 +524,44 @@ async def create_account(
         },
     )
     return map_account(created)
+
+
+@router.post("/accounts/{account_id}/close", status_code=status.HTTP_204_NO_CONTENT)
+async def close_account(account_id: str, current_user: SupabaseUser = Depends(get_current_user)) -> None:
+    result = await supabase_client.rpc(
+        "close_customer_account",
+        {
+            "p_user_id": current_user.id,
+            "p_account_id": account_id,
+        },
+    )
+    if not isinstance(result, dict):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="This account is no longer available to close.",
+        )
+
+    if result.get("closed"):
+        return
+
+    reasons = [
+        reason
+        for reason in result.get("reasons", [])
+        if isinstance(reason, str) and reason.strip()
+    ]
+    response_status = int(result.get("status") or status.HTTP_409_CONFLICT)
+    if response_status == status.HTTP_404_NOT_FOUND:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=reasons[0] if reasons else "Account not found.",
+        )
+    raise HTTPException(
+        status_code=status.HTTP_409_CONFLICT,
+        detail={
+            "message": "This account can't be closed yet.",
+            "reasons": reasons or ["This account is no longer available to close."],
+        },
+    )
 
 
 @router.get("/transactions", response_model=list[Transaction])
@@ -515,7 +653,7 @@ async def create_payment(
     payload: CreateScheduledPaymentIn,
     current_user: SupabaseUser = Depends(get_current_user),
 ) -> ScheduledPayment:
-    account = await require_owned_account(payload.accountId, current_user.id)
+    account = await require_owned_account(payload.accountId, current_user.id, require_open=True)
     payee = await require_owned_payee(payload.payeeId, current_user.id)
 
     created = await supabase_client.insert_row(
@@ -593,7 +731,7 @@ async def create_deposit(
     payload: CreateDepositIn,
     current_user: SupabaseUser = Depends(get_current_user),
 ) -> Deposit:
-    account = await require_owned_account(payload.accountId, current_user.id)
+    account = await require_owned_account(payload.accountId, current_user.id, require_open=True)
     for image_path in [payload.frontImagePath, payload.backImagePath]:
         if not image_path.startswith(f"{current_user.id}/"):
             raise HTTPException(

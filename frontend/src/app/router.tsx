@@ -1,6 +1,6 @@
 import { Navigate, createBrowserRouter } from 'react-router-dom';
 import { AppShell } from '../components/layout';
-import { AccountsPage, AccountDetailPage } from '../features/accounts/AccountsPages';
+import { AccountsPage, AccountDetailPage, OpenAccountPage } from '../features/accounts/AccountsPages';
 import { AtmLocatorPage } from '../features/atm-locator/AtmLocatorPage';
 import { BillPayPage, PayeesPage } from '../features/bill-pay/BillPayPages';
 import { DashboardPage } from '../features/dashboard/DashboardPage';
@@ -30,6 +30,7 @@ export const router = createBrowserRouter([
           { index: true, element: <Navigate replace to="/app/dashboard" /> },
           { path: 'dashboard', element: <DashboardPage /> },
           { path: 'accounts', element: <AccountsPage /> },
+          { path: 'accounts/new', element: <OpenAccountPage /> },
           { path: 'accounts/:accountId', element: <AccountDetailPage /> },
           { path: 'transfers', element: <TransfersPage /> },
           { path: 'bill-pay', element: <BillPayPage /> },

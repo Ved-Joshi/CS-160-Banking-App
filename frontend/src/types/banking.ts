@@ -56,6 +56,10 @@ export interface BalanceSummary {
   currentBalance: number;
 }
 
+/**
+ * Customer account shape returned by the banking API.
+ * `closeEligible` is kept for backward compatibility and mirrors `canClose`.
+ */
 export interface BankAccount {
   id: string;
   nickname: string;
@@ -64,7 +68,12 @@ export interface BankAccount {
   status: 'Open' | 'Restricted';
   routingNumber: string;
   openedAt: string;
+  /** Deprecated. Use `canClose` instead. */
   closeEligible: boolean;
+  /** True only when the account can be closed immediately. */
+  canClose: boolean;
+  /** User-facing reasons that currently block account closure. */
+  closeReasons: string[];
   balances: BalanceSummary;
 }
 

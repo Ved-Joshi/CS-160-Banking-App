@@ -38,6 +38,11 @@ export const accountsService = {
       body: input,
     });
   },
+  close(accountId: string): Promise<void> {
+    return apiRequest(`/api/accounts/${accountId}/close`, {
+      method: 'POST',
+    });
+  },
 };
 
 export const transactionsService = {

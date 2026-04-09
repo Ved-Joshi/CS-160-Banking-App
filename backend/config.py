@@ -15,7 +15,12 @@ class Settings(BaseSettings):
     PORT: int = 8000
     
     # CORS Configuration
-    ALLOWED_ORIGINS: list = ["http://localhost:5173", "http://localhost:3000"]
+    ALLOWED_ORIGINS: list = [
+        "http://localhost:5173",
+        "http://localhost:3000",
+        "http://127.0.0.1:5173",
+        "http://127.0.0.1:3000",
+    ]
 
     # JWT Configuration (used by backend/utils/security.py)
     JWT_SECRET: str = "change-me"
