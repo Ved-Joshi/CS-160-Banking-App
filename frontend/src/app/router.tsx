@@ -5,19 +5,21 @@ import { AtmLocatorPage } from '../features/atm-locator/AtmLocatorPage';
 import { BillPayPage, PayeesPage } from '../features/bill-pay/BillPayPages';
 import { DashboardPage } from '../features/dashboard/DashboardPage';
 import { DepositsPage, DepositDetailPage } from '../features/deposits/DepositPages';
-import { LoginPage, MfaPage, RegisterPage, ResetPasswordPage, WelcomePage } from '../features/auth/AuthPages';
+import { LoginPage, RegisterPage, ResetPasswordPage, WelcomePage } from '../features/auth/AuthPages';
 import { NotificationsPage } from '../features/notifications/NotificationsPage';
 import { SettingsPage } from '../features/settings/SettingsPage';
 import { TransactionsPage } from '../features/transactions/TransactionsPage';
 import { TransfersPage } from '../features/transfers/TransfersPage';
 import { ProtectedRoute } from './ProtectedRoute';
+import { AdminRoute } from './AdminRoute';
+import { AdminPage } from '../features/admin/AdminPage';
+import { AdminAccountsPage } from '../features/admin/AdminAccountsPage';
 
 export const router = createBrowserRouter([
   { path: '/', element: <WelcomePage /> },
   { path: '/login', element: <LoginPage /> },
   { path: '/register', element: <RegisterPage /> },
   { path: '/reset-password', element: <ResetPasswordPage /> },
-  { path: '/mfa', element: <MfaPage /> },
   {
     element: <ProtectedRoute />,
     children: [
@@ -40,6 +42,13 @@ export const router = createBrowserRouter([
           { path: 'settings', element: <SettingsPage /> },
         ],
       },
+    ],
+  },
+  {
+    element: <AdminRoute />,
+    children: [
+      { path: '/admin', element: <AdminPage /> },
+      { path: '/admin/accounts', element: <AdminAccountsPage /> },
     ],
   },
 ]);
