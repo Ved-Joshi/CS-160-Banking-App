@@ -350,17 +350,18 @@ def format_address(profile: dict) -> str:
     return ", ".join(part for part in [street, locality] if part) or "—"
 
 
-async def require_owned_account(account_id: str, user_id: str) -> dict:
-    rows = await supabase_client.select_rows(
-        "accounts",
-        filters={
-            "id": f"eq.{account_id}",
-            "user_id": f"eq.{user_id}",
-        },
-        limit=1,
-    )
+async def require_owned_account(account_id: str, user_id: str, *, require_open: bool = False) -> dict:
+    filters = {
+        "id": f"eq.{account_id}",
+        "user_id": f"eq.{user_id}",
+    }
+    if require_open:
+        filters["status"] = "eq.open"
+
+    rows = await supabase_client.select_rows("accounts", filters=filters, limit=1)
     if not rows:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Account not found.")
+        detail = "Open account not found." if require_open else "Account not found."
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=detail)
     return rows[0]
 
 
@@ -527,40 +528,40 @@ async def create_account(
 
 @router.post("/accounts/{account_id}/close", status_code=status.HTTP_204_NO_CONTENT)
 async def close_account(account_id: str, current_user: SupabaseUser = Depends(get_current_user)) -> None:
-    account = await require_owned_account(account_id, current_user.id)
-    close_context = await get_close_eligibility_context(current_user.id)
-    close_reasons = build_close_reasons(
-        account,
-        pending_transaction_accounts=close_context["pending_transaction_accounts"],
-        pending_deposit_accounts=close_context["pending_deposit_accounts"],
-        blocked_payment_accounts=close_context["blocked_payment_accounts"],
-    )
-    if close_reasons:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail={
-                "message": "This account can't be closed yet.",
-                "reasons": close_reasons,
-            },
-        )
-
-    rows = await supabase_client.update_rows(
-        "accounts",
+    result = await supabase_client.rpc(
+        "close_customer_account",
         {
-            "status": "closed",
-            "close_eligible": False,
-        },
-        filters={
-            "id": f"eq.{account_id}",
-            "user_id": f"eq.{current_user.id}",
-            "status": "eq.open",
+            "p_user_id": current_user.id,
+            "p_account_id": account_id,
         },
     )
-    if not rows:
+    if not isinstance(result, dict):
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="This account is no longer available to close.",
         )
+
+    if result.get("closed"):
+        return
+
+    reasons = [
+        reason
+        for reason in result.get("reasons", [])
+        if isinstance(reason, str) and reason.strip()
+    ]
+    response_status = int(result.get("status") or status.HTTP_409_CONFLICT)
+    if response_status == status.HTTP_404_NOT_FOUND:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=reasons[0] if reasons else "Account not found.",
+        )
+    raise HTTPException(
+        status_code=status.HTTP_409_CONFLICT,
+        detail={
+            "message": "This account can't be closed yet.",
+            "reasons": reasons or ["This account is no longer available to close."],
+        },
+    )
 
 
 @router.get("/transactions", response_model=list[Transaction])
@@ -652,7 +653,7 @@ async def create_payment(
     payload: CreateScheduledPaymentIn,
     current_user: SupabaseUser = Depends(get_current_user),
 ) -> ScheduledPayment:
-    account = await require_owned_account(payload.accountId, current_user.id)
+    account = await require_owned_account(payload.accountId, current_user.id, require_open=True)
     payee = await require_owned_payee(payload.payeeId, current_user.id)
 
     created = await supabase_client.insert_row(
@@ -730,7 +731,7 @@ async def create_deposit(
     payload: CreateDepositIn,
     current_user: SupabaseUser = Depends(get_current_user),
 ) -> Deposit:
-    account = await require_owned_account(payload.accountId, current_user.id)
+    account = await require_owned_account(payload.accountId, current_user.id, require_open=True)
     for image_path in [payload.frontImagePath, payload.backImagePath]:
         if not image_path.startswith(f"{current_user.id}/"):
             raise HTTPException(

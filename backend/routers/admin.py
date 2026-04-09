@@ -23,7 +23,7 @@ def map_account(row: dict) -> BankAccount:
         routingNumber=row.get("routing_number") or "N/A",
         openedAt=row.get("opened_at") or row.get("created_at") or "",
         closeEligible=bool(row.get("close_eligible")),
-        canClose=bool(row.get("close_eligible")),
+        canClose=False,
         closeReasons=[],
         balances={
             "availableBalance": (row.get("available_balance_cents") or 0) / 100,

@@ -238,21 +238,20 @@ export function OpenAccountPage() {
                 const content = accountTypeContent[type];
                 const selected = selectedType === type;
                 return (
-                  <button
-                    aria-checked={selected}
-                    className={selected ? 'product-card product-card--selected' : 'product-card'}
-                    key={type}
-                    onClick={() => {
-                      form.setValue('type', type, { shouldValidate: true });
-                      createAccount.reset();
-                    }}
-                    role="radio"
-                    type="button"
-                  >
+                  <label className={selected ? 'product-card product-card--selected' : 'product-card'} key={type}>
+                    <input
+                      {...form.register('type')}
+                      className="product-card__input"
+                      onChange={() => {
+                        createAccount.reset();
+                      }}
+                      type="radio"
+                      value={type}
+                    />
                     <span className="eyebrow">{content.eyebrow}</span>
                     <strong>{type}</strong>
                     <span>{content.summary}</span>
-                  </button>
+                  </label>
                 );
               })}
             </div>
@@ -424,7 +423,7 @@ export function AccountDetailPage() {
               <p className="eyebrow">Recent activity</p>
               <h3>Latest transactions</h3>
             </div>
-            <Link className="text-link" to="/app/transactions">See full statement</Link>
+            <Link className="text-link" to={`/app/transactions?accountId=${account.id}`}>See full statement</Link>
           </div>
           <div className="activity-feed">
             {accountTransactions.map((transaction) => (

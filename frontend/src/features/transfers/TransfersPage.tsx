@@ -52,13 +52,16 @@ export function TransfersPage() {
       ? preferredFromAccountId
       : '';
     const nextFrom = requestedFrom || accounts[0]?.id || '';
-    const nextTo = accounts.find((account) => account.id !== nextFrom)?.id ?? '';
+    const effectiveFrom = currentFrom && accounts.some((account) => account.id === currentFrom)
+      ? currentFrom
+      : nextFrom;
+    const nextTo = accounts.find((account) => account.id !== effectiveFrom)?.id ?? '';
 
     if (!currentFrom || !accounts.some((account) => account.id === currentFrom)) {
       form.setValue('fromAccountId', nextFrom);
     }
 
-    if (!currentTo || !accounts.some((account) => account.id === currentTo) || currentTo === nextFrom) {
+    if (!currentTo || !accounts.some((account) => account.id === currentTo) || currentTo === effectiveFrom) {
       form.setValue('toAccountId', nextTo);
     }
   }, [accounts, form, hasTransferAccounts, preferredFromAccountId]);

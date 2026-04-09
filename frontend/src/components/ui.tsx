@@ -195,7 +195,6 @@ export function Dialog({
 
   return createPortal(
     <div
-      aria-hidden="true"
       className="dialog-backdrop"
       onMouseDown={(event) => {
         if (event.target === event.currentTarget) {

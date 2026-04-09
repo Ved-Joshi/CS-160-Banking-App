@@ -26,7 +26,7 @@ function normalizeErrorDetail(detail: unknown, fallback: string): string {
       ? detail.reasons.filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
       : [];
     if (message && reasons.length) {
-      return `${message} ${reasons.join(' ')}`;
+      return `${message}: ${reasons.join('; ')}`;
     }
     if (message) {
       return message;

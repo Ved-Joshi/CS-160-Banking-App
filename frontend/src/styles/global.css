@@ -946,6 +946,11 @@ small {
   font-size: 1.25rem;
 }
 
+.dialog__close:focus-visible {
+  outline: 3px solid rgba(91, 118, 150, 0.45);
+  outline-offset: 2px;
+}
+
 .label-pill {
   display: inline-flex;
   align-items: center;
@@ -970,6 +975,7 @@ small {
 }
 
 .product-card {
+  position: relative;
   border: 1px solid rgba(212, 221, 232, 0.95);
   border-radius: 22px;
   padding: 1rem;
@@ -982,11 +988,24 @@ small {
   transition: transform 120ms ease, border-color 120ms ease, box-shadow 120ms ease;
 }
 
+.product-card__input {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
 .product-card:hover,
 .product-card:focus-visible {
   transform: translateY(-1px);
   border-color: rgba(177, 17, 31, 0.35);
   box-shadow: 0 12px 28px rgba(10, 20, 33, 0.08);
+}
+
+.product-card:has(.product-card__input:focus-visible) {
+  transform: translateY(-1px);
+  border-color: rgba(177, 17, 31, 0.45);
+  box-shadow: 0 0 0 4px rgba(177, 17, 31, 0.12), 0 12px 28px rgba(10, 20, 33, 0.08);
 }
 
 .product-card--selected {
