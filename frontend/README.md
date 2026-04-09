@@ -30,13 +30,18 @@ Responsive React web frontend for a mock-first banking application, built for th
 
 The app uses typed mock services in [`src/lib/mockApi.ts`](/Users/vedjoshi/CS-160-Banking-App/frontend/src/lib/mockApi.ts) and deterministic fixtures in [`src/mocks/data.ts`](/Users/vedjoshi/CS-160-Banking-App/frontend/src/mocks/data.ts). The UI is already organized around backend-ready service boundaries so FastAPI integration can replace the mock layer later.
 
-## Run
+## Run (Ensure docker is running)
 
 ```bash
-cd frontend
-npm install
-npm run dev
+docker-compose up --build -d
 ```
+To remove all volumes/rebuild after edits: 
+```bash
+docker-compose down -v
+```
+
+
+
 
 Create a `.env` file (see `.env.example`) with your Supabase project values:
 

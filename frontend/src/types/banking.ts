@@ -19,6 +19,7 @@ export interface User {
   firstName: string;
   middleName?: string | null;
   lastName: string;
+  roles?: string[];
 }
 
 export interface CustomerProfile {
@@ -31,7 +32,6 @@ export interface CustomerProfile {
   phone: string;
   address: string;
   memberSince: string;
-  mfaEnabled: boolean;
 }
 
 export interface RegistrationInput {

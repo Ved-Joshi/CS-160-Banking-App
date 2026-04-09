@@ -11,3 +11,9 @@ if (!url || !anonKey) {
 export const supabase = createClient(url, anonKey);
 export const supabaseUrl = url;
 export const supabaseAnonKey = anonKey;
+
+// Temporary debug: log app_metadata (including roles) to the console on load.
+supabase.auth.getSession().then(({ data }) => {
+  // eslint-disable-next-line no-console
+  console.log('supabase app_metadata', data.session?.user?.app_metadata);
+});

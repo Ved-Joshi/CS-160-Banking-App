@@ -177,4 +177,3 @@ class CustomerProfile(BaseModel):
     phone: str
     address: str
     memberSince: str
-    mfaEnabled: bool

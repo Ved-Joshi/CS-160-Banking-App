@@ -12,7 +12,7 @@ const navItems = [
 ] as const;
 
 export function AppShell() {
-  const { user, signOut } = useAuth();
+  const { user, signOut, isAdmin } = useAuth();
   const displayName = [user?.firstName, user?.lastName].filter(Boolean).join(' ') || user?.username || user?.email || 'Signed in';
   const initials = `${user?.firstName?.[0] ?? ''}${user?.lastName?.[0] ?? ''}`
     || user?.username?.slice(0, 2).toUpperCase()
@@ -34,6 +34,11 @@ export function AppShell() {
               {label}
             </NavLink>
           ))}
+          {isAdmin ? (
+            <NavLink className={({ isActive }) => (isActive ? 'nav-link nav-link--active' : 'nav-link')} to="/admin">
+              Admin
+            </NavLink>
+          ) : null}
         </nav>
         <div className="side-nav__footer">
           <div className="side-nav__profile">
