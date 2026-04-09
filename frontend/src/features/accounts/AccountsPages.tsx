@@ -187,6 +187,8 @@ export function OpenAccountPage() {
       type: 'Checking',
     },
   });
+  const nicknameField = form.register('nickname');
+  const typeField = form.register('type');
   const selectedType = useWatch({
     control: form.control,
     name: 'type',
@@ -240,9 +242,10 @@ export function OpenAccountPage() {
                 return (
                   <label className={selected ? 'product-card product-card--selected' : 'product-card'} key={type}>
                     <input
-                      {...form.register('type')}
+                      {...typeField}
                       className="product-card__input"
-                      onChange={() => {
+                      onChange={(event) => {
+                        typeField.onChange(event);
                         createAccount.reset();
                       }}
                       type="radio"
@@ -257,10 +260,10 @@ export function OpenAccountPage() {
             </div>
             <Field label="Account nickname" error={form.formState.errors.nickname?.message}>
               <input
-                {...form.register('nickname')}
+                {...nicknameField}
                 onChange={(event) => {
+                  nicknameField.onChange(event);
                   createAccount.reset();
-                  form.setValue('nickname', event.target.value, { shouldValidate: true, shouldDirty: true });
                 }}
                 placeholder={selectedType === 'Checking' ? 'Everyday Checking' : selectedType === 'Savings' ? 'Rainy Day Savings' : 'Travel Credit'}
               />
