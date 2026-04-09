@@ -131,7 +131,7 @@ export function WelcomePage() {
 
 export function LoginPage() {
   const navigate = useNavigate();
-  const { user, signIn, mfaPending } = useAuth();
+  const { user, signIn, isAdmin, rolesLoading } = useAuth();
   const [serverError, setServerError] = useState('');
   const form = useForm<z.infer<typeof loginSchema>>({
     resolver: zodResolver(loginSchema),
@@ -141,8 +141,8 @@ export function LoginPage() {
     },
   });
 
-  if (user && !mfaPending) {
-    return <Navigate to="/app/dashboard" replace />;
+  if (user && !rolesLoading) {
+    return <Navigate to={isAdmin ? '/admin' : '/app/dashboard'} replace />;
   }
 
   return (
@@ -153,8 +153,8 @@ export function LoginPage() {
           onSubmit={form.handleSubmit(async (values) => {
             try {
               setServerError('');
-              const result = await signIn(values.email, values.password);
-              navigate(result === 'mfa' ? '/mfa' : '/app/dashboard');
+              await signIn(values.email, values.password);
+              navigate(isAdmin ? '/admin' : '/app/dashboard');
             } catch (error) {
               setServerError(error instanceof Error ? error.message : 'Sign in failed.');
             }
@@ -180,78 +180,6 @@ export function LoginPage() {
             Need online access?{' '}
             <Link className="text-link" to="/register">Enroll now</Link>
           </p>
-        </form>
-      </Card>
-    </AuthLayout>
-  );
-}
-
-const codeSchema = z.object({
-  code: z.string().length(6),
-});
-
-export function MfaPage() {
-  const navigate = useNavigate();
-  const { completeMfa, signOut } = useAuth();
-  const [serverError, setServerError] = useState('');
-  const [infoMessage, setInfoMessage] = useState('');
-  const form = useForm<z.infer<typeof codeSchema>>({
-    resolver: zodResolver(codeSchema),
-    defaultValues: { code: '' },
-  });
-
-  return (
-    <AuthLayout title="Verify your device" subtitle="Enter the six-digit code sent to your phone to continue securely.">
-      <Card className="auth-card">
-        <form
-          className="stack-lg"
-          onSubmit={form.handleSubmit(async (values) => {
-            try {
-              setServerError('');
-              setInfoMessage('');
-              await completeMfa(values.code);
-              navigate('/app/dashboard');
-            } catch (error) {
-              setServerError(error instanceof Error ? error.message : 'Verification failed.');
-            }
-          })}
-        >
-          <PageHeader title="Multi-factor authentication" eyebrow="Security check" subtitle="Enter the SMS code sent to your phone to finish signing in." />
-          {serverError ? <InlineAlert title="Verification failed" tone="warning">{serverError}</InlineAlert> : null}
-          {infoMessage ? <InlineAlert title="Code sent" tone="success">{infoMessage}</InlineAlert> : null}
-          <Field label="Security code" error={form.formState.errors.code?.message}>
-            <input {...form.register('code')} inputMode="numeric" />
-          </Field>
-          <div className="button-row">
-            <Button type="submit">Verify and continue</Button>
-          </div>
-          <div className="auth-secondary-action">
-            <button
-              className="text-link"
-              type="button"
-              onClick={async () => {
-                await signOut();
-                navigate('/login');
-              }}
-            >
-              Back to sign in
-            </button>
-            <button
-              className="text-link"
-              type="button"
-              onClick={async () => {
-                try {
-                  setServerError('');
-                  await authService.resendMfa();
-                  setInfoMessage('A new SMS code was sent to your phone.');
-                } catch (error) {
-                  setServerError(error instanceof Error ? error.message : 'Unable to resend the code.');
-                }
-              }}
-            >
-              Resend code
-            </button>
-          </div>
         </form>
       </Card>
     </AuthLayout>
@@ -317,9 +245,9 @@ export function RegisterPage() {
           onSubmit={form.handleSubmit(async (values) => {
             try {
               setServerError('');
-              const result = await register(values);
+              await register(values);
               setSubmitted(true);
-              navigate(result === 'mfa' ? '/mfa' : '/app/dashboard');
+              navigate('/app/dashboard');
             } catch (error) {
               setSubmitted(false);
               setServerError(error instanceof Error ? error.message : 'Unable to create your account.');

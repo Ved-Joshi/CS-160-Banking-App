@@ -1,79 +1,101 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
-import { MFA_CHALLENGE_KEY, SESSION_KEY, readStorage, writeStorage } from '../../lib/storage';
+import { SESSION_KEY, readStorage, writeStorage } from '../../lib/storage';
 import { authService } from '../../lib/mockApi';
 import { supabase } from '../../lib/supabaseClient';
+import { apiRequest } from '../../lib/apiClient';
 import type { RegistrationInput, User } from '../../types/banking';
 import { AuthContext, type AuthContextValue } from './auth-context';
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(() => readStorage<User | null>(SESSION_KEY, null));
-  const [mfaPending, setMfaPending] = useState<boolean>(() => Boolean(readStorage(MFA_CHALLENGE_KEY, null)));
   const loading = false;
+  const [rolesLoading, setRolesLoading] = useState<boolean>(true);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
       const session = data.session;
-      if (!session?.user) return;
-      const metadata = (session.user.user_metadata as Record<string, string> | undefined) ?? {};
+      if (!session?.user) {
+        setRolesLoading(false);
+        return;
+      }
+      const metadata = (session.user.user_metadata as Record<string, unknown> | undefined) ?? {};
+      const appMeta = (session.user.app_metadata as Record<string, unknown> | undefined) ?? {};
+      const roles = Array.isArray(appMeta.roles)
+        ? (appMeta.roles as string[])
+        : Array.isArray(metadata.roles)
+          ? (metadata.roles as string[])
+          : [];
       const hydrated: User = {
         id: session.user.id,
         email: session.user.email ?? '',
-        username: metadata.username ?? '',
-        firstName: metadata.firstName ?? '',
-        middleName: metadata.middleName ?? '',
-        lastName: metadata.lastName ?? '',
+        username: (metadata.username as string | undefined) ?? '',
+        firstName: (metadata.firstName as string | undefined) ?? '',
+        middleName: (metadata.middleName as string | undefined) ?? '',
+        lastName: (metadata.lastName as string | undefined) ?? '',
+        roles,
       };
       writeStorage(SESSION_KEY, hydrated);
-      writeStorage(MFA_CHALLENGE_KEY, null);
       setUser(hydrated);
-      setMfaPending(false);
+      setRolesLoading(false);
     });
   }, []);
+
+  useEffect(() => {
+    const loadRoles = async () => {
+      setRolesLoading(true);
+      try {
+        const data = await apiRequest<{ isAdmin: boolean; roles: string[] }>('/api/me/admin');
+        setUser((prev) => (prev ? { ...prev, roles: data.roles } : prev));
+      } catch {
+        // ignore; fallback to existing roles
+      } finally {
+        setRolesLoading(false);
+      }
+    };
+    if (user) {
+      void loadRoles();
+    } else {
+      setRolesLoading(false);
+    }
+  }, [user]);
 
   const value = useMemo<AuthContextValue>(
     () => ({
       user,
       loading,
-      mfaPending,
+      rolesLoading,
+      isAdmin: Boolean(user?.roles?.includes('admin')),
       async signIn(email, password) {
         const result = await authService.login(email, password);
-        if (result.mfaRequired) {
-          setMfaPending(true);
-          writeStorage(SESSION_KEY, null);
-          setUser(null);
-          return 'mfa';
-        }
         writeStorage(SESSION_KEY, result.user);
         setUser(result.user);
-        setMfaPending(false);
+        setRolesLoading(true);
+        // Refresh roles after login
+        try {
+          const data = await apiRequest<{ isAdmin: boolean; roles: string[] }>('/api/me/admin');
+          setUser((prev) => (prev ? { ...prev, roles: data.roles } : prev));
+        } catch {
+          // ignore
+        } finally {
+          setRolesLoading(false);
+        }
         return 'ok';
-      },
-      async completeMfa(code) {
-        const nextUser = await authService.verifyMfa(code);
-        writeStorage(SESSION_KEY, nextUser);
-        setUser(nextUser);
-        setMfaPending(false);
       },
       async register(input: RegistrationInput) {
         const result = await authService.register(input);
-        if (result.mfaRequired) {
-          setMfaPending(true);
-          return 'mfa';
-        }
         writeStorage(SESSION_KEY, result.user);
         setUser(result.user);
-        setMfaPending(false);
+        setRolesLoading(false);
         return 'ok';
       },
       async signOut() {
         await supabase.auth.signOut();
         writeStorage(SESSION_KEY, null);
-        writeStorage(MFA_CHALLENGE_KEY, null);
         setUser(null);
-        setMfaPending(false);
+        setRolesLoading(false);
       },
     }),
-    [loading, user],
+    [loading, user, rolesLoading],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

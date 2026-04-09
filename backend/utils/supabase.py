@@ -30,6 +30,7 @@ class SupabaseUser:
     id: str
     email: str
     user_metadata: dict[str, Any]
+    app_metadata: dict[str, Any]
     phone: Optional[str]
     created_at: str
 
@@ -112,9 +113,16 @@ class SupabaseClient:
             id=payload["id"],
             email=payload.get("email") or "",
             user_metadata=payload.get("user_metadata") or {},
+            app_metadata=payload.get("app_metadata") or {},
             phone=payload.get("phone"),
             created_at=payload.get("created_at") or "",
         )
+
+    async def get_user_admin(self, user_id: str) -> dict[str, Any]:
+        return await self._request(
+            "GET",
+            f"/auth/v1/admin/users/{user_id}",
+        ) or {}
 
     async def select_rows(
         self,
@@ -167,6 +175,12 @@ class SupabaseClient:
             prefer="return=representation",
         ) or []
         return rows
+
+    async def delete_rows(self, table: str, *, filters: dict[str, str]) -> None:
+        query: list[tuple[str, str]] = []
+        for key, value in filters.items():
+            query.append((key, value))
+        await self._request("DELETE", f"/rest/v1/{table}", query=query, prefer="return=minimal")
 
     async def create_signed_upload_url(
         self,
