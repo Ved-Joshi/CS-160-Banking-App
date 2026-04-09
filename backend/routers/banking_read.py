@@ -363,7 +363,6 @@ async def get_profile(current_user: SupabaseUser = Depends(get_current_user)) ->
         phone=profile.get("mobile_phone_e164") or current_user.phone or "—",
         address=format_address(profile),
         memberSince=profile.get("created_at") or current_user.created_at,
-        mfaEnabled=bool(profile.get("mfa_enrolled_at") or profile.get("phone_verified_at")),
     )
 
 

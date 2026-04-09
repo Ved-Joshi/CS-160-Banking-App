@@ -18,3 +18,12 @@ async def get_current_user(authorization: str | None = Header(default=None)) -> 
         )
 
     return await supabase_client.get_authenticated_user(access_token)
+
+
+async def require_admin(current_user: SupabaseUser = Depends(get_current_user)) -> SupabaseUser:
+    roles = current_user.app_metadata.get("roles") or current_user.user_metadata.get("roles") or []
+    if not isinstance(roles, list):
+        roles = []
+    if "admin" not in roles:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin only.")
+    return current_user

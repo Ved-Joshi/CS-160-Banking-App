@@ -1,0 +1,22 @@
+services:
+  backend:
+    build: ./backend
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./backend:/app
+    environment:
+      - PYTHONPATH=/app
+    command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+    container_name: banking-backend
+
+  frontend:
+    build: ./frontend
+    ports:
+      - "3000:3000"
+    environment:
+      - VITE_API_URL=http://localhost:8000
+    container_name: banking-frontend
+    depends_on:
+      - backend
+   
