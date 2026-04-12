@@ -30,6 +30,7 @@ from schemas.banking import (
 )
 from utils.google_maps import SearchCenter, geocode_query, search_chase_atms
 from utils.supabase import SupabaseUser, amount_to_cents, cents_to_amount, random_last4, supabase_client
+from services.transfer_service import create_transfer_for_user
 
 router = APIRouter(prefix="/api", tags=["banking"])
 logger = logging.getLogger(__name__)
@@ -596,31 +597,13 @@ async def create_transfer(
     payload: CreateTransferIn,
     current_user: SupabaseUser = Depends(get_current_user),
 ) -> TransferResult:
-    try:
-        result = await supabase_client.rpc(
-            "submit_internal_transfer",
-            {
-                "p_user_id": current_user.id,
-                "p_from_account_id": payload.fromAccountId,
-                "p_to_account_id": payload.toAccountId,
-                "p_amount_cents": amount_to_cents(payload.amount),
-                "p_transfer_date": parse_transfer_date(payload.transferDate),
-                "p_memo": payload.memo,
-            },
-        )
-    except HTTPException as exc:
-        detail = exc.detail
-        if isinstance(detail, dict):
-            detail = detail.get("message") or detail.get("details") or detail
-        if isinstance(detail, list) and detail:
-            detail = detail[0]
-        raise HTTPException(status_code=exc.status_code, detail=detail) from exc
-
-    row = result[0] if isinstance(result, list) else result
-    return TransferResult(
-        id=row["id"],
-        status=map_transfer_status(row.get("status", "pending")),
-        submittedAt=row.get("submitted_at") or datetime.now(timezone.utc).isoformat(),
+    return await create_transfer_for_user(
+        current_user=current_user,
+        from_account_id=payload.fromAccountId,
+        to_account_id=payload.toAccountId,
+        amount=payload.amount,
+        memo=payload.memo,
+        transfer_date=parse_transfer_date(payload.transferDate),
     )
 
 

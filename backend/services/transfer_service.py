@@ -82,6 +82,8 @@ async def create_transfer_for_user(
         },
     )
 
+    
+
     await supabase_client.update_rows(
         "accounts",
         {
@@ -142,6 +144,7 @@ async def create_transfer_for_user(
             "transfer_id": transfer["id"],
         },
     )
+    
 
     return TransferResult(
         id=transfer["id"],
