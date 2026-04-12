@@ -1,5 +1,5 @@
 
-#  Used to test transfers before editing into banking read, may delete
+#  Used to test transaction before implementing into banking read, may delete
 from fastapi import APIRouter, Depends
 
 from dependencies.auth import get_current_user
