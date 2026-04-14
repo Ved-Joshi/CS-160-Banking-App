@@ -7,7 +7,7 @@ import { colors } from "../../src/theme/colors";
 
 export default function LoginScreen() {
   const router = useRouter();
-  const { isAuthenticated, signIn } = useAuth();
+  const { isAuthenticated, login } = useAuth();
   const [email, setEmail] = useState("alex.morgan@examplebank.com");
   const [password, setPassword] = useState("Password123");
   const [error, setError] = useState("");
@@ -17,7 +17,7 @@ export default function LoginScreen() {
   }
 
   const onSubmit = async () => {
-    const message = await signIn(email, password);
+    const message = await login(email, password);
     if (message) {
       setError(message);
       return;
