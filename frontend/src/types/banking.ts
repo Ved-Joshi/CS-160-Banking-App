@@ -17,21 +17,27 @@ export interface User {
   email: string;
   username?: string;
   firstName: string;
+  middleName?: string | null;
   lastName: string;
+  roles?: string[];
 }
 
 export interface CustomerProfile {
   id: string;
+  firstName: string;
+  middleName?: string | null;
+  lastName: string;
   fullName: string;
-  username?: string;
   email: string;
   phone: string;
   address: string;
   memberSince: string;
-  mfaEnabled: boolean;
 }
 
 export interface RegistrationInput {
+  firstName: string;
+  middleName?: string;
+  lastName: string;
   email: string;
   mobilePhone: string;
   streetAddress: string;
@@ -40,7 +46,6 @@ export interface RegistrationInput {
   state: string;
   zipCode: string;
   dateOfBirth: string;
-  username: string;
   password: string;
   passwordConfirmation: string;
   taxId: string;
@@ -51,6 +56,10 @@ export interface BalanceSummary {
   currentBalance: number;
 }
 
+/**
+ * Customer account shape returned by the banking API.
+ * `closeEligible` is kept for backward compatibility and mirrors `canClose`.
+ */
 export interface BankAccount {
   id: string;
   nickname: string;
@@ -59,8 +68,18 @@ export interface BankAccount {
   status: 'Open' | 'Restricted';
   routingNumber: string;
   openedAt: string;
+  /** Deprecated. Use `canClose` instead. */
   closeEligible: boolean;
+  /** True only when the account can be closed immediately. */
+  canClose: boolean;
+  /** User-facing reasons that currently block account closure. */
+  closeReasons: string[];
   balances: BalanceSummary;
+}
+
+export interface CreateBankAccountInput {
+  nickname: string;
+  type: AccountType;
 }
 
 export interface Transaction {
@@ -106,6 +125,14 @@ export interface ScheduledPayment {
   status: PaymentStatus;
 }
 
+export interface CreateScheduledPaymentInput {
+  payeeId: string;
+  accountId: string;
+  amount: number;
+  cadence: 'Once' | 'Weekly' | 'Biweekly' | 'Monthly';
+  deliverBy: string;
+}
+
 export interface DepositImage {
   id: string;
   fileName: string;
@@ -125,6 +152,30 @@ export interface Deposit {
   };
 }
 
+export interface DepositUploadTarget {
+  path: string;
+  token: string;
+  signedUrl: string;
+}
+
+export interface DepositUploadUrls {
+  bucket: string;
+  front: DepositUploadTarget;
+  back: DepositUploadTarget;
+}
+
+export interface CreateDepositUploadUrlsInput {
+  frontFileName: string;
+  backFileName: string;
+}
+
+export interface CreateDepositInput {
+  accountId: string;
+  amount: number;
+  frontImagePath: string;
+  backImagePath: string;
+}
+
 export interface AtmLocation {
   id: string;
   name: string;
@@ -132,9 +183,33 @@ export interface AtmLocation {
   city: string;
   state: string;
   zip: string;
+  latitude: number;
+  longitude: number;
   distanceMiles: number;
   features: string[];
   hours: string;
+  openNow: boolean | null;
+  directionsUrl: string;
+}
+
+export interface AtmSearchCenter {
+  latitude: number;
+  longitude: number;
+  label: string;
+}
+
+export interface AtmSearchResponse {
+  center: AtmSearchCenter;
+  atms: AtmLocation[];
+}
+
+export interface AtmSearchInput {
+  lat?: number;
+  lng?: number;
+  query?: string;
+  radiusMiles?: number;
+  openNow?: boolean;
+  limit?: number;
 }
 
 export interface NotificationItem {

@@ -131,7 +131,7 @@ export function WelcomePage() {
 
 export function LoginPage() {
   const navigate = useNavigate();
-  const { user, signIn } = useAuth();
+  const { user, signIn, isAdmin, rolesLoading } = useAuth();
   const [serverError, setServerError] = useState('');
   const form = useForm<z.infer<typeof loginSchema>>({
     resolver: zodResolver(loginSchema),
@@ -141,8 +141,8 @@ export function LoginPage() {
     },
   });
 
-  if (user) {
-    return <Navigate to="/app/dashboard" replace />;
+  if (user && !rolesLoading) {
+    return <Navigate to={isAdmin ? '/admin' : '/app/dashboard'} replace />;
   }
 
   return (
@@ -154,7 +154,7 @@ export function LoginPage() {
             try {
               setServerError('');
               await signIn(values.email, values.password);
-              navigate('/app/dashboard');
+              navigate(isAdmin ? '/admin' : '/app/dashboard');
             } catch (error) {
               setServerError(error instanceof Error ? error.message : 'Sign in failed.');
             }
@@ -186,54 +186,10 @@ export function LoginPage() {
   );
 }
 
-const codeSchema = z.object({
-  code: z.string().length(6),
-});
-
-export function MfaPage() {
-  const navigate = useNavigate();
-  const { completeMfa } = useAuth();
-  const [serverError, setServerError] = useState('');
-  const form = useForm<z.infer<typeof codeSchema>>({
-    resolver: zodResolver(codeSchema),
-    defaultValues: { code: '' },
-  });
-
-  return (
-    <AuthLayout title="Verify your device" subtitle="Enter the six-digit code sent to your phone to continue securely.">
-      <Card className="auth-card">
-        <form
-          className="stack-lg"
-          onSubmit={form.handleSubmit(async (values) => {
-            try {
-              setServerError('');
-              await completeMfa(values.code);
-              navigate('/app/dashboard');
-            } catch (error) {
-              setServerError(error instanceof Error ? error.message : 'Verification failed.');
-            }
-          })}
-        >
-          <PageHeader title="Multi-factor authentication" eyebrow="Security check" subtitle="Complete verification to finish signing in to your account." />
-          {serverError ? <InlineAlert title="Verification failed" tone="warning">{serverError}</InlineAlert> : null}
-          <Field label="Security code" error={form.formState.errors.code?.message}>
-            <input {...form.register('code')} inputMode="numeric" />
-          </Field>
-          <div className="button-row">
-            <Button type="submit">Verify and continue</Button>
-          </div>
-          <div className="auth-secondary-action">
-            <Link className="text-link" to="/login">
-              Back to sign in
-            </Link>
-          </div>
-        </form>
-      </Card>
-    </AuthLayout>
-  );
-}
-
 const registerSchema = z.object({
+  firstName: z.string().min(1, 'First name is required.'),
+  middleName: z.string().optional(),
+  lastName: z.string().min(1, 'Last name is required.'),
   email: z.string().email(),
   mobilePhone: z.string().refine((value) => {
     const digits = value.replace(/\D/g, '');
@@ -248,7 +204,6 @@ const registerSchema = z.object({
     const parsed = Date.parse(value);
     return !Number.isNaN(parsed) && parsed < Date.now();
   }, 'Enter a valid date of birth.'),
-  username: z.string().min(3).max(32).regex(/^[A-Za-z0-9._-]+$/, 'Use letters, numbers, periods, underscores, or hyphens.'),
   password: z.string().min(8),
   passwordConfirmation: z.string().min(8),
   taxId: z.string().refine((value) => value.replace(/\D/g, '').length === 9, 'Enter a valid 9-digit SSN or TIN.'),
@@ -260,9 +215,14 @@ const registerSchema = z.object({
 export function RegisterPage() {
   const navigate = useNavigate();
   const { register } = useAuth();
+  const [serverError, setServerError] = useState('');
+  const [submitted, setSubmitted] = useState(false);
   const form = useForm<RegistrationInput>({
     resolver: zodResolver(registerSchema),
     defaultValues: {
+      firstName: '',
+      middleName: '',
+      lastName: '',
       email: '',
       mobilePhone: '',
       streetAddress: '',
@@ -271,7 +231,6 @@ export function RegisterPage() {
       state: '',
       zipCode: '',
       dateOfBirth: '',
-      username: '',
       password: '',
       passwordConfirmation: '',
       taxId: '',
@@ -284,11 +243,31 @@ export function RegisterPage() {
         <form
           className="stack-lg"
           onSubmit={form.handleSubmit(async (values) => {
-            await register(values);
-            navigate('/app/dashboard');
+            try {
+              setServerError('');
+              await register(values);
+              setSubmitted(true);
+              navigate('/app/dashboard');
+            } catch (error) {
+              setSubmitted(false);
+              setServerError(error instanceof Error ? error.message : 'Unable to create your account.');
+            }
           })}
         >
           <PageHeader title="Enroll in online banking" eyebrow="New customer" subtitle="Create secure online access for your personal banking profile." />
+          {serverError ? <InlineAlert title="Unable to create access" tone="warning">{serverError}</InlineAlert> : null}
+          {submitted ? <InlineAlert title="Enrollment started" tone="success">Your online banking access has been created successfully.</InlineAlert> : null}
+          <div className="grid-two">
+            <Field label="First name" error={form.formState.errors.firstName?.message}>
+              <input {...form.register('firstName')} autoComplete="given-name" />
+            </Field>
+            <Field label="Middle name (optional)" error={form.formState.errors.middleName?.message}>
+              <input {...form.register('middleName')} autoComplete="additional-name" />
+            </Field>
+            <Field label="Last name" error={form.formState.errors.lastName?.message}>
+              <input {...form.register('lastName')} autoComplete="family-name" />
+            </Field>
+          </div>
           <div className="grid-two">
             <Field label="Email address" error={form.formState.errors.email?.message}>
               <input {...form.register('email')} autoComplete="email" type="email" />
@@ -327,14 +306,9 @@ export function RegisterPage() {
               </Field>
             </div>
           </div>
-          <div className="grid-two">
-            <Field label="Username" error={form.formState.errors.username?.message}>
-              <input {...form.register('username')} autoComplete="username" />
-            </Field>
-            <Field label="Social Security Number (SSN) or Tax Identification Number (TIN)" error={form.formState.errors.taxId?.message}>
-              <input {...form.register('taxId')} autoComplete="off" inputMode="numeric" />
-            </Field>
-          </div>
+          <Field label="Social Security Number (SSN) or Tax Identification Number (TIN)" error={form.formState.errors.taxId?.message}>
+            <input {...form.register('taxId')} autoComplete="off" inputMode="numeric" />
+          </Field>
           <div className="grid-two">
             <Field label="Password" error={form.formState.errors.password?.message}>
               <input {...form.register('password')} autoComplete="new-password" type="password" />

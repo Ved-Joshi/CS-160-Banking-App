@@ -1,14 +1,14 @@
 import { useQuery } from '@tanstack/react-query';
-import { Card, PageHeader, StatusChip } from '../../components/ui';
-import { authService } from '../../lib/mockApi';
+import { Card, PageHeader } from '../../components/ui';
+import { profileService } from '../../lib/bankingApi';
 import { formatDate } from '../../lib/format';
 
 export function SettingsPage() {
-  const { data: profile } = useQuery({ queryKey: ['profile'], queryFn: authService.getProfile });
+  const { data: profile } = useQuery({ queryKey: ['profile'], queryFn: profileService.get });
 
   return (
     <div className="stack-xl">
-      <PageHeader title="Settings" eyebrow="Profile and security" subtitle="Review your profile details and manage your security preferences." />
+      <PageHeader title="Settings" eyebrow="Profile" subtitle="Review your profile details." />
       <div className="grid-two">
         <Card>
           <h3>Profile</h3>
@@ -17,10 +17,6 @@ export function SettingsPage() {
               <div>
                 <dt>Name</dt>
                 <dd>{profile.fullName}</dd>
-              </div>
-              <div>
-                <dt>Username</dt>
-                <dd>{profile.username || '—'}</dd>
               </div>
               <div>
                 <dt>Email</dt>
@@ -39,23 +35,6 @@ export function SettingsPage() {
                 <dd>{formatDate(profile.memberSince)}</dd>
               </div>
             </dl>
-          ) : null}
-        </Card>
-        <Card>
-          <h3>Security</h3>
-          {profile ? (
-            <div className="stack-md">
-              <div className="list-row">
-                <span>Multi-factor authentication</span>
-                <StatusChip status={profile.mfaEnabled ? 'enabled' : 'disabled'} />
-              </div>
-              <button className="button button--secondary" type="button">
-                Reset password
-              </button>
-              <button className="button button--secondary" type="button">
-                Notification preferences
-              </button>
-            </div>
           ) : null}
         </Card>
       </div>

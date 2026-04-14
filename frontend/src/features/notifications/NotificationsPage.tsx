@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Button, Card, EmptyState, PageHeader, StatusChip } from '../../components/ui';
 import { formatDateTime } from '../../lib/format';
-import { notificationsService } from '../../lib/mockApi';
+import { notificationsService } from '../../lib/bankingApi';
 
 export function NotificationsPage() {
   const queryClient = useQueryClient();

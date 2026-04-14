@@ -1,0 +1,2 @@
+[functions.complete_registration]
+verify_jwt = false
