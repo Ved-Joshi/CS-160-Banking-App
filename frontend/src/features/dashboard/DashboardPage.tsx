@@ -3,14 +3,15 @@ import { Link } from 'react-router-dom';
 import { Card, EmptyState, InlineAlert, PageHeader, StatusChip } from '../../components/ui';
 import { accountsService, depositsService, paymentsService, transactionsService } from '../../lib/bankingApi';
 import { formatCurrency, formatDate } from '../../lib/format';
+import { queryKeys } from '../../lib/queryKeys';
 import { useAuth } from '../auth/useAuth';
 
 export function DashboardPage() {
   const { user } = useAuth();
-  const { data: accounts = [] } = useQuery({ queryKey: ['accounts'], queryFn: accountsService.list });
-  const { data: transactions = [] } = useQuery({ queryKey: ['transactions'], queryFn: transactionsService.list });
-  const { data: payments = [] } = useQuery({ queryKey: ['payments'], queryFn: paymentsService.list });
-  const { data: deposits = [] } = useQuery({ queryKey: ['deposits'], queryFn: depositsService.list });
+  const { data: accounts = [] } = useQuery({ queryKey: queryKeys.accounts(), queryFn: accountsService.list });
+  const { data: transactions = [] } = useQuery({ queryKey: queryKeys.transactions(), queryFn: transactionsService.list });
+  const { data: payments = [] } = useQuery({ queryKey: queryKeys.payments(), queryFn: paymentsService.list });
+  const { data: deposits = [] } = useQuery({ queryKey: queryKeys.deposits(), queryFn: depositsService.list });
 
   const displayName = [user?.firstName, user?.lastName].filter(Boolean).join(' ') || user?.username || user?.email || accounts[0]?.nickname || 'Welcome';
   const totalAvailable = accounts.reduce((sum, account) => sum + account.balances.availableBalance, 0);

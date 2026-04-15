@@ -1,12 +1,13 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
-import { useForm } from 'react-hook-form';
+import { useForm, useWatch } from 'react-hook-form';
 import { Link, useSearchParams } from 'react-router-dom';
 import { z } from 'zod';
 import { Button, Card, EmptyState, Field, InlineAlert, PageHeader, StatusChip } from '../../components/ui';
 import { accountsService, transfersService } from '../../lib/bankingApi';
 import { formatCurrency } from '../../lib/format';
+import { queryKeys } from '../../lib/queryKeys';
 
 const transferSchema = z.object({
   fromAccountId: z.string().min(1),
@@ -14,21 +15,24 @@ const transferSchema = z.object({
   amount: z.number().positive(),
   memo: z.string().max(80).optional(),
   transferDate: z.string().min(1),
+}).refine((value) => value.fromAccountId !== value.toAccountId, {
+  message: 'From and To accounts must be different.',
+  path: ['toAccountId'],
 });
 
 export function TransfersPage() {
   const queryClient = useQueryClient();
   const [searchParams] = useSearchParams();
   const preferredFromAccountId = searchParams.get('fromAccountId') ?? '';
-  const { data: accounts = [] } = useQuery({ queryKey: ['accounts'], queryFn: accountsService.list });
+  const { data: accounts = [] } = useQuery({ queryKey: queryKeys.accounts(), queryFn: accountsService.list });
   const [review, setReview] = useState<z.infer<typeof transferSchema> | null>(null);
   const mutation = useMutation({
     mutationFn: transfersService.submit,
     onSuccess: async () => {
       await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ['accounts'] }),
-        queryClient.invalidateQueries({ queryKey: ['transactions'] }),
-        queryClient.invalidateQueries({ queryKey: ['notifications'] }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.accounts() }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.transactions() }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.notifications() }),
       ]);
     },
   });
@@ -66,6 +70,9 @@ export function TransfersPage() {
     }
   }, [accounts, form, hasTransferAccounts, preferredFromAccountId]);
 
+  const selectedFrom = useWatch({ control: form.control, name: 'fromAccountId' }) ?? '';
+  const toAccountOptions = accounts.filter((account) => account.id !== selectedFrom);
+
   return (
     <div className="stack-xl">
       <PageHeader title="Transfers" eyebrow="Move money" subtitle="Transfer funds between your own accounts with a review step before submission." />
@@ -89,7 +96,7 @@ export function TransfersPage() {
             </Field>
             <Field label="To account" error={form.formState.errors.toAccountId?.message}>
               <select {...form.register('toAccountId')} disabled={!hasTransferAccounts}>
-                {accounts.map((account) => (
+                {toAccountOptions.map((account) => (
                   <option key={account.id} value={account.id}>
                     {account.nickname} ({account.maskedNumber})
                   </option>
@@ -140,7 +147,7 @@ export function TransfersPage() {
               <Button
                 onClick={async () => {
                   if (review && hasTransferAccounts) {
-                    await mutation.mutateAsync(review);
+                    mutation.mutate(review);
                     setReview(null);
                   }
                 }}

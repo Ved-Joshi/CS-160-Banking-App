@@ -45,7 +45,18 @@ def map_account_type(value: str) -> str:
 
 
 def map_account_status(value: str) -> str:
-    return "Open" if value == "open" else "Restricted"
+    return "Open" if normalize_account_status(value) == "open" else "Restricted"
+
+
+def normalize_account_status(value: str | None) -> str:
+    normalized = (value or "open").strip().lower()
+    if normalized in {"open", "active"}:
+        return "open"
+    if normalized in {"frozen", "restricted", "hold"}:
+        return "frozen"
+    if normalized in {"closed", "close"}:
+        return "closed"
+    return normalized or "open"
 
 
 def normalize_account_type(value: str) -> str:
@@ -158,7 +169,7 @@ def build_close_reasons(
     blocked_payment_accounts: set[str],
 ) -> list[str]:
     reasons: list[str] = []
-    status_value = row.get("status", "open")
+    status_value = normalize_account_status(row.get("status"))
     if status_value != "open":
         reasons.append("Only open accounts can be closed.")
 
@@ -454,10 +465,10 @@ async def list_accounts(current_user: SupabaseUser = Depends(get_current_user)) 
         "accounts",
         filters={
             "user_id": f"eq.{current_user.id}",
-            "status": "eq.open",
         },
         order="opened_at.asc",
     )
+    rows = [row for row in rows if normalize_account_status(row.get("status")) != "closed"]
     close_context = await get_close_eligibility_context(current_user.id)
     return [
         map_account(
@@ -477,11 +488,12 @@ async def get_account(account_id: str, current_user: SupabaseUser = Depends(get_
         filters={
             "id": f"eq.{account_id}",
             "user_id": f"eq.{current_user.id}",
-            "status": "eq.open",
         },
         limit=1,
     )
     if not rows:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Account not found.")
+    if normalize_account_status(rows[0].get("status")) == "closed":
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Account not found.")
     close_context = await get_close_eligibility_context(current_user.id)
     return map_account(

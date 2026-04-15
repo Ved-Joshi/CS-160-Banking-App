@@ -18,6 +18,7 @@ import type {
   TransferResult,
 } from '../types/banking';
 import { apiRequest } from './apiClient';
+import { normalizeAccount, normalizeAccounts, normalizeTransactions, normalizeTransferResult } from './bankingContract';
 
 export const profileService = {
   get(): Promise<CustomerProfile> {
@@ -27,16 +28,16 @@ export const profileService = {
 
 export const accountsService = {
   list(): Promise<BankAccount[]> {
-    return apiRequest('/api/accounts');
+    return apiRequest<unknown[]>('/api/accounts').then(normalizeAccounts);
   },
   get(accountId: string): Promise<BankAccount> {
-    return apiRequest(`/api/accounts/${accountId}`);
+    return apiRequest<unknown>(`/api/accounts/${accountId}`).then(normalizeAccount);
   },
   create(input: CreateBankAccountInput): Promise<BankAccount> {
-    return apiRequest('/api/accounts', {
+    return apiRequest<unknown>('/api/accounts', {
       method: 'POST',
       body: input,
-    });
+    }).then(normalizeAccount);
   },
   close(accountId: string): Promise<void> {
     return apiRequest(`/api/accounts/${accountId}/close`, {
@@ -47,7 +48,7 @@ export const accountsService = {
 
 export const transactionsService = {
   list(): Promise<Transaction[]> {
-    return apiRequest('/api/transactions');
+    return apiRequest<unknown[]>('/api/transactions').then(normalizeTransactions);
   },
   search(filters: {
     accountId?: string;
@@ -55,14 +56,14 @@ export const transactionsService = {
     status?: string;
     limit?: number;
   } = {}): Promise<Transaction[]> {
-    return apiRequest('/api/transactions', {
+    return apiRequest<unknown[]>('/api/transactions', {
       query: {
         account_id: filters.accountId,
         type: filters.type,
         status: filters.status,
         limit: filters.limit,
       },
-    });
+    }).then(normalizeTransactions);
   },
 };
 
@@ -118,10 +119,10 @@ export const notificationsService = {
 
 export const transfersService = {
   submit(input: TransferRequest): Promise<TransferResult> {
-    return apiRequest('/api/transfers', {
+    return apiRequest<unknown>('/api/transfers', {
       method: 'POST',
       body: input,
-    });
+    }).then(normalizeTransferResult);
   },
 };
 

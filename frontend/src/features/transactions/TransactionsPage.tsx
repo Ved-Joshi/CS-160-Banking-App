@@ -4,11 +4,12 @@ import { Link, useSearchParams } from 'react-router-dom';
 import { Card, DataTable, EmptyState, Field, PageHeader, StatusChip } from '../../components/ui';
 import { accountsService, transactionsService } from '../../lib/bankingApi';
 import { formatCurrency, formatDate } from '../../lib/format';
+import { queryKeys } from '../../lib/queryKeys';
 
 export function TransactionsPage() {
   const [searchParams] = useSearchParams();
-  const { data: accounts = [] } = useQuery({ queryKey: ['accounts'], queryFn: accountsService.list });
-  const { data: transactions = [] } = useQuery({ queryKey: ['transactions'], queryFn: transactionsService.list });
+  const { data: accounts = [] } = useQuery({ queryKey: queryKeys.accounts(), queryFn: accountsService.list });
+  const { data: transactions = [] } = useQuery({ queryKey: queryKeys.transactions(), queryFn: transactionsService.list });
   const requestedAccountId = searchParams.get('accountId') ?? 'all';
   const derivedAccountId = requestedAccountId === 'all' || accounts.some((account) => account.id === requestedAccountId)
     ? requestedAccountId

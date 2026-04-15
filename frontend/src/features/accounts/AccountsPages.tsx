@@ -7,6 +7,7 @@ import { z } from 'zod';
 import { Button, Card, Dialog, EmptyState, Field, InlineAlert, PageHeader, StatusChip } from '../../components/ui';
 import { accountsService, transactionsService } from '../../lib/bankingApi';
 import { formatCurrency, formatDate } from '../../lib/format';
+import { queryKeys } from '../../lib/queryKeys';
 import type { AccountType } from '../../types/banking';
 
 const createAccountSchema = z.object({
@@ -83,7 +84,7 @@ export function AccountsPage() {
     data: accounts = [],
     error: accountsError,
     isLoading: accountsLoading,
-  } = useQuery({ queryKey: ['accounts'], queryFn: accountsService.list });
+  } = useQuery({ queryKey: queryKeys.accounts(), queryFn: accountsService.list });
 
   useEffect(() => {
     if (!navigationState) return;
@@ -151,7 +152,7 @@ export function AccountsPage() {
                   <p className="eyebrow">{account.type}</p>
                   <h3>{account.nickname}</h3>
                 </div>
-                <p className="muted">{account.maskedNumber}</p>
+                <p className="muted">{account.maskedNumber || '••••'}</p>
                 <dl className="stat-list">
                   <div>
                     <dt>Available</dt>
@@ -196,7 +197,7 @@ export function OpenAccountPage() {
   const createAccount = useMutation({
     mutationFn: accountsService.create,
     onSuccess: async (created) => {
-      await queryClient.invalidateQueries({ queryKey: ['accounts'] });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.accounts() });
       navigate('/app/accounts', {
         state: {
           createdAccountId: created.id,
@@ -317,14 +318,14 @@ export function AccountDetailPage() {
     data: account,
     isLoading: accountLoading,
     refetch: refetchAccount,
-  } = useQuery({ queryKey: ['accounts', accountId], queryFn: () => accountsService.get(accountId) });
-  const { data: transactions = [] } = useQuery({ queryKey: ['transactions'], queryFn: transactionsService.list });
+  } = useQuery({ queryKey: queryKeys.account(accountId), queryFn: () => accountsService.get(accountId) });
+  const { data: transactions = [] } = useQuery({ queryKey: queryKeys.transactions(), queryFn: transactionsService.list });
   const closeAccount = useMutation({
     mutationFn: accountsService.close,
     onSuccess: async () => {
       if (!account) return;
-      await queryClient.invalidateQueries({ queryKey: ['accounts'] });
-      queryClient.removeQueries({ queryKey: ['accounts', accountId] });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.accounts() });
+      queryClient.removeQueries({ queryKey: queryKeys.account(accountId) });
       navigate('/app/accounts', {
         state: {
           closedAccountName: account.nickname,
@@ -363,7 +364,7 @@ export function AccountDetailPage() {
       <PageHeader
         title={account.nickname}
         eyebrow={`${account.type} account`}
-        subtitle={`${account.maskedNumber} • Routing ${account.routingNumber}`}
+        subtitle={`${account.maskedNumber || '••••'} • Routing ${account.routingNumber || 'N/A'}`}
         actions={(
           <div className="account-detail-header-actions">
             <Link className="button button--secondary" to="/app/accounts">Back to accounts</Link>
@@ -404,11 +405,11 @@ export function AccountDetailPage() {
             </div>
             <div>
               <span>Account number</span>
-              <strong>{account.maskedNumber}</strong>
+              <strong>{account.maskedNumber || '••••'}</strong>
             </div>
             <div>
               <span>Routing</span>
-              <strong>{account.routingNumber}</strong>
+              <strong>{account.routingNumber || 'N/A'}</strong>
             </div>
           </div>
         </div>
@@ -480,7 +481,7 @@ export function AccountDetailPage() {
             <Button
               disabled={closeAccount.isPending || !account.canClose}
               onClick={() => {
-                void closeAccount.mutateAsync(account.id);
+                closeAccount.mutate(account.id);
               }}
               type="button"
               variant="destructive"
@@ -504,13 +505,13 @@ export function AccountDetailPage() {
         <div className="stack-sm">
           {!account.canClose ? (
             <InlineAlert title="Account not eligible for closure" tone="warning">
-              {account.closeReasons[0] ?? 'This account still has blocking activity.'}
+              {account.closeReasons.length ? account.closeReasons.join(' ') : 'This account still has blocking activity.'}
             </InlineAlert>
           ) : null}
           <div className="summary-row">
             <div className="summary-row__primary">
               <strong>{account.nickname}</strong>
-              <span className="muted">{account.type} • {account.maskedNumber}</span>
+              <span className="muted">{account.type} • {account.maskedNumber || '••••'}</span>
             </div>
           </div>
           <div className="summary-row">
