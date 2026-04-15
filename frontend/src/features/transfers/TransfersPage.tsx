@@ -20,12 +20,24 @@ const transferSchema = z.object({
   path: ['toAccountId'],
 });
 
+function formatAmountDigits(digits: string): string {
+  const cleaned = digits.replace(/\D/g, '').slice(0, 12);
+  if (!cleaned) return '00.00';
+  if (cleaned.length === 1) return `${cleaned}0.00`;
+  if (cleaned.length === 2) return `${cleaned}.00`;
+  if (cleaned.length === 3) return `${cleaned.slice(0, 2)}.${cleaned.slice(2)}0`;
+  const integerPart = cleaned.slice(0, -2).replace(/^0+(?=\d)/, '') || '0';
+  const centsPart = cleaned.slice(-2);
+  return `${integerPart}.${centsPart}`;
+}
+
 export function TransfersPage() {
   const queryClient = useQueryClient();
   const [searchParams] = useSearchParams();
   const preferredFromAccountId = searchParams.get('fromAccountId') ?? '';
   const { data: accounts = [] } = useQuery({ queryKey: queryKeys.accounts(), queryFn: accountsService.list });
   const [review, setReview] = useState<z.infer<typeof transferSchema> | null>(null);
+  const [amountDigits, setAmountDigits] = useState('');
   const mutation = useMutation({
     mutationFn: transfersService.submit,
     onSuccess: async () => {
@@ -47,6 +59,7 @@ export function TransfersPage() {
     },
   });
   const hasTransferAccounts = accounts.length >= 2;
+  const amountDisplay = formatAmountDigits(amountDigits);
 
   useEffect(() => {
     if (!hasTransferAccounts) return;
@@ -69,6 +82,11 @@ export function TransfersPage() {
       form.setValue('toAccountId', nextTo);
     }
   }, [accounts, form, hasTransferAccounts, preferredFromAccountId]);
+
+  useEffect(() => {
+    const normalizedAmount = amountDigits ? Number(amountDisplay) : 0;
+    form.setValue('amount', normalizedAmount, { shouldValidate: true });
+  }, [amountDigits, amountDisplay, form]);
 
   const selectedFrom = useWatch({ control: form.control, name: 'fromAccountId' }) ?? '';
   const toAccountOptions = accounts.filter((account) => account.id !== selectedFrom);
@@ -104,7 +122,42 @@ export function TransfersPage() {
               </select>
             </Field>
             <Field label="Amount" error={form.formState.errors.amount?.message}>
-              <input {...form.register('amount', { valueAsNumber: true })} disabled={!hasTransferAccounts} min="0" step="0.01" type="number" />
+              <input
+                aria-label="Amount"
+                disabled={!hasTransferAccounts}
+                inputMode="numeric"
+                name="amount"
+                onFocus={(event) => {
+                  event.currentTarget.setSelectionRange(0, event.currentTarget.value.length);
+                }}
+                onKeyDown={(event) => {
+                  if (event.key >= '0' && event.key <= '9') {
+                    event.preventDefault();
+                    setAmountDigits((prev) => `${prev}${event.key}`.slice(0, 12));
+                    return;
+                  }
+                  if (event.key === 'Backspace') {
+                    event.preventDefault();
+                    setAmountDigits((prev) => prev.slice(0, -1));
+                    return;
+                  }
+                  if (event.key === 'Delete') {
+                    event.preventDefault();
+                    setAmountDigits('');
+                    return;
+                  }
+                  const allowedKeys = ['Tab', 'ArrowLeft', 'ArrowRight', 'Home', 'End', 'Enter'];
+                  if (allowedKeys.includes(event.key)) return;
+                  event.preventDefault();
+                }}
+                onPaste={(event) => {
+                  event.preventDefault();
+                  const pasted = event.clipboardData.getData('text').replace(/\D/g, '').slice(0, 12);
+                  setAmountDigits(pasted);
+                }}
+                type="text"
+                value={amountDisplay}
+              />
             </Field>
             <Field label="Memo" error={form.formState.errors.memo?.message}>
               <input {...form.register('memo')} disabled={!hasTransferAccounts} />
