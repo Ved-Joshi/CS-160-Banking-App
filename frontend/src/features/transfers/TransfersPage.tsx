@@ -60,6 +60,7 @@ export function TransfersPage() {
   });
   const hasTransferAccounts = accounts.length >= 2;
   const amountDisplay = formatAmountDigits(amountDigits);
+  const amountInputValue = `$${amountDisplay}`;
 
   useEffect(() => {
     if (!hasTransferAccounts) return;
@@ -85,7 +86,7 @@ export function TransfersPage() {
 
   useEffect(() => {
     const normalizedAmount = amountDigits ? Number(amountDisplay) : 0;
-    form.setValue('amount', normalizedAmount, { shouldValidate: true });
+    form.setValue('amount', normalizedAmount);
   }, [amountDigits, amountDisplay, form]);
 
   const selectedFrom = useWatch({ control: form.control, name: 'fromAccountId' }) ?? '';
@@ -156,7 +157,7 @@ export function TransfersPage() {
                   setAmountDigits(pasted);
                 }}
                 type="text"
-                value={amountDisplay}
+                value={amountInputValue}
               />
             </Field>
             <Field label="Memo" error={form.formState.errors.memo?.message}>

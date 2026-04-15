@@ -16,6 +16,17 @@ const depositSchema = z.object({
   backFileName: z.string().min(1),
 });
 
+function formatAmountDigits(digits: string): string {
+  const cleaned = digits.replace(/\D/g, '').slice(0, 12);
+  if (!cleaned) return '00.00';
+  if (cleaned.length === 1) return `${cleaned}0.00`;
+  if (cleaned.length === 2) return `${cleaned}.00`;
+  if (cleaned.length === 3) return `${cleaned.slice(0, 2)}.${cleaned.slice(2)}0`;
+  const integerPart = cleaned.slice(0, -2).replace(/^0+(?=\d)/, '') || '0';
+  const centsPart = cleaned.slice(-2);
+  return `${integerPart}.${centsPart}`;
+}
+
 export function DepositsPage() {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
@@ -32,6 +43,7 @@ export function DepositsPage() {
     front: 'No file selected',
     back: 'No file selected',
   });
+  const [amountDigits, setAmountDigits] = useState('');
   const { data: deposits = [] } = useQuery({ queryKey: ['deposits'], queryFn: depositsService.list });
   const { data: accounts = [] } = useQuery({ queryKey: ['accounts'], queryFn: accountsService.list });
   const mutation = useMutation({
@@ -88,12 +100,14 @@ export function DepositsPage() {
     resolver: zodResolver(depositSchema),
     defaultValues: {
       accountId: '',
-      amount: 250,
+      amount: 0,
       frontFileName: '',
       backFileName: '',
     },
   });
   const hasAccounts = accounts.length > 0;
+  const amountDisplay = formatAmountDigits(amountDigits);
+  const amountInputValue = `$${amountDisplay}`;
 
   useEffect(() => {
     if (!hasAccounts) return;
@@ -105,6 +119,11 @@ export function DepositsPage() {
       form.setValue('accountId', requestedAccountId || accounts[0]?.id || '');
     }
   }, [accounts, form, hasAccounts, preferredAccountId]);
+
+  useEffect(() => {
+    const normalizedAmount = amountDigits ? Number(amountDisplay) : 0;
+    form.setValue('amount', normalizedAmount);
+  }, [amountDigits, amountDisplay, form]);
 
   const rows = deposits.map((deposit) => [
     <Link key={`${deposit.id}-link`} className="text-link" to={`/app/deposits/${deposit.id}`}>
@@ -144,7 +163,42 @@ export function DepositsPage() {
               </select>
             </Field>
             <Field label="Amount" error={form.formState.errors.amount?.message}>
-              <input {...form.register('amount', { valueAsNumber: true })} disabled={!hasAccounts} type="number" step="0.01" />
+              <input
+                aria-label="Amount"
+                disabled={!hasAccounts}
+                inputMode="numeric"
+                name="amount"
+                onFocus={(event) => {
+                  event.currentTarget.setSelectionRange(0, event.currentTarget.value.length);
+                }}
+                onKeyDown={(event) => {
+                  if (event.key >= '0' && event.key <= '9') {
+                    event.preventDefault();
+                    setAmountDigits((prev) => `${prev}${event.key}`.slice(0, 12));
+                    return;
+                  }
+                  if (event.key === 'Backspace') {
+                    event.preventDefault();
+                    setAmountDigits((prev) => prev.slice(0, -1));
+                    return;
+                  }
+                  if (event.key === 'Delete') {
+                    event.preventDefault();
+                    setAmountDigits('');
+                    return;
+                  }
+                  const allowedKeys = ['Tab', 'ArrowLeft', 'ArrowRight', 'Home', 'End', 'Enter'];
+                  if (allowedKeys.includes(event.key)) return;
+                  event.preventDefault();
+                }}
+                onPaste={(event) => {
+                  event.preventDefault();
+                  const pasted = event.clipboardData.getData('text').replace(/\D/g, '').slice(0, 12);
+                  setAmountDigits(pasted);
+                }}
+                type="text"
+                value={amountInputValue}
+              />
             </Field>
             <Field label="Front image upload" error={form.formState.errors.frontFileName?.message}>
               <label className="file-upload">

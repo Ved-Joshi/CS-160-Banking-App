@@ -1,6 +1,6 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { Link, useSearchParams } from 'react-router-dom';
 import { z } from 'zod';
@@ -16,6 +16,17 @@ const paymentSchema = z.object({
   deliverBy: z.string().min(1),
 });
 
+function formatAmountDigits(digits: string): string {
+  const cleaned = digits.replace(/\D/g, '').slice(0, 12);
+  if (!cleaned) return '00.00';
+  if (cleaned.length === 1) return `${cleaned}0.00`;
+  if (cleaned.length === 2) return `${cleaned}.00`;
+  if (cleaned.length === 3) return `${cleaned.slice(0, 2)}.${cleaned.slice(2)}0`;
+  const integerPart = cleaned.slice(0, -2).replace(/^0+(?=\d)/, '') || '0';
+  const centsPart = cleaned.slice(-2);
+  return `${integerPart}.${centsPart}`;
+}
+
 export function BillPayPage() {
   const queryClient = useQueryClient();
   const [searchParams] = useSearchParams();
@@ -29,6 +40,7 @@ export function BillPayPage() {
       queryClient.invalidateQueries({ queryKey: ['payments'] });
     },
   });
+  const [amountDigits, setAmountDigits] = useState('');
   const form = useForm<z.infer<typeof paymentSchema>>({
     resolver: zodResolver(paymentSchema),
     defaultValues: {
@@ -42,6 +54,8 @@ export function BillPayPage() {
   const hasAccounts = accounts.length > 0;
   const hasPayees = payees.length > 0;
   const canSchedule = hasAccounts && hasPayees;
+  const amountDisplay = formatAmountDigits(amountDigits);
+  const amountInputValue = `$${amountDisplay}`;
 
   useEffect(() => {
     if (!hasAccounts) return;
@@ -61,6 +75,11 @@ export function BillPayPage() {
       form.setValue('payeeId', payees[0]?.id ?? '');
     }
   }, [form, hasPayees, payees]);
+
+  useEffect(() => {
+    const normalizedAmount = amountDigits ? Number(amountDisplay) : 0;
+    form.setValue('amount', normalizedAmount);
+  }, [amountDigits, amountDisplay, form]);
 
   const rows = payments.map((payment) => [
     payment.payeeName,
@@ -85,6 +104,7 @@ export function BillPayPage() {
                 return;
               }
               form.reset({ ...values, amount: 0 });
+              setAmountDigits('');
             })}
           >
             <h3>Schedule payment</h3>
@@ -112,7 +132,42 @@ export function BillPayPage() {
               </select>
             </Field>
             <Field label="Amount" error={form.formState.errors.amount?.message}>
-              <input {...form.register('amount', { valueAsNumber: true })} disabled={!canSchedule} step="0.01" type="number" />
+              <input
+                aria-label="Amount"
+                disabled={!canSchedule}
+                inputMode="numeric"
+                name="amount"
+                onFocus={(event) => {
+                  event.currentTarget.setSelectionRange(0, event.currentTarget.value.length);
+                }}
+                onKeyDown={(event) => {
+                  if (event.key >= '0' && event.key <= '9') {
+                    event.preventDefault();
+                    setAmountDigits((prev) => `${prev}${event.key}`.slice(0, 12));
+                    return;
+                  }
+                  if (event.key === 'Backspace') {
+                    event.preventDefault();
+                    setAmountDigits((prev) => prev.slice(0, -1));
+                    return;
+                  }
+                  if (event.key === 'Delete') {
+                    event.preventDefault();
+                    setAmountDigits('');
+                    return;
+                  }
+                  const allowedKeys = ['Tab', 'ArrowLeft', 'ArrowRight', 'Home', 'End', 'Enter'];
+                  if (allowedKeys.includes(event.key)) return;
+                  event.preventDefault();
+                }}
+                onPaste={(event) => {
+                  event.preventDefault();
+                  const pasted = event.clipboardData.getData('text').replace(/\D/g, '').slice(0, 12);
+                  setAmountDigits(pasted);
+                }}
+                type="text"
+                value={amountInputValue}
+              />
             </Field>
             <Field label="Cadence" error={form.formState.errors.cadence?.message}>
               <select {...form.register('cadence')} disabled={!canSchedule}>
