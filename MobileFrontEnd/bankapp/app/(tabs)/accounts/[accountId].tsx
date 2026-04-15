@@ -1,13 +1,28 @@
 import { useLocalSearchParams, useRouter } from "expo-router";
+import { useMemo } from "react";
 import { Text } from "react-native";
 import { Card, LinkButton, PageHeader, Row, Screen, StatusChip } from "../../../src/components/ui";
-import { mockAccounts, mockTransactions } from "../../../src/data/mockData";
 import { formatCurrency, formatDate } from "../../../src/lib/format";
+import { useAccounts, useTransactions } from "../../../src/lib/hooks";
 
 export default function AccountDetailScreen() {
   const { accountId } = useLocalSearchParams<{ accountId: string }>();
   const router = useRouter();
-  const account = mockAccounts.find((item) => item.id === accountId);
+  const { accounts, loading: accountsLoading } = useAccounts();
+  const { transactions } = useTransactions();
+
+  const account = useMemo(() => accounts.find((item) => item.id === accountId), [accounts, accountId]);
+  const rows = useMemo(() => transactions.filter((txn) => txn.accountId === accountId), [transactions, accountId]);
+
+  if (accountsLoading) {
+    return (
+      <Screen>
+        <Card>
+          <Text style={{ fontWeight: "800" }}>Loading...</Text>
+        </Card>
+      </Screen>
+    );
+  }
 
   if (!account) {
     return (
@@ -19,8 +34,6 @@ export default function AccountDetailScreen() {
       </Screen>
     );
   }
-
-  const rows = mockTransactions.filter((txn) => txn.accountId === account.id);
 
   return (
     <Screen>
@@ -48,14 +61,18 @@ export default function AccountDetailScreen() {
 
       <Card>
         <Text style={{ fontWeight: "800", fontSize: 18 }}>Recent activity</Text>
-        {rows.map((txn) => (
-          <Row
-            key={txn.id}
-            title={txn.description}
-            subtitle={`${formatDate(txn.postedAt)} • ${txn.type}`}
-            right={<Text>{txn.direction === "credit" ? "+" : "-"}{formatCurrency(txn.amount)}</Text>}
-          />
-        ))}
+        {rows.length === 0 ? (
+          <Text>No transactions found for this account.</Text>
+        ) : (
+          rows.map((txn) => (
+            <Row
+              key={txn.id}
+              title={txn.description}
+              subtitle={`${formatDate(txn.postedAt)} Â· ${txn.type}`}
+              right={<Text>{txn.direction === "credit" ? "+" : "-"}{formatCurrency(txn.amount)}</Text>}
+            />
+          ))
+        )}
       </Card>
     </Screen>
   );

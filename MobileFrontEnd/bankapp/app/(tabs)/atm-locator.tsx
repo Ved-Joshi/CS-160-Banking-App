@@ -1,20 +1,32 @@
 import { useMemo, useState } from "react";
 import { Button, Card, Field, PageHeader, Row, Screen } from "../../src/components/ui";
-import { mockAtms } from "../../src/data/mockData";
+import { searchATMs } from "../../src/lib/hooks";
+import type { AtmLocation } from "../../src/types";
 
 export default function AtmLocatorScreen() {
   const [query, setQuery] = useState("");
   const [feature, setFeature] = useState("all");
+  const [atms, setAtms] = useState<AtmLocation[]>([]);
+  const [loading, setLoading] = useState(false);
+
+  const handleSearch = async () => {
+    setLoading(true);
+    try {
+      const results = await searchATMs(query);
+      setAtms(results);
+    } catch (err) {
+      console.error("Failed to search ATMs", err);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const filtered = useMemo(
     () =>
-      mockAtms.filter((atm) => {
-        return (
-          (!query || `${atm.name} ${atm.address} ${atm.city} ${atm.state} ${atm.zip}`.toLowerCase().includes(query.toLowerCase())) &&
-          (feature === "all" || atm.features.includes(feature))
-        );
+      atms.filter((atm) => {
+        return feature === "all" || atm.features.includes(feature);
       }),
-    [feature, query]
+    [feature, atms]
   );
 
   return (
@@ -23,16 +35,23 @@ export default function AtmLocatorScreen() {
       <Card>
         <Field label="Search by city or zip" value={query} onChangeText={setQuery} />
         <Field label="Filter feature" value={feature} onChangeText={setFeature} />
+        <Button label={loading ? "Searching..." : "Search ATMs"} onPress={handleSearch} disabled={loading} />
       </Card>
       <Card>
-        {filtered.map((atm) => (
-          <Row
-            key={atm.id}
-            title={atm.name}
-            subtitle={`${atm.address}, ${atm.city}, ${atm.state} ${atm.zip} • ${atm.distanceMiles.toFixed(1)} mi`}
-            right={<Button label="Directions" variant="secondary" onPress={() => {}} />}
-          />
-        ))}
+        {atms.length === 0 ? (
+          <>
+            <Field label="Search for a location" value="" />
+          </>
+        ) : (
+          filtered.map((atm) => (
+            <Row
+              key={atm.id}
+              title={atm.name}
+              subtitle={`${atm.address}, ${atm.city}, ${atm.state} ${atm.zip}`}
+              right={<Button label="Directions" variant="secondary" onPress={() => {}} />}
+            />
+          ))
+        )}
       </Card>
     </Screen>
   );

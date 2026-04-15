@@ -18,6 +18,7 @@ export interface RegistrationInput {
   password: string;
   username?: string;
   firstName?: string;
+  middleName?: string;
   lastName?: string;
   mobilePhone?: string;
   streetAddress?: string;
@@ -25,6 +26,7 @@ export interface RegistrationInput {
   city?: string;
   state?: string;
   zipCode?: string;
+  dateOfBirth?: string;
   taxId?: string;
 }
 

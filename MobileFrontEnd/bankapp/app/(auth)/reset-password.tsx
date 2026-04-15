@@ -8,7 +8,7 @@ import { colors } from "../../src/theme/colors";
 export default function ResetPasswordScreen() {
   const router = useRouter();
   const { requestReset } = useAuth();
-  const [email, setEmail] = useState("alex.morgan@examplebank.com");
+  const [email, setEmail] = useState("");
   const [error, setError] = useState("");
   const [sentTo, setSentTo] = useState("");
 
@@ -32,7 +32,7 @@ export default function ResetPasswordScreen() {
         />
         {error ? <Text style={{ color: colors.red700, fontWeight: "700" }}>{error}</Text> : null}
         {sentTo ? <Text style={{ color: colors.success, fontWeight: "700" }}>Reset link sent to {sentTo}</Text> : null}
-        <Field label="Email address" value={email} onChangeText={setEmail} />
+        <Field label="Email address" placeholder="you@example.com" value={email} onChangeText={setEmail} />
         <Button label="Send link" onPress={onSubmit} />
         <LinkButton label="Back to sign in" onPress={() => router.push("/login")} />
       </Card>

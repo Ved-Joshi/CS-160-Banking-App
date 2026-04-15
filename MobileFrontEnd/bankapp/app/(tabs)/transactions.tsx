@@ -1,20 +1,23 @@
 import { useMemo, useState } from "react";
 import { Text } from "react-native";
 import { Card, Field, PageHeader, Row, Screen, StatusChip } from "../../src/components/ui";
-import { mockTransactions } from "../../src/data/mockData";
 import { formatCurrency, formatDate } from "../../src/lib/format";
+import { useTransactions, useAccounts } from "../../src/lib/hooks";
 
 export default function TransactionsScreen() {
   const [accountId, setAccountId] = useState("all");
   const [type, setType] = useState("all");
   const [status, setStatus] = useState("all");
+  
+  const { accounts } = useAccounts();
+  const { transactions, loading } = useTransactions();
 
   const filtered = useMemo(
     () =>
-      mockTransactions.filter((txn) => {
+      transactions.filter((txn) => {
         return (accountId === "all" || txn.accountId === accountId) && (type === "all" || txn.type === type) && (status === "all" || txn.status === status);
       }),
-    [accountId, status, type]
+    [accountId, status, type, transactions]
   );
 
   return (
@@ -26,11 +29,16 @@ export default function TransactionsScreen() {
         <Field label="Status" value={status} onChangeText={setStatus} />
       </Card>
       <Card>
-        {filtered.map((txn) => (
+        {loading ? (
+          <Text>Loading transactions...</Text>
+        ) : filtered.length === 0 ? (
+          <Text>No transactions found.</Text>
+        ) : (
+          filtered.map((txn) => (
           <Row
             key={txn.id}
             title={txn.description}
-            subtitle={`${formatDate(txn.postedAt)} • ${txn.type}`}
+            subtitle={`${formatDate(txn.postedAt)} ï¿½ ${txn.type}`}
             right={
               <>
                 <Text>{txn.direction === "credit" ? "+" : "-"}{formatCurrency(txn.amount)}</Text>
@@ -38,7 +46,8 @@ export default function TransactionsScreen() {
               </>
             }
           />
-        ))}
+        ))
+        )}
       </Card>
     </Screen>
   );

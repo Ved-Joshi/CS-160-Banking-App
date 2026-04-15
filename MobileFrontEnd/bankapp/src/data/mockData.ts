@@ -12,20 +12,20 @@ import type {
 
 export const mockUser: User = {
   id: "user-1",
-  email: "alex.morgan@examplebank.com",
-  username: "alex.morgan",
-  firstName: "Alex",
-  lastName: "Morgan",
+  email: "user@example.com",
+  username: "user.example",
+  firstName: "First",
+  lastName: "Last",
 };
 
 export const mockProfile: CustomerProfile = {
   id: "profile-1",
-  fullName: "Alex Morgan",
-  username: "alex.morgan",
-  email: "alex.morgan@examplebank.com",
-  phone: "(415) 555-0193",
-  address: "1700 Mission Street, San Francisco, CA 94103",
-  memberSince: "2022-08-14T08:00:00.000Z",
+  fullName: "First Last",
+  username: "user.example",
+  email: "user@example.com",
+  phone: "(000) 000-0000",
+  address: "123 Main St, Anytown, CA 90000",
+  memberSince: "2024-01-01T00:00:00.000Z",
   mfaEnabled: true,
 };
 

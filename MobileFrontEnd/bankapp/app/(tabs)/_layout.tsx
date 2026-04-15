@@ -41,11 +41,11 @@ export default function TabsLayout() {
         },
       })}
     >
-      <Tabs.Screen name="dashboard" options={{ title: "Dashboard" }} />
-      <Tabs.Screen name="accounts" options={{ title: "Accounts" }} />
-      <Tabs.Screen name="transfers" options={{ title: "Transfers" }} />
-      <Tabs.Screen name="bill-pay" options={{ title: "Bill Pay" }} />
-      <Tabs.Screen name="more" options={{ title: "More" }} />
+      <Tabs.Screen name="dashboard" options={{ title: "Dashboard", tabBarLabel: "Dashboard" }} />
+      <Tabs.Screen name="accounts/index" options={{ title: "Accounts", tabBarLabel: "Accounts" }} />
+      <Tabs.Screen name="transfers" options={{ title: "Transfers", tabBarLabel: "Transfers" }} />
+      <Tabs.Screen name="bill-pay" options={{ title: "Bill Pay", tabBarLabel: "Bill Pay" }} />
+      <Tabs.Screen name="more" options={{ title: "More", tabBarLabel: "More" }} />
 
       <Tabs.Screen name="accounts/[accountId]" options={{ href: null, title: "Account Details" }} />
       <Tabs.Screen name="bill-pay/payees" options={{ href: null, title: "Payees" }} />

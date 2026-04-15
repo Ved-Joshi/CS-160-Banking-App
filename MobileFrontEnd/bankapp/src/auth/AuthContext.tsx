@@ -2,7 +2,7 @@ import { createContext, useContext, useEffect, useMemo, useState, type PropsWith
 import * as Linking from "expo-linking";
 import type { User as SupabaseUser } from "@supabase/supabase-js";
 import type { CustomerProfile, RegistrationInput, User } from "../types";
-import { supabase } from "../lib/supabaseClient";
+import { supabase, supabaseUrl } from "../lib/supabaseClient";
 
 type AuthContextValue = {
   user: User | null;
@@ -93,31 +93,109 @@ export function AuthProvider({ children }: PropsWithChildren) {
         return null;
       },
       async register(input) {
-        if (!input.email.includes("@") || input.password.length < 8) {
+        const firstName = input.firstName?.trim() ?? "";
+        const lastName = input.lastName?.trim() ?? "";
+        const email = input.email.trim();
+        const password = input.password;
+        const mobilePhone = input.mobilePhone?.trim() ?? "";
+        const streetAddress = input.streetAddress?.trim() ?? "";
+        const apartmentUnit = input.apartmentUnit?.trim() ?? "";
+        const city = input.city?.trim() ?? "";
+        const state = input.state?.trim().toUpperCase() ?? "";
+        const zipCode = input.zipCode?.trim() ?? "";
+        const dateOfBirth = input.dateOfBirth?.trim() ?? "";
+        const taxId = input.taxId?.replace(/\D/g, "") ?? "";
+
+        if (firstName.length < 2 || lastName.length < 2) {
+          return "Enter first and last name.";
+        }
+
+        if (!email.includes("@") || password.length < 8) {
           return "Use a valid email and at least 8 characters for password.";
         }
 
+        if (!/^[0-9]{10,15}$/.test(mobilePhone.replace(/\D/g, ""))) {
+          return "Enter a valid phone number.";
+        }
+
+        if (!streetAddress || !city || state.length !== 2 || !/^[A-Z]{2}$/.test(state) || !/^\d{5}(?:-\d{4})?$/.test(zipCode)) {
+          return "Provide a valid address, city, state, and ZIP code.";
+        }
+
+        if (!dateOfBirth || Number.isNaN(Date.parse(dateOfBirth))) {
+          return "Enter a valid date of birth.";
+        }
+
+        const dob = new Date(dateOfBirth);
+        const today = new Date();
+        const adultCutoff = new Date(today.getFullYear() - 18, today.getMonth(), today.getDate());
+        if (dob > adultCutoff) {
+          return "You must be at least 18 years old.";
+        }
+
+        if (taxId.length !== 9) {
+          return "Enter a valid 9-digit SSN or TIN.";
+        }
+
         const { data, error } = await supabase.auth.signUp({
-          email: input.email,
-          password: input.password,
+          email,
+          password,
           options: {
             data: {
               username: input.username ?? "",
-              firstName: input.firstName ?? "",
-              lastName: input.lastName ?? "",
-              mobilePhone: input.mobilePhone ?? "",
-              streetAddress: input.streetAddress ?? "",
-              apartmentUnit: input.apartmentUnit ?? "",
-              city: input.city ?? "",
-              state: input.state ?? "",
-              zipCode: input.zipCode ?? "",
-              taxIdLast4: input.taxId ? input.taxId.slice(-4) : "",
+              firstName,
+              middleName: input.middleName?.trim() ?? "",
+              lastName,
+              mobilePhone,
+              streetAddress,
+              apartmentUnit,
+              city,
+              state,
+              zipCode,
+              dateOfBirth,
+              taxIdLast4: taxId.slice(-4),
             },
           },
         });
 
         if (error) {
           return error.message;
+        }
+
+        const session = data.session ?? (await supabase.auth.signInWithPassword({ email, password })).data?.session;
+        const token = session?.access_token;
+
+        if (!token) {
+          return "Registration created, but no active session was available. Please confirm your email before signing in.";
+        }
+
+        const completeResponse = await fetch(`${supabaseUrl}/functions/v1/complete_registration`, {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            email,
+            first_name: firstName,
+            middle_name: input.middleName?.trim() || null,
+            last_name: lastName,
+            mobile_phone_e164: mobilePhone,
+            street_address: streetAddress,
+            apartment_unit: apartmentUnit || null,
+            city,
+            state,
+            zip_code: zipCode,
+            date_of_birth: dateOfBirth,
+            tax_identifier_raw: taxId,
+          }),
+        });
+
+        if (!completeResponse.ok) {
+          const payload = await completeResponse.json().catch(() => null);
+          return (
+            payload?.error || payload?.message || completeResponse.statusText || "Unable to finish registration."
+          );
         }
 
         try {

@@ -1,12 +1,25 @@
 import { useLocalSearchParams } from "expo-router";
+import { useMemo } from "react";
 import { Text } from "react-native";
 import { Card, PageHeader, Row, Screen, StatusChip } from "../../../src/components/ui";
-import { mockDeposits } from "../../../src/data/mockData";
 import { formatCurrency, formatDateTime } from "../../../src/lib/format";
+import { useDeposits } from "../../../src/lib/hooks";
 
 export default function DepositDetailScreen() {
   const { depositId } = useLocalSearchParams<{ depositId: string }>();
-  const deposit = mockDeposits.find((item) => item.id === depositId);
+  const { deposits, loading } = useDeposits();
+  
+  const deposit = useMemo(() => deposits.find((item) => item.id === depositId), [deposits, depositId]);
+
+  if (loading) {
+    return (
+      <Screen>
+        <Card>
+          <Text style={{ fontWeight: "800" }}>Loading...</Text>
+        </Card>
+      </Screen>
+    );
+  }
 
   if (!deposit) {
     return (

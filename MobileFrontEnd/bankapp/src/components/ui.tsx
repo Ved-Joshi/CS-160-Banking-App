@@ -62,9 +62,9 @@ export function Field({
   );
 }
 
-export function Button({ label, onPress, variant = "primary" }: { label: string; onPress: () => void; variant?: "primary" | "secondary" }) {
+export function Button({ label, onPress, variant = "primary", disabled = false }: { label: string; onPress: () => void; variant?: "primary" | "secondary"; disabled?: boolean }) {
   return (
-    <Pressable style={({ pressed }) => [styles.button, variant === "primary" ? styles.buttonPrimary : styles.buttonSecondary, pressed && styles.buttonPressed]} onPress={onPress}>
+    <Pressable style={({ pressed }) => [styles.button, variant === "primary" ? styles.buttonPrimary : styles.buttonSecondary, pressed && styles.buttonPressed, disabled && styles.buttonDisabled]} onPress={onPress} disabled={disabled}>
       <Text style={variant === "primary" ? styles.buttonPrimaryText : styles.buttonSecondaryText}>{label}</Text>
     </Pressable>
   );
@@ -146,6 +146,7 @@ const styles = StyleSheet.create({
   buttonPrimary: { backgroundColor: colors.red700 },
   buttonSecondary: { backgroundColor: "rgba(16,35,59,0.08)" },
   buttonPressed: { opacity: 0.86 },
+  buttonDisabled: { opacity: 0.5 },
   buttonPrimaryText: { color: colors.white, fontWeight: "700" },
   buttonSecondaryText: { color: colors.navy950, fontWeight: "700" },
   link: { color: colors.linkBlue, fontWeight: "700" },

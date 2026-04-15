@@ -1,16 +1,27 @@
-import { useState } from "react";
-import { Text, View } from "react-native";
+import { Alert, Text, View } from "react-native";
 import { Button, Card, PageHeader, Row, Screen, StatusChip } from "../../src/components/ui";
-import { mockNotifications as seedNotifications } from "../../src/data/mockData";
 import { formatDateTime } from "../../src/lib/format";
+import { useNotifications } from "../../src/lib/hooks";
 
 export default function NotificationsScreen() {
-  const [notifications, setNotifications] = useState(seedNotifications);
+  const { notifications, loading, markAsRead } = useNotifications();
+
+  const handleMarkAsRead = async (notificationId: string) => {
+    try {
+      await markAsRead(notificationId);
+    } catch (err) {
+      Alert.alert("Error", "Failed to mark notification as read");
+    }
+  };
 
   return (
     <Screen>
       <PageHeader title="Notifications" eyebrow="System events" subtitle="Track deposit reviews, payment failures, and security notices." />
-      {!notifications.length ? (
+      {loading ? (
+        <Card>
+          <Text>Loading notifications...</Text>
+        </Card>
+      ) : !notifications.length ? (
         <Card>
           <Text style={{ fontWeight: "800" }}>No notifications</Text>
           <Text>System activity and alerts will appear here.</Text>
@@ -26,7 +37,7 @@ export default function NotificationsScreen() {
                 <Button
                   label="Mark read"
                   variant="secondary"
-                  onPress={() => setNotifications((items) => items.map((item) => (item.id === notification.id ? { ...item, read: true } : item)))}
+                  onPress={() => handleMarkAsRead(notification.id)}
                 />
               </View>
             ) : null}

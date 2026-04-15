@@ -1,20 +1,27 @@
 import { useRouter } from "expo-router";
 import { StyleSheet, Text, View } from "react-native";
 import { Card, LinkButton, PageHeader, Screen, StatusChip } from "../../src/components/ui";
-import { mockAccounts, mockDeposits, mockPayments, mockTransactions } from "../../src/data/mockData";
 import { formatCurrency, formatDate } from "../../src/lib/format";
 import { colors } from "../../src/theme/colors";
+import { useAccounts, useTransactions, useBillPayments, useDeposits } from "../../src/lib/hooks";
+import { useAuth } from "../../src/auth/AuthContext";
 
 export default function DashboardScreen() {
   const router = useRouter();
-  const totalAvailable = mockAccounts.reduce((sum, account) => sum + account.balances.availableBalance, 0);
-  const pendingDeposit = mockDeposits.find((deposit) => deposit.status === "PENDING_REVIEW");
+  const { accounts, loading: accountsLoading } = useAccounts();
+  const { transactions } = useTransactions();
+  const { payments } = useBillPayments();
+  const { deposits } = useDeposits();
+  const { user } = useAuth();
+  
+  const totalAvailable = accounts.reduce((sum, account) => sum + account.balances.availableBalance, 0);
+  const pendingDeposit = deposits.find((deposit) => deposit.status === "PENDING_REVIEW");
 
   return (
     <Screen>
       <PageHeader
         eyebrow="Account overview"
-        title="Good evening, Alex."
+        title={`Good evening, ${user?.firstName || user?.email || 'there'}.`}
         subtitle="See balances, recent activity, and the items that still need your attention."
       />
 
@@ -25,22 +32,28 @@ export default function DashboardScreen() {
         </Card>
       ) : null}
 
-      <View style={styles.heroCard}>
-        <Text style={styles.heroEyebrow}>Available across linked accounts</Text>
-        <Text style={styles.heroValue}>{formatCurrency(totalAvailable)}</Text>
-        <View style={styles.actionRow}>
-          <LinkButton label="Transfer money" onPress={() => router.push("/transfers")} />
-          <LinkButton label="Pay bills" onPress={() => router.push("/bill-pay")} />
-          <LinkButton label="Deposit check" onPress={() => router.push("/deposits")} />
-        </View>
-      </View>
+      {accountsLoading ? (
+        <Card>
+          <Text>Loading accounts...</Text>
+        </Card>
+      ) : (
+        <>
+          <View style={styles.heroCard}>
+            <Text style={styles.heroEyebrow}>Available across linked accounts</Text>
+            <Text style={styles.heroValue}>{formatCurrency(totalAvailable)}</Text>
+            <View style={styles.actionRow}>
+              <LinkButton label="Transfer money" onPress={() => router.push("/transfers")} />
+              <LinkButton label="Pay bills" onPress={() => router.push("/bill-pay")} />
+              <LinkButton label="Deposit check" onPress={() => router.push("/deposits")} />
+            </View>
+          </View>
 
-      <Card>
-        <View style={styles.headingRow}>
-          <Text style={styles.heading}>Recent transactions</Text>
-          <LinkButton label="See all" onPress={() => router.push("/transactions")} />
-        </View>
-        {mockTransactions.slice(0, 4).map((transaction) => (
+          <Card>
+            <View style={styles.headingRow}>
+              <Text style={styles.heading}>Recent transactions</Text>
+              <LinkButton label="See all" onPress={() => router.push("/transactions")} />
+            </View>
+            {transactions.slice(0, 4).map((transaction) => (
           <View key={transaction.id} style={styles.itemRow}>
             <View style={{ flex: 1 }}>
               <Text style={styles.itemTitle}>{transaction.description}</Text>
@@ -51,15 +64,15 @@ export default function DashboardScreen() {
               <StatusChip status={transaction.status} />
             </View>
           </View>
-        ))}
-      </Card>
+            ))}
+          </Card>
 
-      <Card>
-        <View style={styles.headingRow}>
-          <Text style={styles.heading}>Upcoming bill payments</Text>
-          <LinkButton label="Manage" onPress={() => router.push("/bill-pay")} />
-        </View>
-        {mockPayments.slice(0, 3).map((payment) => (
+          <Card>
+            <View style={styles.headingRow}>
+              <Text style={styles.heading}>Upcoming bill payments</Text>
+              <LinkButton label="Manage" onPress={() => router.push("/bill-pay")} />
+            </View>
+            {payments.slice(0, 3).map((payment) => (
           <View key={payment.id} style={styles.itemRow}>
             <View style={{ flex: 1 }}>
               <Text style={styles.itemTitle}>{payment.payeeName}</Text>
@@ -70,8 +83,10 @@ export default function DashboardScreen() {
               <StatusChip status={payment.status} />
             </View>
           </View>
-        ))}
-      </Card>
+            ))}
+          </Card>
+        </>
+      )}
     </Screen>
   );
 }

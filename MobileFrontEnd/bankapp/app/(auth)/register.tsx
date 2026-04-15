@@ -8,10 +8,19 @@ import { colors } from "../../src/theme/colors";
 export default function RegisterScreen() {
   const router = useRouter();
   const { isAuthenticated, register } = useAuth();
-  const [firstName, setFirstName] = useState("Alex");
-  const [lastName, setLastName] = useState("Morgan");
-  const [email, setEmail] = useState("alex.morgan@examplebank.com");
-  const [password, setPassword] = useState("Password123");
+  const [firstName, setFirstName] = useState("");
+  const [middleName, setMiddleName] = useState("");
+  const [lastName, setLastName] = useState("");
+  const [email, setEmail] = useState("");
+  const [mobilePhone, setMobilePhone] = useState("");
+  const [streetAddress, setStreetAddress] = useState("");
+  const [apartmentUnit, setApartmentUnit] = useState("");
+  const [city, setCity] = useState("");
+  const [state, setState] = useState("");
+  const [zipCode, setZipCode] = useState("");
+  const [dateOfBirth, setDateOfBirth] = useState("");
+  const [taxId, setTaxId] = useState("");
+  const [password, setPassword] = useState("");
   const [error, setError] = useState("");
 
   if (isAuthenticated) {
@@ -19,15 +28,63 @@ export default function RegisterScreen() {
   }
 
   const onRegister = async () => {
-    if (firstName.length < 2 || lastName.length < 2) {
+    const phoneDigits = mobilePhone.replace(/\D/g, "");
+    const taxDigits = taxId.replace(/\D/g, "");
+    const dob = new Date(dateOfBirth);
+    const today = new Date();
+    const adultCutoff = new Date(today.getFullYear() - 18, today.getMonth(), today.getDate());
+
+    if (firstName.trim().length < 2 || lastName.trim().length < 2) {
       setError("Enter first and last name.");
       return;
     }
-    const message = await register({ firstName, lastName, email, password });
+
+    if (!email.includes("@") || password.length < 8) {
+      setError("Use a valid email and at least 8 characters for password.");
+      return;
+    }
+
+    if (!/^[0-9]{10,15}$/.test(phoneDigits)) {
+      setError("Enter a valid phone number.");
+      return;
+    }
+
+    if (!streetAddress.trim() || !city.trim() || !/^[A-Z]{2}$/.test(state.trim().toUpperCase()) || !/^\d{5}(?:-\d{4})?$/.test(zipCode.trim())) {
+      setError("Provide a valid address, city, state, and ZIP code.");
+      return;
+    }
+
+    if (!dateOfBirth || Number.isNaN(dob.getTime()) || dob > adultCutoff) {
+      setError("You must be at least 18 years old.");
+      return;
+    }
+
+    if (taxDigits.length !== 9) {
+      setError("Enter a valid 9-digit SSN or TIN.");
+      return;
+    }
+
+    const message = await register({
+      firstName: firstName.trim(),
+      middleName: middleName.trim(),
+      lastName: lastName.trim(),
+      email: email.trim(),
+      mobilePhone: phoneDigits,
+      streetAddress: streetAddress.trim(),
+      apartmentUnit: apartmentUnit.trim(),
+      city: city.trim(),
+      state: state.trim().toUpperCase(),
+      zipCode: zipCode.trim(),
+      dateOfBirth: dateOfBirth.trim(),
+      taxId: taxDigits,
+      password,
+    });
+
     if (message) {
       setError(message);
       return;
     }
+
     setError("");
     router.replace("/dashboard");
   };
@@ -43,14 +100,33 @@ export default function RegisterScreen() {
         {error ? <Text style={{ color: colors.red700, fontWeight: "700" }}>{error}</Text> : null}
         <View style={{ flexDirection: "row", gap: 8 }}>
           <View style={{ flex: 1 }}>
-            <Field label="First name" value={firstName} onChangeText={setFirstName} />
+            <Field label="First name" placeholder="First name" value={firstName} onChangeText={setFirstName} />
           </View>
           <View style={{ flex: 1 }}>
-            <Field label="Last name" value={lastName} onChangeText={setLastName} />
+            <Field label="Middle name (optional)" placeholder="Middle name" value={middleName} onChangeText={setMiddleName} />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Field label="Last name" placeholder="Last name" value={lastName} onChangeText={setLastName} />
           </View>
         </View>
-        <Field label="Email" value={email} onChangeText={setEmail} />
-        <Field label="Password" value={password} onChangeText={setPassword} secureTextEntry />
+        <Field label="Email" placeholder="you@example.com" value={email} onChangeText={setEmail} />
+        <Field label="Mobile phone" placeholder="555-123-4567" value={mobilePhone} onChangeText={setMobilePhone} />
+        <Field label="Street address" placeholder="123 Main St" value={streetAddress} onChangeText={setStreetAddress} />
+        <Field label="Apartment / unit (optional)" placeholder="Unit 4B" value={apartmentUnit} onChangeText={setApartmentUnit} />
+        <View style={{ flexDirection: "row", gap: 8 }}>
+          <View style={{ flex: 1 }}>
+            <Field label="City" placeholder="City" value={city} onChangeText={setCity} />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Field label="State" placeholder="CA" value={state} onChangeText={setState} />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Field label="ZIP code" placeholder="12345" value={zipCode} onChangeText={setZipCode} />
+          </View>
+        </View>
+        <Field label="Date of birth" placeholder="YYYY-MM-DD" value={dateOfBirth} onChangeText={setDateOfBirth} />
+        <Field label="SSN / Tax ID" placeholder="123-45-6789" value={taxId} onChangeText={setTaxId} />
+        <Field label="Password" placeholder="At least 8 characters" value={password} onChangeText={setPassword} secureTextEntry />
         <Button label="Create access" onPress={onRegister} />
         <LinkButton label="Already enrolled? Sign in" onPress={() => router.push("/login")} />
       </Card>
