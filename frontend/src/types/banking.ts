@@ -10,6 +10,9 @@ export type TransactionStatus = 'PENDING' | 'COMPLETED' | 'FAILED';
 export type DepositStatus = 'PENDING_REVIEW' | 'APPROVED' | 'DECLINED';
 export type PaymentStatus = 'SCHEDULED' | 'PROCESSING' | 'COMPLETED' | 'FAILED' | 'CANCELLED';
 export type TransferStatus = 'PENDING' | 'COMPLETED' | 'FAILED';
+export type TransferScheduleMode = 'NOW' | 'SCHEDULED';
+export type TransferCadence = 'Once' | 'Daily' | 'Weekly' | 'Biweekly' | 'Monthly';
+export type TransferPlanStatus = 'SCHEDULED' | 'PROCESSING' | 'COMPLETED' | 'CANCELLED';
 export type NotificationType = 'deposit' | 'payment' | 'transfer' | 'security';
 
 export interface User {
@@ -32,6 +35,7 @@ export interface CustomerProfile {
   phone: string;
   address: string;
   memberSince: string;
+  timezone: string;
 }
 
 export interface RegistrationInput {
@@ -99,12 +103,43 @@ export interface TransferRequest {
   amount: number;
   memo?: string;
   transferDate: string;
+  scheduleMode?: TransferScheduleMode;
+  cadence?: TransferCadence;
+  startDate?: string;
+  runTime?: string;
+  endDate?: string;
+  timezone?: string;
 }
 
 export interface TransferResult {
   id: string;
   status: TransferStatus;
   submittedAt: string;
+}
+
+export interface TransferPlan {
+  id: string;
+  fromAccountId: string;
+  toAccountId: string;
+  amount: number;
+  memo?: string;
+  cadence: TransferCadence;
+  startDate: string;
+  runTime: string;
+  timezone: string;
+  endDate?: string;
+  nextRunAt?: string;
+  lastRunAt?: string;
+  lastFailureReason?: string;
+  status: TransferPlanStatus;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface TransferSubmissionResult {
+  mode: TransferScheduleMode;
+  transfer?: TransferResult;
+  plan?: TransferPlan;
 }
 
 export interface Payee {
