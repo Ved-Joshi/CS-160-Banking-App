@@ -45,7 +45,7 @@ export function Field({
   label,
   error,
   children,
-}: PropsWithChildren<{ label: string; error?: string }>) {
+}: PropsWithChildren<{ label: ReactNode; error?: string }>) {
   return (
     <label className="field">
       <span>{label}</span>
