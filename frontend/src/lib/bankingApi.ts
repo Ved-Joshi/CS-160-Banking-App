@@ -14,11 +14,19 @@ import type {
   Payee,
   ScheduledPayment,
   Transaction,
+  TransferPlan,
   TransferRequest,
-  TransferResult,
+  TransferSubmissionResult,
 } from '../types/banking';
 import { apiRequest } from './apiClient';
-import { normalizeAccount, normalizeAccounts, normalizeTransactions, normalizeTransferResult } from './bankingContract';
+import {
+  normalizeAccount,
+  normalizeAccounts,
+  normalizeTransactions,
+  normalizeTransferPlan,
+  normalizeTransferPlans,
+  normalizeTransferSubmissionResult,
+} from './bankingContract';
 
 export const profileService = {
   get(): Promise<CustomerProfile> {
@@ -118,11 +126,19 @@ export const notificationsService = {
 };
 
 export const transfersService = {
-  submit(input: TransferRequest): Promise<TransferResult> {
+  submit(input: TransferRequest): Promise<TransferSubmissionResult> {
     return apiRequest<unknown>('/api/transfers', {
       method: 'POST',
       body: input,
-    }).then(normalizeTransferResult);
+    }).then(normalizeTransferSubmissionResult);
+  },
+  listPlans(): Promise<TransferPlan[]> {
+    return apiRequest<unknown[]>('/api/transfers/plans').then(normalizeTransferPlans);
+  },
+  cancelPlan(planId: string): Promise<TransferPlan> {
+    return apiRequest<unknown>(`/api/transfers/plans/${planId}/cancel`, {
+      method: 'POST',
+    }).then(normalizeTransferPlan);
   },
 };
 

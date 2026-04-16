@@ -8,15 +8,23 @@ import { TransfersPage } from './TransfersPage';
 
 const mocks = vi.hoisted(() => ({
   listAccounts: vi.fn(),
+  getProfile: vi.fn(),
+  listPlans: vi.fn(),
   submitTransfer: vi.fn(),
+  cancelPlan: vi.fn(),
 }));
 
 vi.mock('../../lib/bankingApi', () => ({
   accountsService: {
     list: mocks.listAccounts,
   },
+  profileService: {
+    get: mocks.getProfile,
+  },
   transfersService: {
+    listPlans: mocks.listPlans,
     submit: mocks.submitTransfer,
+    cancelPlan: mocks.cancelPlan,
   },
 }));
 
@@ -46,6 +54,19 @@ async function fillAndReview() {
   await userEvent.click(screen.getByRole('button', { name: 'Review transfer' }));
 }
 
+async function fillAndReviewScheduled() {
+  await userEvent.selectOptions(screen.getByLabelText('Transfer mode'), 'SCHEDULED');
+  await userEvent.clear(screen.getByLabelText('Start date'));
+  await userEvent.type(screen.getByLabelText('Start date'), '2026-05-01');
+  await userEvent.clear(screen.getByLabelText('Run time'));
+  await userEvent.type(screen.getByLabelText('Run time'), '09:30');
+  await userEvent.clear(screen.getByLabelText('Timezone'));
+  await userEvent.type(screen.getByLabelText('Timezone'), 'America/New_York');
+  await userEvent.type(screen.getByLabelText('Amount'), '1250');
+  await userEvent.type(screen.getByLabelText('Memo'), 'Recurring transfer');
+  await userEvent.click(screen.getByRole('button', { name: 'Review scheduled transfer' }));
+}
+
 async function waitForTransferFormReady() {
   await waitFor(() => {
     const fromSelect = screen.getByLabelText('From account') as HTMLSelectElement;
@@ -58,6 +79,9 @@ describe('TransfersPage', () => {
   beforeEach(() => {
     mocks.listAccounts.mockReset();
     mocks.submitTransfer.mockReset();
+    mocks.getProfile.mockReset();
+    mocks.listPlans.mockReset();
+    mocks.cancelPlan.mockReset();
     mocks.listAccounts.mockResolvedValue([
       {
         id: 'acct_1',
@@ -70,6 +94,8 @@ describe('TransfersPage', () => {
         maskedNumber: '•••• 2222',
       },
     ]);
+    mocks.getProfile.mockResolvedValue({ timezone: 'America/Los_Angeles' });
+    mocks.listPlans.mockResolvedValue([]);
   });
 
   it('prevents selecting the same account for destination', async () => {
@@ -88,9 +114,12 @@ describe('TransfersPage', () => {
 
   it('submits transfer and invalidates account/transaction/notification queries', async () => {
     mocks.submitTransfer.mockResolvedValue({
-      id: 'tr_1',
-      status: 'COMPLETED',
-      submittedAt: '2026-03-05T00:00:00Z',
+      mode: 'NOW',
+      transfer: {
+        id: 'tr_1',
+        status: 'COMPLETED',
+        submittedAt: '2026-03-05T00:00:00Z',
+      },
     });
 
     const { invalidateSpy } = renderPage();
@@ -103,7 +132,68 @@ describe('TransfersPage', () => {
       expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: queryKeys.accounts() });
       expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: queryKeys.transactions() });
       expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: queryKeys.notifications() });
+      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: queryKeys.transferPlans() });
       expect(screen.getByText('Transfer submitted')).toBeInTheDocument();
+    });
+  });
+
+  it('submits scheduled transfer payload and shows scheduled result', async () => {
+    mocks.submitTransfer.mockResolvedValue({
+      mode: 'SCHEDULED',
+      plan: {
+        id: 'plan_1',
+        status: 'SCHEDULED',
+      },
+    });
+
+    renderPage();
+    await waitForTransferFormReady();
+    await fillAndReviewScheduled();
+    await userEvent.click(screen.getByRole('button', { name: 'Create schedule' }));
+
+    await waitFor(() => {
+      expect(mocks.submitTransfer).toHaveBeenCalledTimes(1);
+      expect(mocks.submitTransfer.mock.calls[0]?.[0]).toEqual(expect.objectContaining({
+        scheduleMode: 'SCHEDULED',
+        cadence: 'Once',
+        startDate: '2026-05-01',
+        runTime: '09:30',
+        timezone: 'America/New_York',
+        memo: 'Recurring transfer',
+      }));
+      expect(screen.getByText('Scheduled transfer created')).toBeInTheDocument();
+    });
+  });
+
+  it('lists scheduled transfers and cancels plan', async () => {
+    mocks.listPlans.mockResolvedValue([
+      {
+        id: 'plan_live',
+        amount: 50,
+        cadence: 'Weekly',
+        runTime: '08:00',
+        timezone: 'America/Los_Angeles',
+        nextRunAt: '2026-05-02T15:00:00Z',
+        status: 'SCHEDULED',
+      },
+    ]);
+    mocks.cancelPlan.mockResolvedValue({
+      id: 'plan_live',
+      status: 'CANCELLED',
+    });
+
+    renderPage();
+
+    await waitFor(() => {
+      expect(screen.getByText('Scheduled transfers')).toBeInTheDocument();
+      expect(screen.getByText(/\$50\.00/)).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Cancel' })).toBeInTheDocument();
+    });
+
+    await userEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+
+    await waitFor(() => {
+      expect(mocks.cancelPlan.mock.calls[0]?.[0]).toBe('plan_live');
     });
   });
 

@@ -11,6 +11,9 @@ PaymentStatus = Literal["SCHEDULED", "PROCESSING", "COMPLETED", "FAILED", "CANCE
 NotificationType = Literal["deposit", "payment", "transfer", "security"]
 PaymentCadence = Literal["Once", "Weekly", "Biweekly", "Monthly"]
 TransferStatus = Literal["PENDING", "COMPLETED", "FAILED"]
+TransferScheduleMode = Literal["NOW", "SCHEDULED"]
+TransferCadence = Literal["Once", "Daily", "Weekly", "Biweekly", "Monthly"]
+TransferPlanStatus = Literal["SCHEDULED", "PROCESSING", "COMPLETED", "CANCELLED"]
 
 
 class BalanceSummary(BaseModel):
@@ -62,12 +65,43 @@ class CreateTransferIn(BaseModel):
     amount: float = Field(gt=0)
     memo: Optional[str] = Field(default=None, max_length=80)
     transferDate: str
+    scheduleMode: TransferScheduleMode = "NOW"
+    cadence: Optional[TransferCadence] = None
+    startDate: Optional[str] = None
+    runTime: Optional[str] = None
+    endDate: Optional[str] = None
+    timezone: Optional[str] = None
 
 
 class TransferResult(BaseModel):
     id: str
     status: TransferStatus
     submittedAt: str
+
+
+class TransferPlan(BaseModel):
+    id: str
+    fromAccountId: str
+    toAccountId: str
+    amount: float
+    memo: Optional[str] = None
+    cadence: TransferCadence
+    startDate: str
+    runTime: str
+    timezone: str
+    endDate: Optional[str] = None
+    nextRunAt: Optional[str] = None
+    lastRunAt: Optional[str] = None
+    lastFailureReason: Optional[str] = None
+    status: TransferPlanStatus
+    createdAt: str
+    updatedAt: str
+
+
+class TransferSubmissionResult(BaseModel):
+    mode: TransferScheduleMode
+    transfer: Optional[TransferResult] = None
+    plan: Optional[TransferPlan] = None
 
 
 class Payee(BaseModel):
@@ -179,3 +213,4 @@ class CustomerProfile(BaseModel):
     phone: str
     address: str
     memberSince: str
+    timezone: str

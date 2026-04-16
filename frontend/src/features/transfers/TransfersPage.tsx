@@ -5,9 +5,10 @@ import { useForm, useWatch } from 'react-hook-form';
 import { Link, useSearchParams } from 'react-router-dom';
 import { z } from 'zod';
 import { Button, Card, EmptyState, Field, InlineAlert, PageHeader, StatusChip } from '../../components/ui';
-import { accountsService, transfersService } from '../../lib/bankingApi';
-import { formatCurrency } from '../../lib/format';
+import { accountsService, profileService, transfersService } from '../../lib/bankingApi';
+import { formatCurrency, formatDate } from '../../lib/format';
 import { queryKeys } from '../../lib/queryKeys';
+import type { TransferCadence, TransferRequest, TransferScheduleMode } from '../../types/banking';
 
 const transferSchema = z.object({
   fromAccountId: z.string().min(1),
@@ -15,9 +16,51 @@ const transferSchema = z.object({
   amount: z.number().positive(),
   memo: z.string().max(80).optional(),
   transferDate: z.string().min(1),
-}).refine((value) => value.fromAccountId !== value.toAccountId, {
-  message: 'From and To accounts must be different.',
-  path: ['toAccountId'],
+  scheduleMode: z.enum(['NOW', 'SCHEDULED']),
+  cadence: z.enum(['Once', 'Daily', 'Weekly', 'Biweekly', 'Monthly']),
+  startDate: z.string().optional(),
+  runTime: z.string().optional(),
+  endDate: z.string().optional(),
+  timezone: z.string().optional(),
+}).superRefine((value, ctx) => {
+  if (value.fromAccountId === value.toAccountId) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'From and To accounts must be different.',
+      path: ['toAccountId'],
+    });
+  }
+
+  if (value.scheduleMode !== 'SCHEDULED') return;
+
+  if (!value.startDate) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'Start date is required.',
+      path: ['startDate'],
+    });
+  }
+  if (!value.runTime) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'Run time is required.',
+      path: ['runTime'],
+    });
+  }
+  if (!value.timezone) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'Timezone is required.',
+      path: ['timezone'],
+    });
+  }
+  if (value.endDate && value.startDate && value.endDate < value.startDate) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'End date must be on or after start date.',
+      path: ['endDate'],
+    });
+  }
 });
 
 function formatAmountDigits(digits: string): string {
@@ -36,18 +79,29 @@ export function TransfersPage() {
   const [searchParams] = useSearchParams();
   const preferredFromAccountId = searchParams.get('fromAccountId') ?? '';
   const { data: accounts = [] } = useQuery({ queryKey: queryKeys.accounts(), queryFn: accountsService.list });
+  const { data: profile } = useQuery({ queryKey: ['profile'], queryFn: profileService.get });
+  const { data: transferPlans = [] } = useQuery({ queryKey: queryKeys.transferPlans(), queryFn: transfersService.listPlans });
   const [review, setReview] = useState<z.infer<typeof transferSchema> | null>(null);
   const [amountDigits, setAmountDigits] = useState('');
-  const mutation = useMutation({
+  const submitMutation = useMutation({
     mutationFn: transfersService.submit,
     onSuccess: async () => {
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: queryKeys.accounts() }),
         queryClient.invalidateQueries({ queryKey: queryKeys.transactions() }),
         queryClient.invalidateQueries({ queryKey: queryKeys.notifications() }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.transferPlans() }),
       ]);
     },
   });
+  const cancelPlanMutation = useMutation({
+    mutationFn: transfersService.cancelPlan,
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: queryKeys.transferPlans() });
+    },
+  });
+
+  const today = new Date().toISOString().slice(0, 10);
   const form = useForm<z.infer<typeof transferSchema>>({
     resolver: zodResolver(transferSchema),
     defaultValues: {
@@ -55,12 +109,22 @@ export function TransfersPage() {
       toAccountId: '',
       amount: 0,
       memo: '',
-      transferDate: new Date().toISOString().slice(0, 10),
+      transferDate: today,
+      scheduleMode: 'NOW',
+      cadence: 'Once',
+      startDate: today,
+      runTime: '09:00',
+      endDate: '',
+      timezone: '',
     },
   });
+
   const hasTransferAccounts = accounts.length >= 2;
   const amountDisplay = formatAmountDigits(amountDigits);
   const amountInputValue = `$${amountDisplay}`;
+  const scheduleMode = useWatch({ control: form.control, name: 'scheduleMode' }) ?? 'NOW';
+  const selectedFrom = useWatch({ control: form.control, name: 'fromAccountId' }) ?? '';
+  const toAccountOptions = accounts.filter((account) => account.id !== selectedFrom);
 
   useEffect(() => {
     if (!hasTransferAccounts) return;
@@ -89,12 +153,17 @@ export function TransfersPage() {
     form.setValue('amount', normalizedAmount);
   }, [amountDigits, amountDisplay, form]);
 
-  const selectedFrom = useWatch({ control: form.control, name: 'fromAccountId' }) ?? '';
-  const toAccountOptions = accounts.filter((account) => account.id !== selectedFrom);
+  useEffect(() => {
+    if (!profile?.timezone) return;
+    if (form.getValues('timezone')) return;
+    form.setValue('timezone', profile.timezone);
+  }, [form, profile?.timezone]);
+
+  const schedulePlans = transferPlans.filter((plan) => plan.status === 'SCHEDULED' || plan.status === 'PROCESSING');
 
   return (
     <div className="stack-xl">
-      <PageHeader title="Transfers" eyebrow="Move money" subtitle="Transfer funds between your own accounts with a review step before submission." />
+      <PageHeader title="Transfers" eyebrow="Move money" subtitle="Transfer now or schedule recurring transfers between your own accounts." />
       <div className="grid-two">
         <Card>
           <form
@@ -104,6 +173,12 @@ export function TransfersPage() {
               setReview(values);
             })}
           >
+            <Field label="Transfer mode" error={form.formState.errors.scheduleMode?.message}>
+              <select {...form.register('scheduleMode')} disabled={!hasTransferAccounts}>
+                <option value="NOW">Now</option>
+                <option value="SCHEDULED">Schedule</option>
+              </select>
+            </Field>
             <Field label="From account" error={form.formState.errors.fromAccountId?.message}>
               <select {...form.register('fromAccountId')} disabled={!hasTransferAccounts}>
                 {accounts.map((account) => (
@@ -163,9 +238,35 @@ export function TransfersPage() {
             <Field label="Memo" error={form.formState.errors.memo?.message}>
               <input {...form.register('memo')} disabled={!hasTransferAccounts} />
             </Field>
-            <Field label="Transfer date" error={form.formState.errors.transferDate?.message}>
-              <input {...form.register('transferDate')} disabled={!hasTransferAccounts} type="date" />
-            </Field>
+            {scheduleMode === 'NOW' ? (
+              <Field label="Transfer date" error={form.formState.errors.transferDate?.message}>
+                <input {...form.register('transferDate')} disabled={!hasTransferAccounts} type="date" />
+              </Field>
+            ) : (
+              <>
+                <Field label="Cadence" error={form.formState.errors.cadence?.message}>
+                  <select {...form.register('cadence')} disabled={!hasTransferAccounts}>
+                    {(['Once', 'Daily', 'Weekly', 'Biweekly', 'Monthly'] as TransferCadence[]).map((cadence) => (
+                      <option key={cadence} value={cadence}>
+                        {cadence}
+                      </option>
+                    ))}
+                  </select>
+                </Field>
+                <Field label="Start date" error={form.formState.errors.startDate?.message}>
+                  <input {...form.register('startDate')} disabled={!hasTransferAccounts} type="date" />
+                </Field>
+                <Field label="Run time" error={form.formState.errors.runTime?.message}>
+                  <input {...form.register('runTime')} disabled={!hasTransferAccounts} type="time" />
+                </Field>
+                <Field label="End date (optional)" error={form.formState.errors.endDate?.message}>
+                  <input {...form.register('endDate')} disabled={!hasTransferAccounts} type="date" />
+                </Field>
+                <Field label="Timezone" error={form.formState.errors.timezone?.message}>
+                  <input {...form.register('timezone')} disabled={!hasTransferAccounts} placeholder="America/Los_Angeles" />
+                </Field>
+              </>
+            )}
             {!hasTransferAccounts ? (
               <EmptyState
                 title="Transfers require two accounts"
@@ -173,7 +274,9 @@ export function TransfersPage() {
                 action={<Link className="button button--secondary" to="/app/accounts">Open account</Link>}
               />
             ) : null}
-            <Button disabled={!hasTransferAccounts} type="submit">Review transfer</Button>
+            <Button disabled={!hasTransferAccounts} type="submit">
+              {scheduleMode === 'SCHEDULED' ? 'Review scheduled transfer' : 'Review transfer'}
+            </Button>
           </form>
         </Card>
         <Card>
@@ -181,6 +284,10 @@ export function TransfersPage() {
           {review ? (
             <div className="stack-md">
               <dl className="stat-list">
+                <div>
+                  <dt>Mode</dt>
+                  <dd>{review.scheduleMode === 'SCHEDULED' ? 'Scheduled' : 'Now'}</dd>
+                </div>
                 <div>
                   <dt>From</dt>
                   <dd>{accounts.find((account) => account.id === review.fromAccountId)?.nickname}</dd>
@@ -193,39 +300,129 @@ export function TransfersPage() {
                   <dt>Amount</dt>
                   <dd>{formatCurrency(review.amount)}</dd>
                 </div>
-                <div>
-                  <dt>Date</dt>
-                  <dd>{review.transferDate}</dd>
-                </div>
+                {review.scheduleMode === 'SCHEDULED' ? (
+                  <>
+                    <div>
+                      <dt>Cadence</dt>
+                      <dd>{review.cadence}</dd>
+                    </div>
+                    <div>
+                      <dt>Starts</dt>
+                      <dd>{review.startDate || '—'} at {review.runTime || '—'}</dd>
+                    </div>
+                    <div>
+                      <dt>Timezone</dt>
+                      <dd>{review.timezone || '—'}</dd>
+                    </div>
+                    {review.endDate ? (
+                      <div>
+                        <dt>Ends</dt>
+                        <dd>{review.endDate}</dd>
+                      </div>
+                    ) : null}
+                  </>
+                ) : (
+                  <div>
+                    <dt>Date</dt>
+                    <dd>{review.transferDate}</dd>
+                  </div>
+                )}
               </dl>
               <Button
                 onClick={async () => {
-                  if (review && hasTransferAccounts) {
-                    mutation.mutate(review);
-                    setReview(null);
+                  if (!review || !hasTransferAccounts) return;
+                  const request: TransferRequest = {
+                    fromAccountId: review.fromAccountId,
+                    toAccountId: review.toAccountId,
+                    amount: review.amount,
+                    memo: review.memo,
+                    transferDate: review.transferDate,
+                    scheduleMode: review.scheduleMode as TransferScheduleMode,
+                  };
+                  if (review.scheduleMode === 'SCHEDULED') {
+                    request.cadence = review.cadence;
+                    request.startDate = review.startDate;
+                    request.runTime = review.runTime;
+                    request.endDate = review.endDate || undefined;
+                    request.timezone = review.timezone;
                   }
+
+                  submitMutation.mutate(request, {
+                    onSuccess: () => {
+                      setReview(null);
+                    },
+                  });
                 }}
-                disabled={mutation.isPending}
+                disabled={submitMutation.isPending}
                 type="button"
               >
-                {mutation.isPending ? 'Submitting transfer...' : 'Submit transfer'}
+                {submitMutation.isPending
+                  ? 'Submitting transfer...'
+                  : review.scheduleMode === 'SCHEDULED'
+                    ? 'Create schedule'
+                    : 'Submit transfer'}
               </Button>
             </div>
           ) : (
-            <p className="muted">Fill out the form to review the transfer details before submitting.</p>
+            <p className="muted">Fill out the form to review transfer details before submitting.</p>
           )}
-          {mutation.error ? (
+          {submitMutation.error ? (
             <InlineAlert title="Transfer could not be submitted" tone="warning">
-              {mutation.error instanceof Error ? mutation.error.message : 'Something went wrong.'}
+              {submitMutation.error instanceof Error ? submitMutation.error.message : 'Something went wrong.'}
             </InlineAlert>
           ) : null}
-          {mutation.data ? (
+          {submitMutation.data?.transfer ? (
             <InlineAlert title="Transfer submitted" tone="success">
-              Reference {mutation.data.id} <StatusChip status={mutation.data.status} />
+              Reference {submitMutation.data.transfer.id} <StatusChip status={submitMutation.data.transfer.status} />
+            </InlineAlert>
+          ) : null}
+          {submitMutation.data?.plan ? (
+            <InlineAlert title="Scheduled transfer created" tone="success">
+              Plan {submitMutation.data.plan.id} <StatusChip status={submitMutation.data.plan.status} />
             </InlineAlert>
           ) : null}
         </Card>
       </div>
+      <Card>
+        <h3>Scheduled transfers</h3>
+        {schedulePlans.length ? (
+          <div className="list-stack">
+            {schedulePlans.map((plan) => (
+              <div className="summary-row" key={plan.id}>
+                <div className="summary-row__primary">
+                  <strong>{formatCurrency(plan.amount)} • {plan.cadence}</strong>
+                  <p className="muted">
+                    Next run {plan.nextRunAt ? formatDate(plan.nextRunAt) : '—'} at {plan.runTime} ({plan.timezone})
+                  </p>
+                </div>
+                <div className="summary-row__secondary">
+                  <StatusChip status={plan.status} />
+                  <Button
+                    disabled={cancelPlanMutation.isPending}
+                    onClick={() => {
+                      cancelPlanMutation.mutate(plan.id);
+                    }}
+                    type="button"
+                    variant="secondary"
+                  >
+                    Cancel
+                  </Button>
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <EmptyState
+            title="No scheduled transfers"
+            description="Scheduled and recurring transfers will appear here after you create one."
+          />
+        )}
+        {cancelPlanMutation.error ? (
+          <InlineAlert title="Unable to cancel transfer plan" tone="warning">
+            {cancelPlanMutation.error instanceof Error ? cancelPlanMutation.error.message : 'Something went wrong.'}
+          </InlineAlert>
+        ) : null}
+      </Card>
       <Card>
         <h3>External transfers</h3>
         <p className="muted">External account transfers are currently unavailable online. Please contact support for additional transfer options.</p>

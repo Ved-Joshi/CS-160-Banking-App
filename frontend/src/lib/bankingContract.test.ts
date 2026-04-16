@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { normalizeAccount, normalizeTransaction, normalizeTransferResult } from './bankingContract';
+import {
+  normalizeAccount,
+  normalizeTransaction,
+  normalizeTransferPlan,
+  normalizeTransferResult,
+  normalizeTransferSubmissionResult,
+} from './bankingContract';
 
 describe('banking contract normalization', () => {
   it('normalizes /api account payloads without changing UI shape', () => {
@@ -70,5 +76,50 @@ describe('banking contract normalization', () => {
     expect(transaction.amount).toBe(25.99);
     expect(transaction.direction).toBe('credit');
     expect(transfer.status).toBe('COMPLETED');
+  });
+
+  it('normalizes scheduled transfer plan payloads from /api responses', () => {
+    const plan = normalizeTransferPlan({
+      id: 'plan_1',
+      from_account_id: 'acct_1',
+      to_account_id: 'acct_2',
+      amount_cents: 12500,
+      cadence: 'biweekly',
+      start_date: '2026-05-01',
+      run_time: '09:30:00',
+      timezone: 'America/New_York',
+      status: 'scheduled',
+      next_run_at: '2026-05-01T13:30:00Z',
+      created_at: '2026-04-15T00:00:00Z',
+      updated_at: '2026-04-15T00:00:00Z',
+    });
+
+    expect(plan.amount).toBe(125);
+    expect(plan.cadence).toBe('Biweekly');
+    expect(plan.runTime).toBe('09:30');
+    expect(plan.status).toBe('SCHEDULED');
+  });
+
+  it('normalizes transfer submission result for scheduled mode', () => {
+    const result = normalizeTransferSubmissionResult({
+      mode: 'SCHEDULED',
+      plan: {
+        id: 'plan_2',
+        from_account_id: 'acct_1',
+        to_account_id: 'acct_2',
+        amount_cents: 5000,
+        cadence: 'monthly',
+        start_date: '2026-05-10',
+        run_time: '07:15:00',
+        timezone: 'America/Los_Angeles',
+        status: 'processing',
+        created_at: '2026-04-15T00:00:00Z',
+        updated_at: '2026-04-15T00:00:00Z',
+      },
+    });
+
+    expect(result.mode).toBe('SCHEDULED');
+    expect(result.plan?.cadence).toBe('Monthly');
+    expect(result.plan?.status).toBe('PROCESSING');
   });
 });

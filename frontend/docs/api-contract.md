@@ -6,4 +6,4 @@ The frontend consumes the backend through `/api/*` routes as the public UI contr
 - Do not call raw ledger routes like `/accounts/*` directly from UI components.
 - Any backend shape drift (snake_case fields, cents values, status casing) is normalized in `src/lib/bankingContract.ts`.
 
-This keeps component-facing types (`BankAccount`, `Transaction`, `TransferResult`) stable while backend internals evolve.
+This keeps component-facing types (`BankAccount`, `Transaction`, `TransferSubmissionResult`, `TransferPlan`) stable while backend internals evolve.

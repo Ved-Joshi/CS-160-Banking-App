@@ -1,4 +1,4 @@
-import type { BankAccount, Transaction, TransferResult } from '../types/banking';
+import type { BankAccount, Transaction, TransferPlan, TransferResult, TransferSubmissionResult } from '../types/banking';
 
 type UnknownRecord = Record<string, unknown>;
 
@@ -139,6 +139,54 @@ export function normalizeTransferResult(input: unknown): TransferResult {
   };
 }
 
+function normalizeTransferCadence(value: unknown): TransferPlan['cadence'] {
+  const normalized = asString(value).toLowerCase();
+  if (normalized === 'daily') return 'Daily';
+  if (normalized === 'weekly') return 'Weekly';
+  if (normalized === 'biweekly') return 'Biweekly';
+  if (normalized === 'monthly') return 'Monthly';
+  return 'Once';
+}
+
+function normalizeTransferPlanStatus(value: unknown): TransferPlan['status'] {
+  const normalized = asString(value).toLowerCase();
+  if (normalized === 'processing') return 'PROCESSING';
+  if (normalized === 'completed') return 'COMPLETED';
+  if (normalized === 'cancelled') return 'CANCELLED';
+  return 'SCHEDULED';
+}
+
+export function normalizeTransferPlan(input: unknown): TransferPlan {
+  const row = asRecord(input);
+  const amount = row.amount ?? centsToDollars(row.amount_cents);
+  return {
+    id: asString(row.id),
+    fromAccountId: asString(row.fromAccountId) || asString(row.from_account_id),
+    toAccountId: asString(row.toAccountId) || asString(row.to_account_id),
+    amount: asNumber(amount, 0),
+    memo: asString(row.memo) || undefined,
+    cadence: normalizeTransferCadence(row.cadence),
+    startDate: asString(row.startDate) || asString(row.start_date),
+    runTime: asString(row.runTime) || asString(row.run_time).slice(0, 5),
+    timezone: asString(row.timezone, 'UTC'),
+    endDate: asString(row.endDate) || asString(row.end_date) || undefined,
+    nextRunAt: asString(row.nextRunAt) || asString(row.next_run_at) || undefined,
+    lastRunAt: asString(row.lastRunAt) || asString(row.last_run_at) || undefined,
+    lastFailureReason: asString(row.lastFailureReason) || asString(row.last_failure_reason) || undefined,
+    status: normalizeTransferPlanStatus(row.status),
+    createdAt: asString(row.createdAt) || asString(row.created_at),
+    updatedAt: asString(row.updatedAt) || asString(row.updated_at),
+  };
+}
+
+export function normalizeTransferSubmissionResult(input: unknown): TransferSubmissionResult {
+  const row = asRecord(input);
+  const mode = asString(row.mode).toUpperCase() === 'SCHEDULED' ? 'SCHEDULED' : 'NOW';
+  const transfer = row.transfer ? normalizeTransferResult(row.transfer) : undefined;
+  const plan = row.plan ? normalizeTransferPlan(row.plan) : undefined;
+  return { mode, transfer, plan };
+}
+
 export function normalizeAccounts(input: unknown): BankAccount[] {
   if (!Array.isArray(input)) return [];
   return input.map(normalizeAccount);
@@ -147,4 +195,9 @@ export function normalizeAccounts(input: unknown): BankAccount[] {
 export function normalizeTransactions(input: unknown): Transaction[] {
   if (!Array.isArray(input)) return [];
   return input.map(normalizeTransaction);
+}
+
+export function normalizeTransferPlans(input: unknown): TransferPlan[] {
+  if (!Array.isArray(input)) return [];
+  return input.map(normalizeTransferPlan);
 }

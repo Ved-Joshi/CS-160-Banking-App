@@ -26,11 +26,16 @@ from schemas.banking import (
     ScheduledPayment,
     SignedUploadTarget,
     Transaction,
-    TransferResult,
+    TransferPlan,
+    TransferSubmissionResult,
 )
 from utils.google_maps import SearchCenter, geocode_query, search_chase_atms
 from utils.supabase import SupabaseUser, amount_to_cents, cents_to_amount, random_last4, supabase_client
-from services.transfer_service import create_transfer_for_user
+from services.transfer_service import (
+    cancel_transfer_plan_for_user,
+    create_transfer_for_user,
+    list_transfer_plans_for_user,
+)
 
 router = APIRouter(prefix="/api", tags=["banking"])
 logger = logging.getLogger(__name__)
@@ -456,6 +461,7 @@ async def get_profile(current_user: SupabaseUser = Depends(get_current_user)) ->
         phone=profile.get("mobile_phone_e164") or current_user.phone or "—",
         address=format_address(profile),
         memberSince=profile.get("created_at") or current_user.created_at,
+        timezone=profile.get("timezone") or "America/Los_Angeles",
     )
 
 
@@ -604,19 +610,31 @@ async def list_transactions(
     return [map_transaction(row) for row in rows]
 
 
-@router.post("/transfers", response_model=TransferResult, status_code=status.HTTP_201_CREATED)
+@router.post("/transfers", response_model=TransferSubmissionResult, status_code=status.HTTP_201_CREATED)
 async def create_transfer(
     payload: CreateTransferIn,
     current_user: SupabaseUser = Depends(get_current_user),
-) -> TransferResult:
+) -> TransferSubmissionResult:
     return await create_transfer_for_user(
         current_user=current_user,
-        from_account_id=payload.fromAccountId,
-        to_account_id=payload.toAccountId,
-        amount=payload.amount,
-        memo=payload.memo,
-        transfer_date=parse_transfer_date(payload.transferDate),
+        payload=payload,
+        parsed_transfer_date=parse_transfer_date(payload.transferDate),
     )
+
+
+@router.get("/transfers/plans", response_model=list[TransferPlan])
+async def list_transfer_plans(
+    current_user: SupabaseUser = Depends(get_current_user),
+) -> list[TransferPlan]:
+    return await list_transfer_plans_for_user(current_user)
+
+
+@router.post("/transfers/plans/{plan_id}/cancel", response_model=TransferPlan)
+async def cancel_transfer_plan(
+    plan_id: str,
+    current_user: SupabaseUser = Depends(get_current_user),
+) -> TransferPlan:
+    return await cancel_transfer_plan_for_user(plan_id, current_user)
 
 
 @router.get("/payees", response_model=list[Payee])
