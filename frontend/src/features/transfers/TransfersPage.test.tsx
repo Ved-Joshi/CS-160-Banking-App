@@ -60,8 +60,6 @@ async function fillAndReviewScheduled() {
   await userEvent.type(screen.getByLabelText('Start date'), '2026-05-01');
   await userEvent.clear(screen.getByLabelText('Run time'));
   await userEvent.type(screen.getByLabelText('Run time'), '09:30');
-  await userEvent.clear(screen.getByLabelText('Timezone'));
-  await userEvent.type(screen.getByLabelText('Timezone'), 'America/New_York');
   await userEvent.type(screen.getByLabelText('Amount'), '1250');
   await userEvent.type(screen.getByLabelText('Memo'), 'Recurring transfer');
   await userEvent.click(screen.getByRole('button', { name: 'Review scheduled transfer' }));
@@ -158,7 +156,7 @@ describe('TransfersPage', () => {
         cadence: 'Once',
         startDate: '2026-05-01',
         runTime: '09:30',
-        timezone: 'America/New_York',
+        timezone: 'America/Los_Angeles',
         memo: 'Recurring transfer',
       }));
       expect(screen.getByText('Scheduled transfer created')).toBeInTheDocument();
@@ -191,6 +189,12 @@ describe('TransfersPage', () => {
     });
 
     await userEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    await waitFor(() => {
+      expect(screen.getByText('Cancel Weekly transfer?')).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Confirm cancel' })).toBeInTheDocument();
+    });
+
+    await userEvent.click(screen.getByRole('button', { name: 'Confirm cancel' }));
 
     await waitFor(() => {
       expect(mocks.cancelPlan.mock.calls[0]?.[0]).toBe('plan_live');

@@ -4,11 +4,11 @@ import { useEffect, useState } from 'react';
 import { useForm, useWatch } from 'react-hook-form';
 import { Link, useSearchParams } from 'react-router-dom';
 import { z } from 'zod';
-import { Button, Card, EmptyState, Field, InlineAlert, PageHeader, StatusChip } from '../../components/ui';
+import { Button, Card, Dialog, EmptyState, Field, InlineAlert, PageHeader, StatusChip } from '../../components/ui';
 import { accountsService, profileService, transfersService } from '../../lib/bankingApi';
 import { formatCurrency, formatDate } from '../../lib/format';
 import { queryKeys } from '../../lib/queryKeys';
-import type { TransferCadence, TransferRequest, TransferScheduleMode } from '../../types/banking';
+import type { TransferCadence, TransferPlan, TransferRequest, TransferScheduleMode } from '../../types/banking';
 
 const transferSchema = z.object({
   fromAccountId: z.string().min(1),
@@ -47,13 +47,6 @@ const transferSchema = z.object({
       path: ['runTime'],
     });
   }
-  if (!value.timezone) {
-    ctx.addIssue({
-      code: z.ZodIssueCode.custom,
-      message: 'Timezone is required.',
-      path: ['timezone'],
-    });
-  }
   if (value.endDate && value.startDate && value.endDate < value.startDate) {
     ctx.addIssue({
       code: z.ZodIssueCode.custom,
@@ -74,15 +67,28 @@ function formatAmountDigits(digits: string): string {
   return `${integerPart}.${centsPart}`;
 }
 
+function getBrowserTimezone(): string {
+  try {
+    const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    return typeof tz === 'string' && tz.trim().length > 0 ? tz : 'UTC';
+  } catch {
+    return 'UTC';
+  }
+}
+
 export function TransfersPage() {
   const queryClient = useQueryClient();
   const [searchParams] = useSearchParams();
   const preferredFromAccountId = searchParams.get('fromAccountId') ?? '';
   const { data: accounts = [] } = useQuery({ queryKey: queryKeys.accounts(), queryFn: accountsService.list });
   const { data: profile } = useQuery({ queryKey: ['profile'], queryFn: profileService.get });
-  const { data: transferPlans = [] } = useQuery({ queryKey: queryKeys.transferPlans(), queryFn: transfersService.listPlans });
+  const {
+    data: transferPlans = [],
+    error: transferPlansError,
+  } = useQuery({ queryKey: queryKeys.transferPlans(), queryFn: transfersService.listPlans });
   const [review, setReview] = useState<z.infer<typeof transferSchema> | null>(null);
   const [amountDigits, setAmountDigits] = useState('');
+  const [planPendingCancel, setPlanPendingCancel] = useState<TransferPlan | null>(null);
   const submitMutation = useMutation({
     mutationFn: transfersService.submit,
     onSuccess: async () => {
@@ -102,6 +108,7 @@ export function TransfersPage() {
   });
 
   const today = new Date().toISOString().slice(0, 10);
+  const browserTimezone = getBrowserTimezone();
   const form = useForm<z.infer<typeof transferSchema>>({
     resolver: zodResolver(transferSchema),
     defaultValues: {
@@ -125,6 +132,7 @@ export function TransfersPage() {
   const scheduleMode = useWatch({ control: form.control, name: 'scheduleMode' }) ?? 'NOW';
   const selectedFrom = useWatch({ control: form.control, name: 'fromAccountId' }) ?? '';
   const toAccountOptions = accounts.filter((account) => account.id !== selectedFrom);
+  const activeTransferPlans = transferPlans.filter((plan) => plan.status === 'SCHEDULED' || plan.status === 'PROCESSING');
 
   useEffect(() => {
     if (!hasTransferAccounts) return;
@@ -154,12 +162,15 @@ export function TransfersPage() {
   }, [amountDigits, amountDisplay, form]);
 
   useEffect(() => {
-    if (!profile?.timezone) return;
-    if (form.getValues('timezone')) return;
-    form.setValue('timezone', profile.timezone);
-  }, [form, profile?.timezone]);
-
-  const schedulePlans = transferPlans.filter((plan) => plan.status === 'SCHEDULED' || plan.status === 'PROCESSING');
+    const currentTimezone = form.getValues('timezone');
+    if (!currentTimezone && profile?.timezone) {
+      form.setValue('timezone', profile.timezone);
+      return;
+    }
+    if (!currentTimezone && browserTimezone) {
+      form.setValue('timezone', browserTimezone);
+    }
+  }, [form, profile?.timezone, browserTimezone]);
 
   return (
     <div className="stack-xl">
@@ -261,9 +272,6 @@ export function TransfersPage() {
                 </Field>
                 <Field label="End date (optional)" error={form.formState.errors.endDate?.message}>
                   <input {...form.register('endDate')} disabled={!hasTransferAccounts} type="date" />
-                </Field>
-                <Field label="Timezone" error={form.formState.errors.timezone?.message}>
-                  <input {...form.register('timezone')} disabled={!hasTransferAccounts} placeholder="America/Los_Angeles" />
                 </Field>
               </>
             )}
@@ -385,9 +393,9 @@ export function TransfersPage() {
       </div>
       <Card>
         <h3>Scheduled transfers</h3>
-        {schedulePlans.length ? (
+        {activeTransferPlans.length ? (
           <div className="list-stack">
-            {schedulePlans.map((plan) => (
+            {activeTransferPlans.map((plan) => (
               <div className="summary-row" key={plan.id}>
                 <div className="summary-row__primary">
                   <strong>{formatCurrency(plan.amount)} • {plan.cadence}</strong>
@@ -397,26 +405,30 @@ export function TransfersPage() {
                 </div>
                 <div className="summary-row__secondary">
                   <StatusChip status={plan.status} />
-                  <Button
-                    disabled={cancelPlanMutation.isPending}
-                    onClick={() => {
-                      cancelPlanMutation.mutate(plan.id);
-                    }}
-                    type="button"
-                    variant="secondary"
-                  >
-                    Cancel
-                  </Button>
+                  {(plan.status === 'SCHEDULED' || plan.status === 'PROCESSING') ? (
+                    <Button
+                      disabled={cancelPlanMutation.isPending}
+                      onClick={() => {
+                        setPlanPendingCancel(plan);
+                      }}
+                      type="button"
+                      variant="primary"
+                    >
+                      Cancel
+                    </Button>
+                  ) : null}
                 </div>
               </div>
             ))}
           </div>
         ) : (
-          <EmptyState
-            title="No scheduled transfers"
-            description="Scheduled and recurring transfers will appear here after you create one."
-          />
+          <p className="muted">No scheduled transfers yet. Scheduled and recurring transfers will appear here after you create one.</p>
         )}
+        {transferPlansError ? (
+          <InlineAlert title="Unable to load scheduled transfers" tone="warning">
+            {transferPlansError instanceof Error ? transferPlansError.message : 'Something went wrong.'}
+          </InlineAlert>
+        ) : null}
         {cancelPlanMutation.error ? (
           <InlineAlert title="Unable to cancel transfer plan" tone="warning">
             {cancelPlanMutation.error instanceof Error ? cancelPlanMutation.error.message : 'Something went wrong.'}
@@ -427,6 +439,65 @@ export function TransfersPage() {
         <h3>External transfers</h3>
         <p className="muted">External account transfers are currently unavailable online. Please contact support for additional transfer options.</p>
       </Card>
+      <Dialog
+        actions={(
+          <>
+            <Button
+              onClick={() => {
+                if (cancelPlanMutation.isPending) return;
+                setPlanPendingCancel(null);
+              }}
+              type="button"
+              variant="secondary"
+            >
+              Keep schedule
+            </Button>
+            <Button
+              disabled={cancelPlanMutation.isPending || !planPendingCancel}
+              onClick={() => {
+                if (!planPendingCancel) return;
+                cancelPlanMutation.mutate(planPendingCancel.id, {
+                  onSuccess: () => {
+                    setPlanPendingCancel(null);
+                  },
+                });
+              }}
+              type="button"
+              variant="destructive"
+            >
+              {cancelPlanMutation.isPending ? 'Cancelling...' : 'Confirm cancel'}
+            </Button>
+          </>
+        )}
+        description="Future runs for this scheduled transfer will be cancelled. Past completed runs remain in your history."
+        onClose={() => {
+          if (cancelPlanMutation.isPending) return;
+          setPlanPendingCancel(null);
+        }}
+        open={planPendingCancel !== null}
+        title={planPendingCancel ? `Cancel ${planPendingCancel.cadence} transfer?` : 'Cancel scheduled transfer?'}
+      >
+        {planPendingCancel ? (
+          <div className="stack-sm">
+            <div className="summary-row">
+              <div className="summary-row__primary">
+                <strong>Amount</strong>
+              </div>
+              <div className="summary-row__secondary">
+                <strong>{formatCurrency(planPendingCancel.amount)}</strong>
+              </div>
+            </div>
+            <div className="summary-row">
+              <div className="summary-row__primary">
+                <strong>Next run</strong>
+              </div>
+              <div className="summary-row__secondary">
+                <span>{planPendingCancel.nextRunAt ? formatDate(planPendingCancel.nextRunAt) : '—'} at {planPendingCancel.runTime}</span>
+              </div>
+            </div>
+          </div>
+        ) : null}
+      </Dialog>
     </div>
   );
 }
