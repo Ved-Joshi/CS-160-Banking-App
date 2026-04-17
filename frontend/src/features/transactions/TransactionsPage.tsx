@@ -1,10 +1,12 @@
 import { useQuery } from '@tanstack/react-query';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { Card, DataTable, EmptyState, Field, PageHeader, StatusChip } from '../../components/ui';
 import { accountsService, transactionsService } from '../../lib/bankingApi';
 import { formatCurrency, formatDate, formatDateTime, titleCase } from '../../lib/format';
 import { queryKeys } from '../../lib/queryKeys';
+
+const TRANSACTIONS_PER_PAGE = 20;
 
 function csvEscape(value: string): string {
   const needsQuoting = /[",\n\r]/.test(value);
@@ -31,6 +33,7 @@ export function TransactionsPage() {
   const accountId = accountIdOverride || derivedAccountId;
   const [type, setType] = useState('all');
   const [status, setStatus] = useState('all');
+  const [page, setPage] = useState(1);
   const hasActiveFilters = accountId !== 'all' || type !== 'all' || status !== 'all';
 
   const filtered = useMemo(
@@ -45,7 +48,25 @@ export function TransactionsPage() {
     [accountId, status, transactions, type],
   );
 
-  const rows = filtered.map((transaction) => [
+  useEffect(() => {
+    setPage(1);
+  }, [accountId, type, status]);
+
+  const totalPages = Math.max(1, Math.ceil(filtered.length / TRANSACTIONS_PER_PAGE));
+
+  useEffect(() => {
+    if (page > totalPages) {
+      setPage(totalPages);
+    }
+  }, [page, totalPages]);
+
+  const pagedTransactions = useMemo(() => {
+    const startIndex = (page - 1) * TRANSACTIONS_PER_PAGE;
+    const endIndex = startIndex + TRANSACTIONS_PER_PAGE;
+    return filtered.slice(startIndex, endIndex);
+  }, [filtered, page]);
+
+  const rows = pagedTransactions.map((transaction) => [
     formatDate(transaction.postedAt),
     transaction.description,
     transaction.type,
@@ -144,7 +165,33 @@ export function TransactionsPage() {
       </Card>
       <Card>
         {filtered.length ? (
-          <DataTable headers={['Date', 'Description', 'Type', 'Status', 'Amount']} rows={rows} />
+          <div className="stack-md">
+            <DataTable headers={['Date', 'Description', 'Type', 'Status', 'Amount']} rows={rows} />
+            <div className="transactions-pagination">
+              <p className="muted">
+                Showing {(page - 1) * TRANSACTIONS_PER_PAGE + 1}-{Math.min(page * TRANSACTIONS_PER_PAGE, filtered.length)} of {filtered.length}
+              </p>
+              <div className="transactions-pagination__controls">
+                <button
+                  className="button button--ghost pagination-button"
+                  disabled={page <= 1}
+                  onClick={() => setPage((current) => Math.max(1, current - 1))}
+                  type="button"
+                >
+                  Previous
+                </button>
+                <span className="muted">Page {page} of {totalPages}</span>
+                <button
+                  className="button button--ghost pagination-button"
+                  disabled={page >= totalPages}
+                  onClick={() => setPage((current) => Math.min(totalPages, current + 1))}
+                  type="button"
+                >
+                  Next
+                </button>
+              </div>
+            </div>
+          </div>
         ) : (
           <EmptyState
             title={accounts.length ? 'No transactions yet' : 'No accounts available'}
