@@ -3,8 +3,21 @@ import { useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { Card, DataTable, EmptyState, Field, PageHeader, StatusChip } from '../../components/ui';
 import { accountsService, transactionsService } from '../../lib/bankingApi';
-import { formatCurrency, formatDate } from '../../lib/format';
+import { formatCurrency, formatDate, formatDateTime, titleCase } from '../../lib/format';
 import { queryKeys } from '../../lib/queryKeys';
+
+function csvEscape(value: string): string {
+  const needsQuoting = /[",\n\r]/.test(value);
+  const escaped = value.replace(/"/g, '""');
+  return needsQuoting ? `"${escaped}"` : escaped;
+}
+
+function formatFileTimestamp(value: Date): string {
+  const year = value.getFullYear();
+  const month = `${value.getMonth() + 1}`.padStart(2, '0');
+  const day = `${value.getDate()}`.padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
 
 export function TransactionsPage() {
   const [searchParams] = useSearchParams();
@@ -18,6 +31,7 @@ export function TransactionsPage() {
   const accountId = accountIdOverride || derivedAccountId;
   const [type, setType] = useState('all');
   const [status, setStatus] = useState('all');
+  const hasActiveFilters = accountId !== 'all' || type !== 'all' || status !== 'all';
 
   const filtered = useMemo(
     () =>
@@ -39,13 +53,63 @@ export function TransactionsPage() {
     `${transaction.direction === 'credit' ? '+' : '-'}${formatCurrency(transaction.amount)}`,
   ]);
 
+  const handleExportCsv = () => {
+    if (!filtered.length || typeof window === 'undefined' || typeof document === 'undefined') return;
+
+    const accountNameById = new Map(accounts.map((account) => [account.id, account.nickname]));
+    const headers = [
+      'posted_at',
+      'description',
+      'type',
+      'status',
+      'direction',
+      'amount_usd',
+      'account_name',
+    ];
+    const dataRows = filtered.map((transaction) => {
+      return [
+        formatDateTime(transaction.postedAt),
+        transaction.description,
+        transaction.type,
+        titleCase(transaction.status),
+        transaction.direction,
+        transaction.amount.toFixed(2),
+        accountNameById.get(transaction.accountId) ?? '',
+      ];
+    });
+
+    const csv = [headers, ...dataRows]
+      .map((line) => line.map((cell) => csvEscape(String(cell))).join(','))
+      .join('\r\n');
+
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const downloadUrl = window.URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = downloadUrl;
+    const suffix = hasActiveFilters ? 'filtered' : 'all';
+    link.download = `sj-state-bank-transactions-${suffix}-${formatFileTimestamp(new Date())}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    window.URL.revokeObjectURL(downloadUrl);
+  };
+
   return (
     <div className="stack-xl">
       <PageHeader
         title="Transactions"
         eyebrow="Activity history"
         subtitle="Filter and review posted, pending, and failed account activity."
-        actions={<button className="button button--secondary" disabled={!accounts.length || !filtered.length} type="button">Export CSV</button>}
+        actions={(
+          <button
+            className="button button--secondary"
+            disabled={!accounts.length || !filtered.length}
+            onClick={handleExportCsv}
+            type="button"
+          >
+            {hasActiveFilters ? 'Export filtered CSV' : 'Export CSV'}
+          </button>
+        )}
       />
       <Card>
         <div className="grid-three">
