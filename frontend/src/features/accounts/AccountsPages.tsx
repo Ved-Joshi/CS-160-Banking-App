@@ -432,20 +432,25 @@ export function AccountDetailPage() {
           <div className="activity-feed">
             {accountTransactions.map((transaction) => (
               <div className="activity-item" key={transaction.id}>
-                <div className="activity-item__icon" aria-hidden="true">
+                <div
+                  aria-hidden="true"
+                  className={transaction.direction === 'credit' ? 'activity-item__icon activity-item__icon--credit' : 'activity-item__icon activity-item__icon--debit'}
+                >
                   {transaction.direction === 'credit' ? '+' : '−'}
                 </div>
                 <div className="activity-item__content">
                   <div className="activity-item__primary">
                     <strong>{transaction.description}</strong>
-                    <span>{transaction.type}</span>
+                    <span>
+                      {transaction.type} • {transaction.direction === 'credit' ? 'Money in' : 'Money out'}
+                    </span>
                   </div>
                   <div className="activity-item__secondary">
                     <span>{formatDate(transaction.postedAt)}</span>
                     <StatusChip status={transaction.status} />
                   </div>
                 </div>
-                <div className={transaction.direction === 'credit' ? 'activity-item__amount activity-item__amount--credit' : 'activity-item__amount'}>
+                <div className={transaction.direction === 'credit' ? 'activity-item__amount activity-item__amount--credit' : 'activity-item__amount activity-item__amount--debit'}>
                   {transaction.direction === 'credit' ? '+' : '-'}{formatCurrency(transaction.amount)}
                 </div>
               </div>
