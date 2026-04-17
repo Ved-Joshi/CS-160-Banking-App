@@ -507,12 +507,13 @@ async def process_due_transfer_plans(*, batch_size: int = 50) -> dict[str, int]:
 
         cadence = plan["cadence"]
         timezone_name = plan["timezone"]
-        run_time = _parse_local_time(plan.get("run_time"), field_name="runTime")
-        next_run_at = datetime.fromisoformat(plan["next_run_at"].replace("Z", "+00:00"))
-        local_run_date = next_run_at.astimezone(ZoneInfo(timezone_name)).date()
-        end_date = _parse_iso_date(plan["end_date"], field_name="endDate") if plan.get("end_date") else None
-
+        last_failure_reason: str | None = None
         try:
+            run_time = _parse_local_time(plan.get("run_time"), field_name="runTime")
+            next_run_at = datetime.fromisoformat(plan["next_run_at"].replace("Z", "+00:00"))
+            local_run_date = next_run_at.astimezone(ZoneInfo(timezone_name)).date()
+            end_date = _parse_iso_date(plan["end_date"], field_name="endDate") if plan.get("end_date") else None
+
             await execute_transfer_run(
                 user_id=plan["user_id"],
                 actor_user_id=plan["user_id"],
@@ -525,7 +526,6 @@ async def process_due_transfer_plans(*, batch_size: int = 50) -> dict[str, int]:
                 enforce_user_ownership=True,
             )
             succeeded += 1
-            last_failure_reason = None
         except HTTPException as exc:
             failed += 1
             last_failure_reason = _format_error_detail(exc.detail)
@@ -543,6 +543,20 @@ async def process_due_transfer_plans(*, batch_size: int = 50) -> dict[str, int]:
                     "transfer_plan_id": plan["id"],
                 },
             )
+        except Exception as exc:
+            failed += 1
+            last_failure_reason = f"Unable to process transfer plan: {str(exc)}"
+            await supabase_client.update_rows(
+                "transfer_plans",
+                {
+                    "status": "cancelled",
+                    "last_run_at": now_utc.isoformat(),
+                    "next_run_at": None,
+                    "last_failure_reason": last_failure_reason,
+                },
+                filters={"id": f"eq.{plan['id']}"},
+            )
+            continue
 
         if cadence == "once":
             await supabase_client.update_rows(

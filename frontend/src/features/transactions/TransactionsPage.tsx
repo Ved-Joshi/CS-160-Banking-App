@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { Card, DataTable, EmptyState, Field, PageHeader, StatusChip } from '../../components/ui';
 import { accountsService, transactionsService } from '../../lib/bankingApi';
@@ -48,23 +48,14 @@ export function TransactionsPage() {
     [accountId, status, transactions, type],
   );
 
-  useEffect(() => {
-    setPage(1);
-  }, [accountId, type, status]);
-
   const totalPages = Math.max(1, Math.ceil(filtered.length / TRANSACTIONS_PER_PAGE));
-
-  useEffect(() => {
-    if (page > totalPages) {
-      setPage(totalPages);
-    }
-  }, [page, totalPages]);
+  const currentPage = Math.min(page, totalPages);
 
   const pagedTransactions = useMemo(() => {
-    const startIndex = (page - 1) * TRANSACTIONS_PER_PAGE;
+    const startIndex = (currentPage - 1) * TRANSACTIONS_PER_PAGE;
     const endIndex = startIndex + TRANSACTIONS_PER_PAGE;
     return filtered.slice(startIndex, endIndex);
-  }, [filtered, page]);
+  }, [currentPage, filtered]);
 
   const rows = pagedTransactions.map((transaction) => [
     formatDate(transaction.postedAt),
@@ -135,7 +126,14 @@ export function TransactionsPage() {
       <Card>
         <div className="grid-three">
           <Field label="Account">
-            <select disabled={!accounts.length} value={accountId} onChange={(event) => setAccountIdOverride(event.target.value)}>
+            <select
+              disabled={!accounts.length}
+              value={accountId}
+              onChange={(event) => {
+                setAccountIdOverride(event.target.value);
+                setPage(1);
+              }}
+            >
               <option value="all">All accounts</option>
               {accounts.map((account) => (
                 <option key={account.id} value={account.id}>
@@ -145,7 +143,14 @@ export function TransactionsPage() {
             </select>
           </Field>
           <Field label="Type">
-            <select disabled={!accounts.length} value={type} onChange={(event) => setType(event.target.value)}>
+            <select
+              disabled={!accounts.length}
+              value={type}
+              onChange={(event) => {
+                setType(event.target.value);
+                setPage(1);
+              }}
+            >
               <option value="all">All types</option>
               <option value="Deposit">Deposit</option>
               <option value="Transfer">Transfer</option>
@@ -154,7 +159,14 @@ export function TransactionsPage() {
             </select>
           </Field>
           <Field label="Status">
-            <select disabled={!accounts.length} value={status} onChange={(event) => setStatus(event.target.value)}>
+            <select
+              disabled={!accounts.length}
+              value={status}
+              onChange={(event) => {
+                setStatus(event.target.value);
+                setPage(1);
+              }}
+            >
               <option value="all">All statuses</option>
               <option value="COMPLETED">Completed</option>
               <option value="PENDING">Pending</option>
@@ -169,21 +181,21 @@ export function TransactionsPage() {
             <DataTable headers={['Date', 'Description', 'Type', 'Status', 'Amount']} rows={rows} />
             <div className="transactions-pagination">
               <p className="muted">
-                Showing {(page - 1) * TRANSACTIONS_PER_PAGE + 1}-{Math.min(page * TRANSACTIONS_PER_PAGE, filtered.length)} of {filtered.length}
+                Showing {(currentPage - 1) * TRANSACTIONS_PER_PAGE + 1}-{Math.min(currentPage * TRANSACTIONS_PER_PAGE, filtered.length)} of {filtered.length}
               </p>
               <div className="transactions-pagination__controls">
                 <button
                   className="button button--ghost pagination-button"
-                  disabled={page <= 1}
+                  disabled={currentPage <= 1}
                   onClick={() => setPage((current) => Math.max(1, current - 1))}
                   type="button"
                 >
                   Previous
                 </button>
-                <span className="muted">Page {page} of {totalPages}</span>
+                <span className="muted">Page {currentPage} of {totalPages}</span>
                 <button
                   className="button button--ghost pagination-button"
-                  disabled={page >= totalPages}
+                  disabled={currentPage >= totalPages}
                   onClick={() => setPage((current) => Math.min(totalPages, current + 1))}
                   type="button"
                 >

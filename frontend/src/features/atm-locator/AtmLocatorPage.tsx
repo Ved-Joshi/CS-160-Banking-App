@@ -12,6 +12,7 @@ type SearchTarget =
 
 type LocationState = 'idle' | 'requesting' | 'ready' | 'denied' | 'error' | 'unsupported';
 type MapState = 'idle' | 'loading' | 'ready' | 'error';
+const EMPTY_ATMS: NonNullable<Awaited<ReturnType<typeof atmService.search>>['atms']> = [];
 
 function buildSearchInput(target: SearchTarget, radiusMiles: number, openNow: boolean): AtmSearchInput | null {
   if (!target) return null;
@@ -34,10 +35,12 @@ export function AtmLocatorPage() {
   const [searchText, setSearchText] = useState('');
   const [radiusMiles, setRadiusMiles] = useState(10);
   const [openNow, setOpenNow] = useState(false);
-  const [locationState, setLocationState] = useState<LocationState>('idle');
+  const [locationState, setLocationState] = useState<LocationState>(() =>
+    typeof navigator !== 'undefined' && navigator.geolocation ? 'requesting' : 'unsupported',
+  );
   const [target, setTarget] = useState<SearchTarget>(null);
   const [selectedAtmId, setSelectedAtmId] = useState<string | null>(null);
-  const [mapState, setMapState] = useState<MapState>(isGoogleMapsConfigured() ? 'idle' : 'error');
+  const [mapState, setMapState] = useState<MapState>(isGoogleMapsConfigured() ? 'loading' : 'error');
   const mapCanvasRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<google.maps.Map | null>(null);
   const markersRef = useRef<Array<{ id: string; marker: google.maps.Marker; listener: google.maps.MapsEventListener }>>([]);
@@ -53,27 +56,16 @@ export function AtmLocatorPage() {
     staleTime: 10 * 60 * 1000,
   });
 
-  const atms = searchQuery.data?.atms ?? [];
+  const atms = searchQuery.data?.atms ?? EMPTY_ATMS;
   const center = searchQuery.data?.center;
-  const selectedAtm = atms.find((atm) => atm.id === selectedAtmId) ?? atms[0] ?? null;
+  const activeAtmId = selectedAtmId && atms.some((atm) => atm.id === selectedAtmId) ? selectedAtmId : atms[0]?.id ?? null;
+  const selectedAtm = atms.find((atm) => atm.id === activeAtmId) ?? null;
 
   useEffect(() => {
-    if (!atms.length) {
-      setSelectedAtmId(null);
-      return;
-    }
-    if (!selectedAtmId || !atms.some((atm) => atm.id === selectedAtmId)) {
-      setSelectedAtmId(atms[0].id);
-    }
-  }, [atms, selectedAtmId]);
-
-  useEffect(() => {
-    if (!isGoogleMapsConfigured()) {
-      setMapState('error');
+    if (mapState !== 'loading') {
       return;
     }
     let cancelled = false;
-    setMapState('loading');
     void loadGoogleMaps()
       .then(() => {
         if (!cancelled) {
@@ -88,7 +80,7 @@ export function AtmLocatorPage() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [mapState]);
 
   useEffect(() => {
     if (mapState !== 'ready' || !mapCanvasRef.current || !center || !window.google?.maps) {
@@ -161,31 +153,29 @@ export function AtmLocatorPage() {
   }, [selectedAtm]);
 
   useEffect(() => {
-    if (!selectedAtmId) {
+    if (!activeAtmId) {
       lastScrolledAtmIdRef.current = null;
       return;
     }
     if (lastScrolledAtmIdRef.current === null) {
-      lastScrolledAtmIdRef.current = selectedAtmId;
+      lastScrolledAtmIdRef.current = activeAtmId;
       return;
     }
-    if (lastScrolledAtmIdRef.current === selectedAtmId) {
+    if (lastScrolledAtmIdRef.current === activeAtmId) {
       return;
     }
-    cardRefs.current[selectedAtmId]?.scrollIntoView({
+    cardRefs.current[activeAtmId]?.scrollIntoView({
       behavior: 'smooth',
       block: 'nearest',
     });
-    lastScrolledAtmIdRef.current = selectedAtmId;
-  }, [selectedAtmId]);
+    lastScrolledAtmIdRef.current = activeAtmId;
+  }, [activeAtmId]);
 
   useEffect(() => {
     if (!navigator.geolocation) {
-      setLocationState('unsupported');
       return;
     }
 
-    setLocationState('requesting');
     navigator.geolocation.getCurrentPosition(
       (position) => {
         setLocationState('ready');
@@ -197,7 +187,6 @@ export function AtmLocatorPage() {
         });
       },
       (error) => {
-        setTarget(null);
         if (error.code === error.PERMISSION_DENIED) {
           setLocationState('denied');
           return;
@@ -221,7 +210,6 @@ export function AtmLocatorPage() {
 
   const handleUseMyLocation = () => {
     if (!navigator.geolocation) {
-      setLocationState('unsupported');
       return;
     }
     setLocationState('requesting');
@@ -337,7 +325,7 @@ export function AtmLocatorPage() {
                 <div className="list-stack">
                   {atms.map((atm, index) => (
                     <div
-                      className={atm.id === selectedAtmId ? 'atm-card atm-card--selected' : 'atm-card'}
+                      className={atm.id === activeAtmId ? 'atm-card atm-card--selected' : 'atm-card'}
                       key={atm.id}
                       ref={(element) => {
                         cardRefs.current[atm.id] = element;
