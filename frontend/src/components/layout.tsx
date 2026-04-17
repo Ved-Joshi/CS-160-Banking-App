@@ -22,12 +22,12 @@ export function AppShell() {
   return (
     <div className="app-shell">
       <aside className="side-nav">
-        <div className="brand-lockup">
+        <NavLink className="brand-lockup" to="/app/dashboard">
           <span className="brand-lockup__mark">SJ</span>
           <div className="brand-lockup__text">
             <strong>SJ State Bank</strong>
           </div>
-        </div>
+        </NavLink>
         <nav className="side-nav__menu">
           {navItems.map(([label, to]) => (
             <NavLink key={to} className={({ isActive }) => (isActive ? 'nav-link nav-link--active' : 'nav-link')} to={to}>
