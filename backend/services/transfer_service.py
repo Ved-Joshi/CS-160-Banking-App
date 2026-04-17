@@ -13,6 +13,8 @@ from schemas.banking import (
 )
 from utils.supabase import SupabaseUser, amount_to_cents, cents_to_amount, supabase_client
 
+STALE_PROCESSING_TIMEOUT_MINUTES = 10
+
 
 def _is_admin(current_user: SupabaseUser) -> bool:
     roles = current_user.app_metadata.get("roles") or current_user.user_metadata.get("roles") or []
@@ -83,13 +85,16 @@ def _parse_local_time(value: str | None, *, field_name: str) -> time:
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"{field_name} is required.",
         )
-    try:
-        return datetime.strptime(value, "%H:%M").time().replace(second=0, microsecond=0)
-    except ValueError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"{field_name} must be in HH:MM format.",
-        ) from exc
+    for fmt in ("%H:%M", "%H:%M:%S"):
+        try:
+            parsed = datetime.strptime(value, fmt).time()
+            return parsed.replace(second=0, microsecond=0)
+        except ValueError:
+            continue
+    raise HTTPException(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        detail=f"{field_name} must be in HH:MM format.",
+    )
 
 
 def _validate_timezone(value: str | None) -> str:
@@ -383,17 +388,11 @@ async def create_transfer_for_user(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Both accounts must be open.")
 
     now_utc = datetime.now(timezone.utc)
-    next_run_at = _compute_next_run_at(
-        cadence=cadence,
-        start_date=start_date,
-        run_time=run_time,
-        timezone_name=timezone_name,
-        reference_utc=now_utc,
-    )
-    if not next_run_at:
+    first_run_at = _combine_local_to_utc(start_date, run_time, timezone_name)
+    if first_run_at <= now_utc:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Scheduled time must be in the future for one-time transfers.",
+            detail="First scheduled run must be in the future.",
         )
 
     created = await supabase_client.insert_row(
@@ -410,7 +409,7 @@ async def create_transfer_for_user(
             "run_time": run_time.strftime("%H:%M:%S"),
             "timezone": timezone_name,
             "status": "scheduled",
-            "next_run_at": next_run_at.isoformat(),
+            "next_run_at": first_run_at.isoformat(),
         },
     )
     return TransferSubmissionResult(mode="SCHEDULED", plan=_map_transfer_plan(created))
@@ -419,7 +418,10 @@ async def create_transfer_for_user(
 async def list_transfer_plans_for_user(current_user: SupabaseUser) -> list[TransferPlan]:
     rows = await supabase_client.select_rows(
         "transfer_plans",
-        filters={"user_id": f"eq.{current_user.id}"},
+        filters={
+            "user_id": f"eq.{current_user.id}",
+            "status": "in.(scheduled,processing)",
+        },
         order="created_at.desc",
     )
     return [_map_transfer_plan(row) for row in rows]
@@ -452,6 +454,31 @@ async def cancel_transfer_plan_for_user(plan_id: str, current_user: SupabaseUser
 
 async def process_due_transfer_plans(*, batch_size: int = 50) -> dict[str, int]:
     now_utc = datetime.now(timezone.utc)
+    stale_cutoff = now_utc - timedelta(minutes=STALE_PROCESSING_TIMEOUT_MINUTES)
+
+    # Recover plans that were claimed but never finalized (worker crash/restart).
+    stale_processing_rows = await supabase_client.select_rows(
+        "transfer_plans",
+        select="id",
+        filters={
+            "status": "eq.processing",
+            "updated_at": f"lte.{stale_cutoff.isoformat()}",
+        },
+        limit=batch_size,
+    )
+
+    reclaimed = 0
+    for stale in stale_processing_rows:
+        reset_rows = await supabase_client.update_rows(
+            "transfer_plans",
+            {
+                "status": "scheduled",
+            },
+            filters={"id": f"eq.{stale['id']}", "status": "eq.processing"},
+        )
+        if reset_rows:
+            reclaimed += 1
+
     due_rows = await supabase_client.select_rows(
         "transfer_plans",
         filters={
@@ -557,6 +584,7 @@ async def process_due_transfer_plans(*, batch_size: int = 50) -> dict[str, int]:
         )
 
     return {
+        "reclaimed": reclaimed,
         "processed": processed,
         "succeeded": succeeded,
         "failed": failed,
