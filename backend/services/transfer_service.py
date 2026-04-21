@@ -34,6 +34,30 @@ async def create_transfer_for_user(
     memo: str | None,
     transfer_date: str,
 ) -> TransferResult:
+    """
+    Create and execute an internal transfer between accounts using a transactional RPC.
+    
+    This uses the submit_internal_transfer RPC to ensure all mutations happen atomically:
+    - Account balance updates, transfer creation, journal entries, ledger postings, and
+      transaction records are all applied in a single Postgres transaction with FOR UPDATE locks.
+    
+    If the transfer cannot be completed due to insufficient balance, no state is mutated
+    and the request fails with 400 Bad Request.
+    
+    Args:
+        current_user: The authenticated user
+        from_account_id: Source account UUID
+        to_account_id: Destination account UUID  
+        amount: Transfer amount in dollars
+        memo: Optional transfer memo
+        transfer_date: Transfer date (must be current date)
+        
+    Returns:
+        TransferResult with transfer ID, status, and submitted timestamp
+        
+    Raises:
+        HTTPException: If validation fails or insufficient balance
+    """
     if from_account_id == to_account_id:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -47,6 +71,7 @@ async def create_transfer_for_user(
             detail="Transfer amount must be greater than zero.",
         )
 
+    # Fetch accounts for validation (non-mutating reads)
     from_account = await _get_account(from_account_id)
     to_account = await _get_account(to_account_id)
 
@@ -68,86 +93,43 @@ async def create_transfer_for_user(
             detail="Insufficient balance.",
         )
 
-    transfer = await supabase_client.insert_row(
-        "transfers",
-        {
-            "user_id": current_user.id,
-            "from_account_id": from_account_id,
-            "to_account_id": to_account_id,
-            "amount_cents": amount_cents,
-            "memo": memo,
-            "transfer_date": transfer_date,
-            "status": "completed",
-            "completed_at": datetime.now(timezone.utc).isoformat(),
-        },
-    )
+    # Call transactional RPC: all mutations happen atomically in Postgres
+    # The RPC uses FOR UPDATE to lock both accounts, validates state, and performs
+    # all updates (accounts, transfer, ledger_journals, ledger_postings, transactions, notifications)
+    # in one transaction
+    try:
+        result = await supabase_client.rpc(
+            "submit_internal_transfer",
+            {
+                "p_user_id": current_user.id,
+                "p_from_account_id": from_account_id,
+                "p_to_account_id": to_account_id,
+                "p_amount_cents": amount_cents,
+                "p_transfer_date": transfer_date,
+                "p_memo": memo,
+            },
+        )
+    except HTTPException as exc:
+        # RPC errors should propagate with appropriate HTTP status codes
+        if "Insufficient available funds" in str(exc.detail):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Insufficient balance.",
+            ) from exc
+        elif any(msg in str(exc.detail) for msg in ["not found", "open", "different accounts"]):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=str(exc.detail),
+            ) from exc
+        raise
 
+    # Result contains: id, status, submitted_at from the RPC
+    # Note: result may be a list with one row (Supabase RPC returns rows)
+    if isinstance(result, list):
+        result = result[0] if result else {}
     
-
-    await supabase_client.update_rows(
-        "accounts",
-        {
-            "available_balance_cents": from_account["available_balance_cents"] - amount_cents,
-            "current_balance_cents": from_account["current_balance_cents"] - amount_cents,
-        },
-        filters={"id": f"eq.{from_account_id}"},
-    )
-
-    await supabase_client.update_rows(
-        "accounts",
-        {
-            "available_balance_cents": to_account["available_balance_cents"] + amount_cents,
-            "current_balance_cents": to_account["current_balance_cents"] + amount_cents,
-        },
-        filters={"id": f"eq.{to_account_id}"},
-    )
-
-    journal = await supabase_client.insert_row(
-        "ledger_journals",
-        {
-            "event_type": "transfer",
-            "reference_type": "transfer",
-            "reference_id": transfer["id"],
-            "description": memo or "Internal transfer",
-            "created_by": current_user.id,
-        },
-    )
-
-    await supabase_client.insert_row(
-        "transactions",
-        {
-            "user_id": current_user.id,
-            "account_id": from_account_id,
-            "journal_id": journal["id"],
-            "type": "transfer",
-            "direction": "out",
-            "amount_cents": amount_cents,
-            "description": memo or "Transfer out",
-            "status": "posted",
-            "posted_at": datetime.now(timezone.utc).isoformat(),
-            "transfer_id": transfer["id"],
-        },
-    )
-
-    await supabase_client.insert_row(
-        "transactions",
-        {
-            "user_id": to_account["user_id"],
-            "account_id": to_account_id,
-            "journal_id": journal["id"],
-            "type": "transfer",
-            "direction": "in",
-            "amount_cents": amount_cents,
-            "description": memo or "Transfer in",
-            "status": "posted",
-            "posted_at": datetime.now(timezone.utc).isoformat(),
-            "transfer_id": transfer["id"],
-        },
-    )
-    
-
     return TransferResult(
-        id=transfer["id"],
+        id=result.get("id"),
         status="COMPLETED",
-        submittedAt=transfer["submitted_at"],
+        submittedAt=result.get("submitted_at"),
     )
