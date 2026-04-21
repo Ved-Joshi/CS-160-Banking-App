@@ -1,6 +1,13 @@
 from fastapi import HTTPException, status
 
+from config import settings
 from utils.supabase import SupabaseUser, supabase_client
+
+
+def _is_admin(current_user: SupabaseUser) -> bool:
+    """Check if the user has admin role."""
+    roles = current_user.app_metadata.get("roles") or current_user.user_metadata.get("roles") or []
+    return isinstance(roles, list) and "admin" in roles
 
 
 async def execute_payment_for_user(payment_id: str, current_user: SupabaseUser) -> dict:
@@ -20,6 +27,13 @@ async def execute_payment_for_user(payment_id: str, current_user: SupabaseUser) 
     Raises:
         HTTPException: If payment not found, validation fails, or insufficient balance
     """
+    # Authorization: dev-only endpoint - admin or debug mode only
+    if not _is_admin(current_user) and not settings.DEBUG:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="This endpoint is restricted to administrators.",
+        )
+    
     # Fetch payment and account info for validation (non-mutating reads)
     payment_rows = await supabase_client.select_rows(
         "bill_payments",

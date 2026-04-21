@@ -1,5 +1,5 @@
 from pathlib import PurePosixPath
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 import logging
 from uuid import uuid4
 
@@ -406,7 +406,9 @@ def parse_deliver_by(value: str) -> str:
             detail="Deliver by date must be in YYYY-MM-DD format.",
         ) from exc
 
-    if parsed < datetime.now(timezone.utc).date():
+    # Compare against server's local date (not UTC) to match client's date-only input.
+    # This prevents rejecting valid same-day dates due to timezone mismatches.
+    if parsed < date.today():
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Deliver by date cannot be in the past.",
@@ -724,6 +726,8 @@ async def cancel_payment(
     return map_payment(rows[0])
 
 
+# DEV-ONLY ENDPOINT: Restricted to admins or DEBUG mode only.
+# Authorization is enforced in execute_payment_for_user() - see payment_service.py for details.
 @router.post("/dev-payments/{payment_id}/run", response_model=ScheduledPayment)
 async def run_payment_now(
     payment_id: str,
