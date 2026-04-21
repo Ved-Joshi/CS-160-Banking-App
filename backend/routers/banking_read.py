@@ -1,5 +1,5 @@
 from pathlib import PurePosixPath
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 import logging
 from uuid import uuid4
 
@@ -26,16 +26,12 @@ from schemas.banking import (
     ScheduledPayment,
     SignedUploadTarget,
     Transaction,
-    TransferPlan,
-    TransferSubmissionResult,
+    TransferResult,
 )
 from utils.google_maps import SearchCenter, geocode_query, search_chase_atms
 from utils.supabase import SupabaseUser, amount_to_cents, cents_to_amount, random_last4, supabase_client
-from services.transfer_service import (
-    cancel_transfer_plan_for_user,
-    create_transfer_for_user,
-    list_transfer_plans_for_user,
-)
+from services.payment_service import execute_payment_for_user
+from services.transfer_service import create_transfer_for_user
 
 router = APIRouter(prefix="/api", tags=["banking"])
 logger = logging.getLogger(__name__)
@@ -50,18 +46,7 @@ def map_account_type(value: str) -> str:
 
 
 def map_account_status(value: str) -> str:
-    return "Open" if normalize_account_status(value) == "open" else "Restricted"
-
-
-def normalize_account_status(value: str | None) -> str:
-    normalized = (value or "open").strip().lower()
-    if normalized in {"open", "active"}:
-        return "open"
-    if normalized in {"frozen", "restricted", "hold"}:
-        return "frozen"
-    if normalized in {"closed", "close"}:
-        return "closed"
-    return normalized or "open"
+    return "Open" if value == "open" else "Restricted"
 
 
 def normalize_account_type(value: str) -> str:
@@ -174,7 +159,7 @@ def build_close_reasons(
     blocked_payment_accounts: set[str],
 ) -> list[str]:
     reasons: list[str] = []
-    status_value = normalize_account_status(row.get("status"))
+    status_value = row.get("status", "open")
     if status_value != "open":
         reasons.append("Only open accounts can be closed.")
 
@@ -412,6 +397,26 @@ def parse_transfer_date(value: str) -> str:
         ) from exc
 
 
+def parse_deliver_by(value: str) -> str:
+    try:
+        parsed = datetime.strptime(value, "%Y-%m-%d").date()
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Deliver by date must be in YYYY-MM-DD format.",
+        ) from exc
+
+    # Compare against server's local date (not UTC) to match client's date-only input.
+    # This prevents rejecting valid same-day dates due to timezone mismatches.
+    if parsed < date.today():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Deliver by date cannot be in the past.",
+        )
+
+    return parsed.isoformat()
+
+
 def build_atm_center(
     *,
     lat: float | None,
@@ -461,7 +466,6 @@ async def get_profile(current_user: SupabaseUser = Depends(get_current_user)) ->
         phone=profile.get("mobile_phone_e164") or current_user.phone or "—",
         address=format_address(profile),
         memberSince=profile.get("created_at") or current_user.created_at,
-        timezone=profile.get("timezone") or "America/Los_Angeles",
     )
 
 
@@ -471,10 +475,10 @@ async def list_accounts(current_user: SupabaseUser = Depends(get_current_user)) 
         "accounts",
         filters={
             "user_id": f"eq.{current_user.id}",
+            "status": "eq.open",
         },
         order="opened_at.asc",
     )
-    rows = [row for row in rows if normalize_account_status(row.get("status")) != "closed"]
     close_context = await get_close_eligibility_context(current_user.id)
     return [
         map_account(
@@ -494,12 +498,11 @@ async def get_account(account_id: str, current_user: SupabaseUser = Depends(get_
         filters={
             "id": f"eq.{account_id}",
             "user_id": f"eq.{current_user.id}",
+            "status": "eq.open",
         },
         limit=1,
     )
     if not rows:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Account not found.")
-    if normalize_account_status(rows[0].get("status")) == "closed":
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Account not found.")
     close_context = await get_close_eligibility_context(current_user.id)
     return map_account(
@@ -610,31 +613,19 @@ async def list_transactions(
     return [map_transaction(row) for row in rows]
 
 
-@router.post("/transfers", response_model=TransferSubmissionResult, status_code=status.HTTP_201_CREATED)
+@router.post("/transfers", response_model=TransferResult, status_code=status.HTTP_201_CREATED)
 async def create_transfer(
     payload: CreateTransferIn,
     current_user: SupabaseUser = Depends(get_current_user),
-) -> TransferSubmissionResult:
+) -> TransferResult:
     return await create_transfer_for_user(
         current_user=current_user,
-        payload=payload,
-        parsed_transfer_date=parse_transfer_date(payload.transferDate),
+        from_account_id=payload.fromAccountId,
+        to_account_id=payload.toAccountId,
+        amount=payload.amount,
+        memo=payload.memo,
+        transfer_date=parse_transfer_date(payload.transferDate),
     )
-
-
-@router.get("/transfers/plans", response_model=list[TransferPlan])
-async def list_transfer_plans(
-    current_user: SupabaseUser = Depends(get_current_user),
-) -> list[TransferPlan]:
-    return await list_transfer_plans_for_user(current_user)
-
-
-@router.post("/transfers/plans/{plan_id}/cancel", response_model=TransferPlan)
-async def cancel_transfer_plan(
-    plan_id: str,
-    current_user: SupabaseUser = Depends(get_current_user),
-) -> TransferPlan:
-    return await cancel_transfer_plan_for_user(plan_id, current_user)
 
 
 @router.get("/payees", response_model=list[Payee])
@@ -668,6 +659,7 @@ async def create_payment(
 ) -> ScheduledPayment:
     account = await require_owned_account(payload.accountId, current_user.id, require_open=True)
     payee = await require_owned_payee(payload.payeeId, current_user.id)
+    deliver_by = parse_deliver_by(payload.deliverBy)
 
     created = await supabase_client.insert_row(
         "bill_payments",
@@ -677,13 +669,78 @@ async def create_payment(
             "account_id": account["id"],
             "amount_cents": amount_to_cents(payload.amount),
             "cadence": normalize_payment_cadence(payload.cadence),
-            "deliver_by": payload.deliverBy,
+            "deliver_by": deliver_by,
             "status": "scheduled",
-            "next_run_at": f"{payload.deliverBy}T00:00:00+00:00",
+            "next_run_at": f"{deliver_by}T00:00:00+00:00",
+            "failure_reason": None,
         },
     )
     created["payee"] = {"name": payee.get("name")}
     return map_payment(created)
+
+
+@router.post("/payments/{payment_id}/cancel", response_model=ScheduledPayment)
+async def cancel_payment(
+    payment_id: str,
+    current_user: SupabaseUser = Depends(get_current_user),
+) -> ScheduledPayment:
+    payment_rows = await supabase_client.select_rows(
+        "bill_payments",
+        filters={
+            "id": f"eq.{payment_id}",
+            "user_id": f"eq.{current_user.id}",
+        },
+        limit=1,
+    )
+    if not payment_rows:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Payment not found.")
+
+    payment = payment_rows[0]
+    if payment.get("status") not in {"scheduled", "processing"}:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Only scheduled or processing payments can be cancelled.",
+        )
+
+    rows = await supabase_client.update_rows(
+        "bill_payments",
+        {
+            "status": "cancelled",
+            "failure_reason": None,
+            "next_run_at": None,
+        },
+        filters={
+            "id": f"eq.{payment_id}",
+            "user_id": f"eq.{current_user.id}",
+        },
+    )
+    if not rows:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Payment not found.")
+
+    payee_rows = await supabase_client.select_rows(
+        "payees",
+        filters={"id": f"eq.{payment['payee_id']}"},
+        limit=1,
+    )
+    rows[0]["payee"] = {"name": payee_rows[0]["name"] if payee_rows else "Manual Payee"}
+    return map_payment(rows[0])
+
+
+# DEV-ONLY ENDPOINT: Restricted to admins or DEBUG mode only.
+# Authorization is enforced in execute_payment_for_user() - see payment_service.py for details.
+@router.post("/dev-payments/{payment_id}/run", response_model=ScheduledPayment)
+async def run_payment_now(
+    payment_id: str,
+    current_user: SupabaseUser = Depends(get_current_user),
+) -> ScheduledPayment:
+    updated = await execute_payment_for_user(payment_id, current_user)
+    payee_rows = await supabase_client.select_rows(
+        "payees",
+        filters={"id": f"eq.{updated['payee_id']}"},
+        limit=1,
+    )
+    updated["payee"] = {"name": payee_rows[0]["name"] if payee_rows else "Manual Payee"}
+    return map_payment(updated)
 
 
 @router.get("/deposits", response_model=list[Deposit])
