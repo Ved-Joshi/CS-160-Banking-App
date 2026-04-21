@@ -127,16 +127,6 @@ export function BillPayPage() {
                 {mutation.error.message}
               </InlineAlert>
             ) : null}
-            {cancelMutation.error instanceof Error ? (
-              <InlineAlert title="Unable to cancel payment" tone="warning">
-                {cancelMutation.error.message}
-              </InlineAlert>
-            ) : null}
-            {runNowMutation.error instanceof Error ? (
-              <InlineAlert title="Unable to run payment" tone="warning">
-                {runNowMutation.error.message}
-              </InlineAlert>
-            ) : null}
             <Field label="Payee" error={form.formState.errors.payeeId?.message}>
               <select {...form.register('payeeId')} disabled={!canSchedule}>
                 {payees.map((payee) => (
@@ -194,6 +184,16 @@ export function BillPayPage() {
           </div>
         </Card>
       </div>
+      {cancelMutation.error instanceof Error ? (
+        <InlineAlert title="Unable to cancel payment" tone="warning">
+          {cancelMutation.error.message}
+        </InlineAlert>
+      ) : null}
+      {runNowMutation.error instanceof Error ? (
+        <InlineAlert title="Unable to run payment" tone="warning">
+          {runNowMutation.error.message}
+        </InlineAlert>
+      ) : null}
       {rows.length ? (
         <Card>
           <h3>Scheduled payments</h3>
