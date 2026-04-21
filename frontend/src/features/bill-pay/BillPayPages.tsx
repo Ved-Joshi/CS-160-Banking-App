@@ -29,6 +29,20 @@ export function BillPayPage() {
       queryClient.invalidateQueries({ queryKey: ['payments'] });
     },
   });
+  const cancelMutation = useMutation({
+    mutationFn: paymentsService.cancel,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['payments'] });
+    },
+  });
+  const runNowMutation = useMutation({
+    mutationFn: paymentsService.runNow,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['payments'] });
+      queryClient.invalidateQueries({ queryKey: ['accounts'] });
+      queryClient.invalidateQueries({ queryKey: ['transactions'] });
+    },
+  });
   const form = useForm<z.infer<typeof paymentSchema>>({
     resolver: zodResolver(paymentSchema),
     defaultValues: {
@@ -62,13 +76,33 @@ export function BillPayPage() {
     }
   }, [form, hasPayees, payees]);
 
-  const rows = payments.map((payment) => [
-    payment.payeeName,
-    formatDate(payment.deliverBy),
-    payment.cadence,
-    <StatusChip key={`${payment.id}-status`} status={payment.status} />,
-    formatCurrency(payment.amount),
-  ]);
+  const rows = payments.map((payment) => {
+    const canCancel = payment.status === 'SCHEDULED' || payment.status === 'PROCESSING';
+    return [
+      payment.payeeName,
+      formatDate(payment.deliverBy),
+      payment.cadence,
+      <StatusChip key={`${payment.id}-status`} status={payment.status} />,
+      formatCurrency(payment.amount),
+      <div key={`${payment.id}-actions`} style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+        <Button
+          disabled={!canCancel || cancelMutation.isPending || runNowMutation.isPending}
+          onClick={() => cancelMutation.mutate(payment.id)}
+          type="button"
+          variant="secondary"
+        >
+          Cancel
+        </Button>
+        <Button
+          disabled={!canCancel || cancelMutation.isPending || runNowMutation.isPending}
+          onClick={() => runNowMutation.mutate(payment.id)}
+          type="button"
+        >
+          Run now
+        </Button>
+      </div>,
+    ];
+  });
 
   return (
     <div className="stack-xl">
@@ -91,6 +125,16 @@ export function BillPayPage() {
             {mutation.error instanceof Error ? (
               <InlineAlert title="Unable to schedule payment" tone="warning">
                 {mutation.error.message}
+              </InlineAlert>
+            ) : null}
+            {cancelMutation.error instanceof Error ? (
+              <InlineAlert title="Unable to cancel payment" tone="warning">
+                {cancelMutation.error.message}
+              </InlineAlert>
+            ) : null}
+            {runNowMutation.error instanceof Error ? (
+              <InlineAlert title="Unable to run payment" tone="warning">
+                {runNowMutation.error.message}
               </InlineAlert>
             ) : null}
             <Field label="Payee" error={form.formState.errors.payeeId?.message}>
@@ -153,7 +197,7 @@ export function BillPayPage() {
       {rows.length ? (
         <Card>
           <h3>Scheduled payments</h3>
-          <DataTable headers={['Payee', 'Deliver by', 'Cadence', 'Status', 'Amount']} rows={rows} />
+          <DataTable headers={['Payee', 'Deliver by', 'Cadence', 'Status', 'Amount', 'Actions']} rows={rows} />
         </Card>
       ) : (
         <EmptyState

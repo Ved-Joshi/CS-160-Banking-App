@@ -120,7 +120,7 @@ export interface ScheduledPayment {
   payeeName: string;
   accountId: string;
   amount: number;
-  cadence: 'Once' | 'Monthly' | 'Biweekly';
+  cadence: 'Once' | 'Weekly' | 'Monthly' | 'Biweekly';
   deliverBy: string;
   status: PaymentStatus;
 }

@@ -76,6 +76,16 @@ export const paymentsService = {
       body: input,
     });
   },
+  cancel(paymentId: string): Promise<ScheduledPayment> {
+    return apiRequest(`/api/payments/${paymentId}/cancel`, {
+      method: 'POST',
+    });
+  },
+  runNow(paymentId: string): Promise<ScheduledPayment> {
+    return apiRequest(`/api/dev-payments/${paymentId}/run`, {
+      method: 'POST',
+    });
+  },
 };
 
 export const depositsService = {

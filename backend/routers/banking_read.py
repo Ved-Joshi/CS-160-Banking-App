@@ -30,6 +30,7 @@ from schemas.banking import (
 )
 from utils.google_maps import SearchCenter, geocode_query, search_chase_atms
 from utils.supabase import SupabaseUser, amount_to_cents, cents_to_amount, random_last4, supabase_client
+from services.payment_service import execute_payment_for_user
 from services.transfer_service import create_transfer_for_user
 
 router = APIRouter(prefix="/api", tags=["banking"])
@@ -396,6 +397,24 @@ def parse_transfer_date(value: str) -> str:
         ) from exc
 
 
+def parse_deliver_by(value: str) -> str:
+    try:
+        parsed = datetime.strptime(value, "%Y-%m-%d").date()
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Deliver by date must be in YYYY-MM-DD format.",
+        ) from exc
+
+    if parsed < datetime.now(timezone.utc).date():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Deliver by date cannot be in the past.",
+        )
+
+    return parsed.isoformat()
+
+
 def build_atm_center(
     *,
     lat: float | None,
@@ -638,6 +657,7 @@ async def create_payment(
 ) -> ScheduledPayment:
     account = await require_owned_account(payload.accountId, current_user.id, require_open=True)
     payee = await require_owned_payee(payload.payeeId, current_user.id)
+    deliver_by = parse_deliver_by(payload.deliverBy)
 
     created = await supabase_client.insert_row(
         "bill_payments",
@@ -647,13 +667,76 @@ async def create_payment(
             "account_id": account["id"],
             "amount_cents": amount_to_cents(payload.amount),
             "cadence": normalize_payment_cadence(payload.cadence),
-            "deliver_by": payload.deliverBy,
+            "deliver_by": deliver_by,
             "status": "scheduled",
-            "next_run_at": f"{payload.deliverBy}T00:00:00+00:00",
+            "next_run_at": f"{deliver_by}T00:00:00+00:00",
+            "failure_reason": None,
         },
     )
     created["payee"] = {"name": payee.get("name")}
     return map_payment(created)
+
+
+@router.post("/payments/{payment_id}/cancel", response_model=ScheduledPayment)
+async def cancel_payment(
+    payment_id: str,
+    current_user: SupabaseUser = Depends(get_current_user),
+) -> ScheduledPayment:
+    payment_rows = await supabase_client.select_rows(
+        "bill_payments",
+        filters={
+            "id": f"eq.{payment_id}",
+            "user_id": f"eq.{current_user.id}",
+        },
+        limit=1,
+    )
+    if not payment_rows:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Payment not found.")
+
+    payment = payment_rows[0]
+    if payment.get("status") not in {"scheduled", "processing"}:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Only scheduled or processing payments can be cancelled.",
+        )
+
+    rows = await supabase_client.update_rows(
+        "bill_payments",
+        {
+            "status": "cancelled",
+            "failure_reason": None,
+            "next_run_at": None,
+        },
+        filters={
+            "id": f"eq.{payment_id}",
+            "user_id": f"eq.{current_user.id}",
+        },
+    )
+    if not rows:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Payment not found.")
+
+    payee_rows = await supabase_client.select_rows(
+        "payees",
+        filters={"id": f"eq.{payment['payee_id']}"},
+        limit=1,
+    )
+    rows[0]["payee"] = {"name": payee_rows[0]["name"] if payee_rows else "Manual Payee"}
+    return map_payment(rows[0])
+
+
+@router.post("/dev-payments/{payment_id}/run", response_model=ScheduledPayment)
+async def run_payment_now(
+    payment_id: str,
+    current_user: SupabaseUser = Depends(get_current_user),
+) -> ScheduledPayment:
+    updated = await execute_payment_for_user(payment_id, current_user)
+    payee_rows = await supabase_client.select_rows(
+        "payees",
+        filters={"id": f"eq.{updated['payee_id']}"},
+        limit=1,
+    )
+    updated["payee"] = {"name": payee_rows[0]["name"] if payee_rows else "Manual Payee"}
+    return map_payment(updated)
 
 
 @router.get("/deposits", response_model=list[Deposit])
