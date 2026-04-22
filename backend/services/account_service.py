@@ -13,6 +13,19 @@ async def create_account_for_user(
     account_type: str,
     nickname: str | None = None,
 ) -> dict:
+    is_default_internal_receive = False
+    if account_type == "checking":
+        existing_default = await supabase_client.select_rows(
+            "accounts",
+            filters={
+                "user_id": f"eq.{current_user.id}",
+                "account_type": "eq.checking",
+                "status": "eq.open",
+                "is_default_internal_receive": "eq.true",
+            },
+            limit=1,
+        )
+        is_default_internal_receive = len(existing_default) == 0
     payload = {
         "user_id": current_user.id,
         "nickname": nickname,
@@ -22,6 +35,7 @@ async def create_account_for_user(
         "available_balance_cents": 0,
         "current_balance_cents": 0,
         "close_eligible": True,
+        "is_default_internal_receive": is_default_internal_receive,
     }
 
     return await supabase_client.insert_row("accounts", payload)

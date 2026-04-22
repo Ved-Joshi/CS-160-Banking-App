@@ -15,6 +15,9 @@ from schemas.banking import (
     CreateDepositIn,
     CreateDepositUploadUrlsIn,
     CreatePayeeIn,
+    CreateExternalAccountIn,
+    CreateExternalTransferIn,
+    CreateMemberTransferIn,
     CreateScheduledPaymentIn,
     CreateTransferIn,
     CustomerProfile,
@@ -22,6 +25,14 @@ from schemas.banking import (
     DepositImage,
     DepositImages,
     DepositUploadUrls,
+    ExternalAccount,
+    ExternalTransfer,
+    ExternalTransferPlan,
+    ExternalTransferSubmissionResult,
+    MemberTransfer,
+    MemberTransferPlan,
+    MemberTransferRecipient,
+    MemberTransferSubmissionResult,
     NotificationItem,
     Payee,
     ScheduledPayment,
@@ -46,7 +57,19 @@ from services.payment_service import (
     reserve_idempotency_key,
     validate_payment_amount_or_raise,
 )
-from services.transfer_service import create_transfer_for_user
+from services.transfer_service import (
+    cancel_external_transfer_plan_for_user,
+    cancel_member_transfer_plan_for_user,
+    create_external_account_for_user,
+    create_external_transfer_for_user,
+    create_member_transfer_for_user,
+    create_transfer_for_user,
+    list_external_accounts_for_user,
+    list_external_transfer_plans_for_user,
+    list_external_transfers_for_user,
+    list_member_transfer_plans_for_user,
+    resolve_member_recipient_for_user,
+)
 
 router = APIRouter(prefix="/api", tags=["banking"])
 logger = logging.getLogger(__name__)
@@ -168,6 +191,47 @@ def map_transfer_status(value: str) -> str:
     }.get(value, "PENDING")
 
 
+def map_schedule_mode(value: str | None) -> str:
+    return "SCHEDULED" if (value or "").upper() == "SCHEDULED" else "NOW"
+
+
+def map_transfer_cadence(value: str) -> str:
+    return {
+        "daily": "Daily",
+        "weekly": "Weekly",
+        "biweekly": "Biweekly",
+        "monthly": "Monthly",
+        "once": "Once",
+    }.get(value, "Once")
+
+
+def map_plan_status(value: str) -> str:
+    return {
+        "processing": "PROCESSING",
+        "completed": "COMPLETED",
+        "cancelled": "CANCELLED",
+    }.get(value, "SCHEDULED")
+
+
+def map_external_transfer_status(value: str) -> str:
+    return {
+        "completed": "COMPLETED",
+        "failed": "FAILED",
+        "cancelled": "CANCELLED",
+    }.get(value, "PROCESSING")
+
+
+def map_external_account_type(value: str) -> str:
+    return "Savings" if value == "savings" else "Checking"
+
+
+def map_external_verification_status(value: str) -> str:
+    return {
+        "pending": "PENDING",
+        "failed": "FAILED",
+    }.get(value, "VERIFIED")
+
+
 def build_close_reasons(
     row: dict,
     *,
@@ -264,6 +328,7 @@ def map_account(
             "availableBalance": cents_to_amount(row.get("available_balance_cents")),
             "currentBalance": cents_to_amount(row.get("current_balance_cents")),
         },
+        isDefaultInternalReceive=bool(row.get("is_default_internal_receive")),
     )
 
 
@@ -279,6 +344,109 @@ def map_transaction(row: dict) -> Transaction:
         status=map_transaction_status(row.get("status", "pending")),
         type=map_transaction_type(row.get("type", "adjustment")),
         postedAt=row.get("posted_at") or row.get("created_at") or "",
+    )
+
+
+def map_member_transfer_recipient(row: dict) -> MemberTransferRecipient:
+    return MemberTransferRecipient(
+        userId=row["userId"],
+        handle=row["handle"],
+        displayName=row["displayName"],
+        email=row["email"],
+        defaultCheckingAccountMasked=row["defaultCheckingAccountMasked"],
+    )
+
+
+def map_member_transfer(row: dict) -> MemberTransfer:
+    return MemberTransfer(
+        id=row["id"],
+        fromAccountId=row["from_account_id"],
+        recipientUserId=row["recipient_user_id"],
+        recipientDisplayName=row.get("recipient_display_name") or "Member",
+        amount=cents_to_amount(row.get("amount_cents")),
+        memo=row.get("memo"),
+        transferDate=row.get("transfer_date") or "",
+        status=map_transfer_status(row.get("status", "pending")),
+        submittedAt=row.get("submitted_at") or row.get("created_at") or "",
+        completedAt=row.get("completed_at"),
+        failureReason=row.get("failure_reason"),
+    )
+
+
+def map_member_transfer_plan(row: dict) -> MemberTransferPlan:
+    return MemberTransferPlan(
+        id=row["id"],
+        fromAccountId=row["from_account_id"],
+        recipientUserId=row["recipient_user_id"],
+        recipientHandle=row.get("recipient_handle") or "",
+        recipientDisplayName=row.get("recipient_display_name") or "Member",
+        amount=cents_to_amount(row.get("amount_cents")),
+        memo=row.get("memo"),
+        cadence=map_transfer_cadence(row.get("cadence", "once")),
+        startDate=row.get("start_date") or "",
+        runTime=(row.get("run_time") or "")[:5],
+        timezone=row.get("timezone") or "UTC",
+        endDate=row.get("end_date"),
+        nextRunAt=row.get("next_run_at"),
+        lastRunAt=row.get("last_run_at"),
+        lastFailureReason=row.get("last_failure_reason"),
+        status=map_plan_status(row.get("status", "scheduled")),
+        createdAt=row.get("created_at") or "",
+        updatedAt=row.get("updated_at") or "",
+    )
+
+
+def map_external_account(row: dict) -> ExternalAccount:
+    return ExternalAccount(
+        id=row["id"],
+        bankName=row.get("bank_name") or "External bank",
+        nickname=row.get("nickname") or "External account",
+        accountType=map_external_account_type(row.get("account_type", "checking")),
+        maskedAccountNumber=row.get("masked_account_number") or "...----",
+        routingNumber=row.get("routing_number") or "",
+        verificationStatus=map_external_verification_status(row.get("verification_status", "verified")),
+        isActive=bool(row.get("is_active", True)),
+        createdAt=row.get("created_at") or "",
+    )
+
+
+def map_external_transfer(row: dict) -> ExternalTransfer:
+    return ExternalTransfer(
+        id=row["id"],
+        fromAccountId=row["from_account_id"],
+        externalAccountId=row["external_account_id"],
+        externalAccountLabel=row.get("external_account_label") or "External bank",
+        amount=cents_to_amount(row.get("amount_cents")),
+        memo=row.get("memo"),
+        transferDate=row.get("transfer_date") or "",
+        status=map_external_transfer_status(row.get("status", "processing")),
+        submittedAt=row.get("submitted_at") or row.get("created_at") or "",
+        processedAt=row.get("processed_at"),
+        completedAt=row.get("completed_at"),
+        settleAfter=row.get("settle_after"),
+        failureReason=row.get("failure_reason"),
+    )
+
+
+def map_external_transfer_plan(row: dict) -> ExternalTransferPlan:
+    return ExternalTransferPlan(
+        id=row["id"],
+        fromAccountId=row["from_account_id"],
+        externalAccountId=row["external_account_id"],
+        externalAccountLabel=row.get("external_account_label") or "External bank",
+        amount=cents_to_amount(row.get("amount_cents")),
+        memo=row.get("memo"),
+        cadence=map_transfer_cadence(row.get("cadence", "once")),
+        startDate=row.get("start_date") or "",
+        runTime=(row.get("run_time") or "")[:5],
+        timezone=row.get("timezone") or "UTC",
+        endDate=row.get("end_date"),
+        nextRunAt=row.get("next_run_at"),
+        lastRunAt=row.get("last_run_at"),
+        lastFailureReason=row.get("last_failure_reason"),
+        status=map_plan_status(row.get("status", "scheduled")),
+        createdAt=row.get("created_at") or "",
+        updatedAt=row.get("updated_at") or "",
     )
 
 
@@ -499,7 +667,6 @@ async def get_profile(current_user: SupabaseUser = Depends(get_current_user)) ->
 
     return map_customer_profile(rows[0], current_user)
 
-
 @router.patch("/me/profile", response_model=CustomerProfile)
 async def update_profile(
     payload: UpdateCustomerProfileIn,
@@ -587,6 +754,19 @@ async def create_account(
 
     account_type = normalize_account_type(payload.type)
     routing_number = "121000358" if account_type in {"checking", "savings"} else None
+    is_default_internal_receive = False
+    if account_type == "checking":
+        existing_default = await supabase_client.select_rows(
+            "accounts",
+            filters={
+                "user_id": f"eq.{current_user.id}",
+                "account_type": "eq.checking",
+                "status": "eq.open",
+                "is_default_internal_receive": "eq.true",
+            },
+            limit=1,
+        )
+        is_default_internal_receive = len(existing_default) == 0
     created = await supabase_client.insert_row(
         "accounts",
         {
@@ -599,6 +779,7 @@ async def create_account(
             "available_balance_cents": 0,
             "current_balance_cents": 0,
             "close_eligible": False,
+            "is_default_internal_receive": is_default_internal_receive,
         },
     )
     return map_account(created)
@@ -606,6 +787,15 @@ async def create_account(
 
 @router.post("/accounts/{account_id}/close", status_code=status.HTTP_204_NO_CONTENT)
 async def close_account(account_id: str, current_user: SupabaseUser = Depends(get_current_user)) -> None:
+    existing_rows = await supabase_client.select_rows(
+        "accounts",
+        filters={
+            "id": f"eq.{account_id}",
+            "user_id": f"eq.{current_user.id}",
+        },
+        limit=1,
+    )
+    existing_account = existing_rows[0] if existing_rows else None
     result = await supabase_client.rpc(
         "close_customer_account",
         {
@@ -620,6 +810,23 @@ async def close_account(account_id: str, current_user: SupabaseUser = Depends(ge
         )
 
     if result.get("closed"):
+        if existing_account and existing_account.get("is_default_internal_receive"):
+            replacement_rows = await supabase_client.select_rows(
+                "accounts",
+                filters={
+                    "user_id": f"eq.{current_user.id}",
+                    "account_type": "eq.checking",
+                    "status": "eq.open",
+                },
+                order="opened_at.asc",
+                limit=1,
+            )
+            if replacement_rows:
+                await supabase_client.update_rows(
+                    "accounts",
+                    {"is_default_internal_receive": True},
+                    filters={"id": f"eq.{replacement_rows[0]['id']}"},
+                )
         return
 
     reasons = [
@@ -682,6 +889,120 @@ async def create_transfer(
         memo=payload.memo,
         transfer_date=parse_transfer_date(payload.transferDate),
     )
+
+
+@router.post("/member-transfers/resolve-recipient", response_model=MemberTransferRecipient)
+async def resolve_member_recipient(
+    payload: dict,
+    current_user: SupabaseUser = Depends(get_current_user),
+) -> MemberTransferRecipient:
+    handle = str(payload.get("recipientHandle") or "").strip()
+    recipient = await resolve_member_recipient_for_user(current_user, handle)
+    return map_member_transfer_recipient(recipient.model_dump())
+
+
+@router.post("/member-transfers", response_model=MemberTransferSubmissionResult, status_code=status.HTTP_201_CREATED)
+async def create_member_transfer(
+    payload: CreateMemberTransferIn,
+    current_user: SupabaseUser = Depends(get_current_user),
+) -> MemberTransferSubmissionResult:
+    result = await create_member_transfer_for_user(current_user, payload)
+    transfer = result.get("transfer")
+    plan = result.get("plan")
+    recipient = result.get("recipient") or {}
+    return MemberTransferSubmissionResult(
+        mode=map_schedule_mode(result.get("mode")),
+        transfer=map_member_transfer({
+            **transfer,
+            "recipient_display_name": recipient.get("displayName"),
+        }) if transfer else None,
+        plan=map_member_transfer_plan({
+            **plan,
+            "recipient_display_name": recipient.get("displayName"),
+        }) if plan else None,
+    )
+
+
+@router.get("/member-transfers/plans", response_model=list[MemberTransferPlan])
+async def list_member_transfer_plans(
+    current_user: SupabaseUser = Depends(get_current_user),
+) -> list[MemberTransferPlan]:
+    rows = await list_member_transfer_plans_for_user(current_user.id)
+    return [map_member_transfer_plan(row) for row in rows if row.get("status") != "completed"]
+
+
+@router.post("/member-transfers/plans/{plan_id}/cancel", response_model=MemberTransferPlan)
+async def cancel_member_transfer_plan(
+    plan_id: str,
+    current_user: SupabaseUser = Depends(get_current_user),
+) -> MemberTransferPlan:
+    row = await cancel_member_transfer_plan_for_user(current_user.id, plan_id)
+    return map_member_transfer_plan(row)
+
+
+@router.get("/external-accounts", response_model=list[ExternalAccount])
+async def list_external_accounts(
+    current_user: SupabaseUser = Depends(get_current_user),
+) -> list[ExternalAccount]:
+    rows = await list_external_accounts_for_user(current_user.id)
+    return [map_external_account(row) for row in rows]
+
+
+@router.post("/external-accounts", response_model=ExternalAccount, status_code=status.HTTP_201_CREATED)
+async def create_external_account(
+    payload: CreateExternalAccountIn,
+    current_user: SupabaseUser = Depends(get_current_user),
+) -> ExternalAccount:
+    row = await create_external_account_for_user(current_user, payload)
+    return map_external_account(row)
+
+
+@router.get("/external-transfers", response_model=list[ExternalTransfer])
+async def list_external_transfers(
+    current_user: SupabaseUser = Depends(get_current_user),
+) -> list[ExternalTransfer]:
+    rows = await list_external_transfers_for_user(current_user.id)
+    return [map_external_transfer(row) for row in rows if row.get("status") in {"processing", "failed"}]
+
+
+@router.post("/external-transfers", response_model=ExternalTransferSubmissionResult, status_code=status.HTTP_201_CREATED)
+async def create_external_transfer(
+    payload: CreateExternalTransferIn,
+    current_user: SupabaseUser = Depends(get_current_user),
+) -> ExternalTransferSubmissionResult:
+    result = await create_external_transfer_for_user(current_user, payload)
+    transfer = result.get("transfer")
+    plan = result.get("plan")
+    external_account = result.get("external_account") or {}
+    label = f"{external_account.get('bank_name', 'External bank')} {external_account.get('masked_account_number', '')}".strip()
+    return ExternalTransferSubmissionResult(
+        mode=map_schedule_mode(result.get("mode")),
+        transfer=map_external_transfer({
+            **transfer,
+            "external_account_label": label,
+        }) if transfer else None,
+        plan=map_external_transfer_plan({
+            **plan,
+            "external_account_label": label,
+        }) if plan else None,
+    )
+
+
+@router.get("/external-transfers/plans", response_model=list[ExternalTransferPlan])
+async def list_external_transfer_plans(
+    current_user: SupabaseUser = Depends(get_current_user),
+) -> list[ExternalTransferPlan]:
+    rows = await list_external_transfer_plans_for_user(current_user.id)
+    return [map_external_transfer_plan(row) for row in rows if row.get("status") != "completed"]
+
+
+@router.post("/external-transfers/plans/{plan_id}/cancel", response_model=ExternalTransferPlan)
+async def cancel_external_transfer_plan(
+    plan_id: str,
+    current_user: SupabaseUser = Depends(get_current_user),
+) -> ExternalTransferPlan:
+    row = await cancel_external_transfer_plan_for_user(current_user.id, plan_id)
+    return map_external_transfer_plan(row)
 
 
 @router.get("/payees", response_model=list[Payee])

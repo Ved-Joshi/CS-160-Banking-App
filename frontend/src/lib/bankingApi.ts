@@ -7,19 +7,28 @@ import type {
   CreateDepositInput,
   CreateDepositUploadUrlsInput,
   CreatePayeeInput,
+  CreateExternalAccountInput,
+  ExternalAccount,
+  ExternalTransfer,
+  ExternalTransferPlan,
+  ExternalTransferRequest,
+  ExternalTransferSubmissionResult,
   CreateScheduledPaymentInput,
   UpdateScheduledPaymentInput,
   CustomerProfile,
   Deposit,
   DepositUploadUrls,
+  MemberTransferPlan,
+  MemberTransferRecipient,
+  MemberTransferRequest,
+  MemberTransferSubmissionResult,
   NotificationItem,
   Payee,
   ScheduledPayment,
   Transaction,
-  TransferPlan,
   TransferRequest,
-  TransferSubmissionResult,
   UpdateCustomerProfileInput,
+  TransferResult,
 } from '../types/banking';
 import { apiRequest } from './apiClient';
 import {
@@ -27,10 +36,15 @@ import {
   normalizeAccounts,
   normalizePayment,
   normalizePayments,
+  normalizeExternalAccount,
+  normalizeExternalAccounts,
+  normalizeExternalTransferPlans,
+  normalizeExternalTransfers,
+  normalizeExternalTransferSubmissionResult,
+  normalizeMemberTransferPlans,
+  normalizeMemberTransferRecipient,
+  normalizeMemberTransferSubmissionResult,
   normalizeTransactions,
-  normalizeTransferPlan,
-  normalizeTransferPlans,
-  normalizeTransferSubmissionResult,
 } from './bankingContract';
 
 function createIdempotencyKey(): string {
@@ -168,19 +182,70 @@ export const notificationsService = {
 };
 
 export const transfersService = {
-  submit(input: TransferRequest): Promise<TransferSubmissionResult> {
+  submit(input: TransferRequest): Promise<TransferResult> {
     return apiRequest<unknown>('/api/transfers', {
       method: 'POST',
       body: input,
-    }).then(normalizeTransferSubmissionResult);
+    }).then((result) => ({
+      id: (result as { id?: string }).id ?? '',
+      status: ((result as { status?: string }).status as TransferResult['status']) ?? 'PENDING',
+      submittedAt: (result as { submittedAt?: string; submitted_at?: string }).submittedAt ?? (result as { submitted_at?: string }).submitted_at ?? '',
+    }));
   },
-  listPlans(): Promise<TransferPlan[]> {
-    return apiRequest<unknown[]>('/api/transfers/plans').then(normalizeTransferPlans);
-  },
-  cancelPlan(planId: string): Promise<TransferPlan> {
-    return apiRequest<unknown>(`/api/transfers/plans/${planId}/cancel`, {
+};
+
+export const memberTransfersService = {
+  resolveRecipient(recipientHandle: string): Promise<MemberTransferRecipient> {
+    return apiRequest<unknown>('/api/member-transfers/resolve-recipient', {
       method: 'POST',
-    }).then(normalizeTransferPlan);
+      body: { recipientHandle },
+    }).then(normalizeMemberTransferRecipient);
+  },
+  submit(input: MemberTransferRequest): Promise<MemberTransferSubmissionResult> {
+    return apiRequest<unknown>('/api/member-transfers', {
+      method: 'POST',
+      body: input,
+    }).then(normalizeMemberTransferSubmissionResult);
+  },
+  listPlans(): Promise<MemberTransferPlan[]> {
+    return apiRequest<unknown[]>('/api/member-transfers/plans').then(normalizeMemberTransferPlans);
+  },
+  cancelPlan(planId: string): Promise<MemberTransferPlan> {
+    return apiRequest<unknown>(`/api/member-transfers/plans/${planId}/cancel`, {
+      method: 'POST',
+    }).then((input) => normalizeMemberTransferPlans([input])[0]!);
+  },
+};
+
+export const externalAccountsService = {
+  list(): Promise<ExternalAccount[]> {
+    return apiRequest<unknown[]>('/api/external-accounts').then(normalizeExternalAccounts);
+  },
+  create(input: CreateExternalAccountInput): Promise<ExternalAccount> {
+    return apiRequest<unknown>('/api/external-accounts', {
+      method: 'POST',
+      body: input,
+    }).then(normalizeExternalAccount);
+  },
+};
+
+export const externalTransfersService = {
+  submit(input: ExternalTransferRequest): Promise<ExternalTransferSubmissionResult> {
+    return apiRequest<unknown>('/api/external-transfers', {
+      method: 'POST',
+      body: input,
+    }).then(normalizeExternalTransferSubmissionResult);
+  },
+  list(): Promise<ExternalTransfer[]> {
+    return apiRequest<unknown[]>('/api/external-transfers').then(normalizeExternalTransfers);
+  },
+  listPlans(): Promise<ExternalTransferPlan[]> {
+    return apiRequest<unknown[]>('/api/external-transfers/plans').then(normalizeExternalTransferPlans);
+  },
+  cancelPlan(planId: string): Promise<ExternalTransferPlan> {
+    return apiRequest<unknown>(`/api/external-transfers/plans/${planId}/cancel`, {
+      method: 'POST',
+    }).then((input) => normalizeExternalTransferPlans([input])[0]!);
   },
 };
 
