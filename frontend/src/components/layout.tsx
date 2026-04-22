@@ -1,4 +1,6 @@
-import { NavLink, Outlet } from 'react-router-dom';
+import { useState } from 'react';
+import { Link, NavLink, Outlet } from 'react-router-dom';
+import { Dialog } from './ui';
 import { useAuth } from '../features/auth/useAuth';
 
 const navItems = [
@@ -11,8 +13,24 @@ const navItems = [
   ['ATM Locator', '/app/atm-locator'],
 ] as const;
 
+const mobilePrimaryNav = [
+  ['Dashboard', '/app/dashboard'],
+  ['Accounts', '/app/accounts'],
+  ['Transfers', '/app/transfers'],
+  ['Bill Pay', '/app/bill-pay'],
+] as const;
+
+const mobileMoreNav = [
+  ['Deposits', '/app/deposits'],
+  ['Transactions', '/app/transactions'],
+  ['ATM Locator', '/app/atm-locator'],
+  ['Notifications', '/app/notifications'],
+  ['Settings', '/app/settings'],
+] as const;
+
 export function AppShell() {
   const { user, signOut, isAdmin } = useAuth();
+  const [mobileMoreOpen, setMobileMoreOpen] = useState(false);
   const displayName = [user?.firstName, user?.lastName].filter(Boolean).join(' ') || user?.username || user?.email || 'Signed in';
   const initials = `${user?.firstName?.[0] ?? ''}${user?.lastName?.[0] ?? ''}`
     || user?.username?.slice(0, 2).toUpperCase()
@@ -71,7 +89,49 @@ export function AppShell() {
         <main className="page-content">
           <Outlet />
         </main>
+        <nav aria-label="Mobile navigation" className="mobile-tabbar">
+          {mobilePrimaryNav.map(([label, to]) => (
+            <NavLink key={to} className={({ isActive }) => (isActive ? 'mobile-tabbar__link mobile-tabbar__link--active' : 'mobile-tabbar__link')} to={to}>
+              {label}
+            </NavLink>
+          ))}
+          <button
+            className={mobileMoreOpen ? 'mobile-tabbar__link mobile-tabbar__link--active' : 'mobile-tabbar__link'}
+            onClick={() => setMobileMoreOpen(true)}
+            type="button"
+          >
+            More
+          </button>
+        </nav>
       </div>
+      <Dialog
+        description="Quick access to the rest of your banking tabs."
+        onClose={() => setMobileMoreOpen(false)}
+        open={mobileMoreOpen}
+        title="More tabs"
+      >
+        <div className="mobile-more-grid">
+          {mobileMoreNav.map(([label, to]) => (
+            <Link
+              className="button button--secondary mobile-more-grid__link"
+              key={to}
+              onClick={() => setMobileMoreOpen(false)}
+              to={to}
+            >
+              {label}
+            </Link>
+          ))}
+          {isAdmin ? (
+            <Link
+              className="button button--secondary mobile-more-grid__link"
+              onClick={() => setMobileMoreOpen(false)}
+              to="/admin"
+            >
+              Admin
+            </Link>
+          ) : null}
+        </div>
+      </Dialog>
     </div>
   );
 }
