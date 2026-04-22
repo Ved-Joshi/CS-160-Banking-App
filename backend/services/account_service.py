@@ -1,5 +1,6 @@
 from fastapi import HTTPException, status
 
+from services.ledger_service import ensure_customer_ledger_account
 from utils.supabase import SupabaseUser, random_last4, supabase_client
 
 
@@ -24,7 +25,12 @@ async def create_account_for_user(
         "close_eligible": True,
     }
 
-    return await supabase_client.insert_row("accounts", payload)
+    account = await supabase_client.insert_row("accounts", payload)
+    
+    # Ensure corresponding ledger account is created
+    await ensure_customer_ledger_account(account)
+    
+    return account
 
 
 async def list_accounts_for_user(current_user: SupabaseUser) -> list[dict]:

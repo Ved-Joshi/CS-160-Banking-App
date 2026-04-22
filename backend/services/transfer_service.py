@@ -5,6 +5,7 @@ from fastapi import HTTPException, status
 
 from schemas.banking import TransferResult
 from utils.supabase import SupabaseUser, amount_to_cents, supabase_client
+from services.ledger_service import ensure_ledger_accounts_for_transfer
 
 STALE_PROCESSING_TIMEOUT_MINUTES = 10
 
@@ -91,6 +92,9 @@ async def create_transfer_for_user(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Insufficient balance.",
         )
+
+    # Ensure ledger accounts exist for both accounts (safety check)
+    await ensure_ledger_accounts_for_transfer(from_account, to_account)
 
     # Call transactional RPC: all mutations happen atomically in Postgres
     # The RPC uses FOR UPDATE to lock both accounts, validates state, and performs
@@ -393,6 +397,9 @@ async def execute_transfer_run(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Insufficient balance.",
         )
+
+    # Ensure ledger accounts exist for both accounts (safety check)
+    await ensure_ledger_accounts_for_transfer(from_account, to_account)
 
     # Call transactional RPC: all mutations happen atomically in Postgres
     # The RPC uses FOR UPDATE to lock both accounts, validates state, and performs
