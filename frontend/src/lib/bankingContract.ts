@@ -269,7 +269,6 @@ export function normalizeMemberTransferRecipient(input: unknown): MemberTransfer
   const row = asRecord(input);
   return {
     userId: asString(row.userId) || asString(row.user_id),
-    handle: asString(row.handle),
     displayName: asString(row.displayName) || asString(row.display_name),
     email: asString(row.email),
     defaultCheckingAccountMasked: asString(row.defaultCheckingAccountMasked) || asString(row.default_checking_account_masked),
@@ -299,7 +298,7 @@ export function normalizeMemberTransferPlan(input: unknown): MemberTransferPlan 
     id: asString(row.id),
     fromAccountId: asString(row.fromAccountId) || asString(row.from_account_id),
     recipientUserId: asString(row.recipientUserId) || asString(row.recipient_user_id),
-    recipientHandle: asString(row.recipientHandle) || asString(row.recipient_handle),
+    recipientEmail: asString(row.recipientEmail) || asString(row.recipient_email) || asString(row.recipient_handle),
     recipientDisplayName: asString(row.recipientDisplayName) || asString(row.recipient_display_name),
     amount: asNumber(row.amount ?? centsToDollars(row.amount_cents), 0),
     memo: asString(row.memo) || undefined,

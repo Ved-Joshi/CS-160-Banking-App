@@ -16,6 +16,71 @@ STALE_PROCESSING_TIMEOUT_MINUTES = 10
 EXTERNAL_SETTLEMENT_DELAY_SECONDS = 15
 
 
+def _normalize_digits(value: str, *, field_name: str) -> str:
+    digits = "".join(char for char in value if char.isdigit())
+    if not digits:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"{field_name} is required.")
+    return digits
+
+
+def _validate_email(value: str) -> str:
+    normalized = value.strip().lower()
+    if "@" not in normalized or normalized.startswith("@") or normalized.endswith("@"):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Recipient email must be a valid email address.")
+    local_part, _, domain = normalized.partition("@")
+    if not local_part or "." not in domain or domain.startswith(".") or domain.endswith("."):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Recipient email must be a valid email address.")
+    return normalized
+
+
+def _validate_bank_name(value: str) -> str:
+    normalized = " ".join(value.strip().split())
+    if len(normalized) < 2 or len(normalized) > 80:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Bank name must be between 2 and 80 characters.")
+    if not any(char.isalpha() for char in normalized):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Bank name must contain letters.")
+    for char in normalized:
+        if not (char.isalnum() or char in {" ", ".", "&", "-", "'"}):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Bank name contains unsupported characters.")
+    return normalized
+
+
+def _validate_display_name(value: str, *, field_name: str) -> str:
+    normalized = " ".join(value.strip().split())
+    if len(normalized) < 2 or len(normalized) > 80:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"{field_name} must be between 2 and 80 characters.",
+        )
+    return normalized
+
+
+def _validate_routing_number(value: str) -> str:
+    digits = _normalize_digits(value, field_name="Routing number")
+    if len(digits) != 9:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Routing number must be 9 digits.")
+    checksum = (
+        3 * (int(digits[0]) + int(digits[3]) + int(digits[6]))
+        + 7 * (int(digits[1]) + int(digits[4]) + int(digits[7]))
+        + int(digits[2]) + int(digits[5]) + int(digits[8])
+    )
+    if checksum % 10 != 0:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Routing number is invalid.")
+    return digits
+
+
+def _validate_account_number(value: str, *, field_name: str) -> str:
+    digits = _normalize_digits(value, field_name=field_name)
+    if len(digits) < 4 or len(digits) > 17:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"{field_name} must be between 4 and 17 digits.",
+        )
+    if set(digits) == {"0"}:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"{field_name} cannot be all zeros.")
+    return digits
+
+
 def _is_admin(current_user: SupabaseUser) -> bool:
     roles = current_user.app_metadata.get("roles") or current_user.user_metadata.get("roles") or []
     return isinstance(roles, list) and "admin" in roles
@@ -187,6 +252,11 @@ async def create_transfer_for_user(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Not authorized to transfer from this account.",
         )
+    if not _is_admin(current_user) and to_account["user_id"] != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Self transfers can only be made between your own accounts.",
+        )
 
     if from_account["status"] != "open" or to_account["status"] != "open":
         raise HTTPException(
@@ -235,14 +305,12 @@ async def create_transfer_for_user(
     )
 
 
-async def resolve_member_recipient_for_user(current_user: SupabaseUser, handle: str) -> MemberTransferRecipient:
-    normalized = handle.strip().lower()
-    if not normalized:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Recipient handle is required.")
+async def resolve_member_recipient_for_user(current_user: SupabaseUser, recipient_email: str) -> MemberTransferRecipient:
+    normalized = _validate_email(recipient_email)
 
     rows = await supabase_client.select_rows(
         "profiles",
-        filters={"or": f"(username.eq.{normalized},email.eq.{normalized})"},
+        filters={"email": f"eq.{normalized}"},
         limit=1,
     )
     if not rows:
@@ -271,19 +339,18 @@ async def resolve_member_recipient_for_user(current_user: SupabaseUser, handle: 
     account = account_rows[0]
     display_name = " ".join(
         part for part in [profile.get("first_name"), profile.get("last_name")] if isinstance(part, str) and part.strip()
-    ).strip() or profile.get("email") or profile.get("username") or "Member"
+    ).strip() or profile.get("email") or "Member"
 
     return MemberTransferRecipient(
         userId=profile["id"],
-        handle=profile.get("username") or profile.get("email") or normalized,
         displayName=display_name,
-        email=profile.get("email") or "",
+        email=profile.get("email") or normalized,
         defaultCheckingAccountMasked=f"...{account.get('account_last4') or '----'}",
     )
 
 
 async def create_member_transfer_for_user(current_user: SupabaseUser, payload: CreateMemberTransferIn) -> dict:
-    recipient = await resolve_member_recipient_for_user(current_user, payload.recipientHandle)
+    recipient = await resolve_member_recipient_for_user(current_user, payload.recipientEmail)
     from_account = await _get_owned_account(payload.fromAccountId, current_user.id)
     if from_account.get("account_type") != "checking":
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Member transfers require a checking account.")
@@ -293,6 +360,8 @@ async def create_member_transfer_for_user(current_user: SupabaseUser, payload: C
     amount_cents = amount_to_cents(payload.amount)
     if amount_cents <= 0:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Transfer amount must be greater than zero.")
+    if from_account.get("available_balance_cents", 0) < amount_cents:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Insufficient available funds.")
 
     if payload.scheduleMode == "SCHEDULED":
         cadence, start_date, run_time, end_date, timezone_name = await _validate_schedule_payload(
@@ -314,7 +383,7 @@ async def create_member_transfer_for_user(current_user: SupabaseUser, payload: C
                 "user_id": current_user.id,
                 "from_account_id": payload.fromAccountId,
                 "recipient_user_id": recipient.userId,
-                "recipient_handle": payload.recipientHandle.strip(),
+                "recipient_handle": recipient.email,
                 "amount_cents": amount_cents,
                 "memo": payload.memo,
                 "cadence": cadence,
@@ -523,20 +592,44 @@ async def process_due_member_transfer_plans(*, batch_size: int = 50) -> dict[str
 
 
 async def create_external_account_for_user(current_user: SupabaseUser, payload: CreateExternalAccountIn) -> dict:
-    if payload.accountNumber != payload.confirmAccountNumber:
+    routing_number = _validate_routing_number(payload.routingNumber)
+    account_number = _validate_account_number(payload.accountNumber, field_name="Account number")
+    confirm_account_number = _validate_account_number(payload.confirmAccountNumber, field_name="Confirm account number")
+    bank_name = _validate_bank_name(payload.bankName)
+    nickname = _validate_display_name(payload.nickname, field_name="Nickname")
+    if account_number != confirm_account_number:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Account numbers must match.")
-    if not payload.routingNumber.isdigit() or len(payload.routingNumber) != 9:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Routing number must be 9 digits.")
-    masked = f"...{payload.accountNumber[-4:]}"
+    if account_number == routing_number:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Account number cannot match the routing number.",
+        )
+    masked = f"...{account_number[-4:]}"
+    duplicate_rows = await supabase_client.select_rows(
+        "external_accounts",
+        filters={
+            "user_id": f"eq.{current_user.id}",
+            "routing_number": f"eq.{routing_number}",
+            "masked_account_number": f"eq.{masked}",
+            "is_active": "eq.true",
+        },
+        limit=1,
+    )
+    if duplicate_rows:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="This external account is already linked.",
+        )
+
     return await supabase_client.insert_row(
         "external_accounts",
         {
             "user_id": current_user.id,
-            "bank_name": payload.bankName.strip(),
-            "nickname": payload.nickname.strip(),
+            "bank_name": bank_name,
+            "nickname": nickname,
             "account_type": payload.accountType.lower(),
             "masked_account_number": masked,
-            "routing_number": payload.routingNumber,
+            "routing_number": routing_number,
             "verification_status": "verified",
             "is_active": True,
         },
@@ -568,6 +661,8 @@ async def create_external_transfer_for_user(current_user: SupabaseUser, payload:
     external_account = external_rows[0]
 
     amount_cents = amount_to_cents(payload.amount)
+    if amount_cents <= 0:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Transfer amount must be greater than zero.")
     if payload.scheduleMode == "SCHEDULED":
         cadence, start_date, run_time, end_date, timezone_name = await _validate_schedule_payload(
             current_user=current_user,

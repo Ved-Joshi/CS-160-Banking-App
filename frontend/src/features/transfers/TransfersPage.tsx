@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { type Dispatch, type SetStateAction, useMemo, useState } from 'react';
+import { type Dispatch, type SetStateAction, useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { Button, Card, Dialog, EmptyState, Field, InlineAlert, PageHeader, StatusChip } from '../../components/ui';
 import {
@@ -15,7 +15,6 @@ import { queryKeys } from '../../lib/queryKeys';
 import type {
   CreateExternalAccountInput,
   ExternalAccount,
-  ExternalTransferPlan,
   MemberTransferRecipient,
   TransferCadence,
   TransferScheduleMode,
@@ -25,7 +24,7 @@ type TransferMode = 'SELF' | 'MEMBER' | 'EXTERNAL';
 
 type ReviewState =
   | { kind: 'SELF'; payload: { fromAccountId: string; toAccountId: string; amount: number; memo?: string; transferDate: string } }
-  | { kind: 'MEMBER'; payload: { fromAccountId: string; recipientHandle: string; amount: number; memo?: string; scheduleMode: TransferScheduleMode; transferDate?: string; cadence?: TransferCadence; startDate?: string; runTime?: string; endDate?: string; timezone?: string }; recipient: MemberTransferRecipient }
+  | { kind: 'MEMBER'; payload: { fromAccountId: string; recipientEmail: string; amount: number; memo?: string; scheduleMode: TransferScheduleMode; transferDate?: string; cadence?: TransferCadence; startDate?: string; runTime?: string; endDate?: string; timezone?: string }; recipient: MemberTransferRecipient }
   | { kind: 'EXTERNAL'; payload: { fromAccountId: string; externalAccountId: string; amount: number; memo?: string; scheduleMode: TransferScheduleMode; transferDate?: string; cadence?: TransferCadence; startDate?: string; runTime?: string; endDate?: string; timezone?: string }; externalAccount?: ExternalAccount };
 
 const CADENCE_OPTIONS: TransferCadence[] = ['Once', 'Daily', 'Weekly', 'Biweekly', 'Monthly'];
@@ -48,6 +47,67 @@ function getBrowserTimezone(): string {
   } catch {
     return 'UTC';
   }
+}
+
+function digitsOnly(value: string, maxLength: number): string {
+  return value.replace(/\D/g, '').slice(0, maxLength);
+}
+
+function normalizeEmail(value: string): string {
+  return value.trim().toLowerCase();
+}
+
+function isValidEmail(value: string): boolean {
+  const normalized = normalizeEmail(value);
+  if (!normalized || normalized.startsWith('@') || normalized.endsWith('@')) return false;
+  const [local, domain] = normalized.split('@');
+  return Boolean(local && domain && domain.includes('.') && !domain.startsWith('.') && !domain.endsWith('.'));
+}
+
+function normalizeDisplayName(value: string): string {
+  return value.trim().replace(/\s+/g, ' ');
+}
+
+function isValidBankName(value: string): boolean {
+  const normalized = normalizeDisplayName(value);
+  if (normalized.length < 2 || normalized.length > 80) return false;
+  if (!/[a-z]/i.test(normalized)) return false;
+  return /^[A-Za-z0-9 .&'-]+$/.test(normalized);
+}
+
+function isValidRoutingNumber(value: string): boolean {
+  const digits = digitsOnly(value, 9);
+  if (digits.length !== 9) return false;
+  const checksum =
+    (3 * (Number(digits[0]) + Number(digits[3]) + Number(digits[6])))
+    + (7 * (Number(digits[1]) + Number(digits[4]) + Number(digits[7])))
+    + Number(digits[2]) + Number(digits[5]) + Number(digits[8]);
+  return checksum % 10 === 0;
+}
+
+function validateExternalAccountInput(input: CreateExternalAccountInput) {
+  const routingNumber = digitsOnly(input.routingNumber, 9);
+  const accountNumber = digitsOnly(input.accountNumber, 17);
+  const confirmAccountNumber = digitsOnly(input.confirmAccountNumber, 17);
+  const bankName = normalizeDisplayName(input.bankName);
+  const nickname = normalizeDisplayName(input.nickname);
+
+  if (!isValidBankName(bankName)) throw new Error('Enter a valid bank name.');
+  if (nickname.length < 2 || nickname.length > 80) throw new Error('Nickname must be between 2 and 80 characters.');
+  if (!isValidRoutingNumber(routingNumber)) throw new Error('Routing number is invalid.');
+  if (accountNumber.length < 4 || accountNumber.length > 17) throw new Error('Account number must be between 4 and 17 digits.');
+  if (/^0+$/.test(accountNumber)) throw new Error('Account number cannot be all zeros.');
+  if (accountNumber !== confirmAccountNumber) throw new Error('Account numbers must match.');
+  if (routingNumber === accountNumber) throw new Error('Account number cannot match the routing number.');
+
+  return {
+    ...input,
+    bankName,
+    nickname,
+    routingNumber,
+    accountNumber,
+    confirmAccountNumber,
+  };
 }
 
 function AmountInput({
@@ -84,8 +144,8 @@ function AmountInput({
           onChange(() => '');
           return;
         }
-      if (['Tab', 'ArrowLeft', 'ArrowRight', 'Home', 'End', 'Enter'].includes(event.key)) return;
-      event.preventDefault();
+        if (['Tab', 'ArrowLeft', 'ArrowRight', 'Home', 'End', 'Enter'].includes(event.key)) return;
+        event.preventDefault();
       }}
       onChange={() => {}}
       onPaste={(event) => {
@@ -128,7 +188,7 @@ export function TransfersPage() {
   });
   const [memberForm, setMemberForm] = useState({
     fromAccountId: '',
-    recipientHandle: '',
+    recipientEmail: '',
     memo: '',
     transferDate: today,
     scheduleMode: 'NOW' as TransferScheduleMode,
@@ -187,6 +247,29 @@ export function TransfersPage() {
   const externalTimezone = externalForm.timezone || profile?.timezone || browserTimezone;
   const memberActivePlans = memberPlans.filter((plan) => plan.status === 'SCHEDULED' || plan.status === 'PROCESSING');
   const externalActivePlans = externalPlans.filter((plan) => plan.status === 'SCHEDULED' || plan.status === 'PROCESSING');
+  const scheduledTransfers = useMemo(
+    () => [
+      ...memberActivePlans.map((plan) => ({
+        id: plan.id,
+        kind: 'MEMBER' as const,
+        title: plan.recipientDisplayName,
+        amount: plan.amount,
+        summary: scheduleSummary(plan),
+        status: plan.status,
+        cancelLabel: `Cancel ${plan.recipientDisplayName} transfer?`,
+      })),
+      ...externalActivePlans.map((plan) => ({
+        id: plan.id,
+        kind: 'EXTERNAL' as const,
+        title: plan.externalAccountLabel,
+        amount: plan.amount,
+        summary: scheduleSummary(plan),
+        status: plan.status,
+        cancelLabel: `Cancel ${plan.externalAccountLabel} transfer?`,
+      })),
+    ],
+    [memberActivePlans, externalActivePlans],
+  );
 
   const invalidateTransferQueries = async () => {
     await Promise.all([
@@ -236,7 +319,7 @@ export function TransfersPage() {
       setErrorMessage(null);
       setReview(null);
       setMemberAmountDigits('');
-      setMemberForm((current) => ({ ...current, memo: '', recipientHandle: current.recipientHandle }));
+      setMemberForm((current) => ({ ...current, memo: '', recipientEmail: current.recipientEmail }));
     },
     onError: (error: Error) => {
       setErrorMessage(error.message);
@@ -338,20 +421,24 @@ export function TransfersPage() {
     });
   };
 
-  const openMemberReview = () => {
+  const openMemberReview = async () => {
     const amount = buildAmount(memberAmountDigits);
     if (!checkingAccounts.length) throw new Error('A checking account is required for member transfers.');
     if (!memberFromAccountId) throw new Error('Choose a funding account.');
-    if (!memberRecipient || memberRecipient.handle.toLowerCase() !== memberForm.recipientHandle.trim().toLowerCase()) {
-      throw new Error('Resolve the recipient before submitting.');
-    }
+    const normalizedRecipientEmail = normalizeEmail(memberForm.recipientEmail);
+    if (!normalizedRecipientEmail) throw new Error('Recipient email is required.');
+    if (!isValidEmail(normalizedRecipientEmail)) throw new Error('Recipient email must be a valid email address.');
     if (amount <= 0) throw new Error('Enter an amount greater than zero.');
     validateSchedule(memberForm.scheduleMode, memberForm.startDate, memberForm.runTime, memberForm.endDate, memberTimezone);
+    const resolvedRecipient = memberRecipient && normalizeEmail(memberRecipient.email) === normalizedRecipientEmail
+      ? memberRecipient
+      : await resolveRecipientMutation.mutateAsync(normalizedRecipientEmail);
+    setMemberRecipient(resolvedRecipient);
     setReview({
       kind: 'MEMBER',
       payload: {
         fromAccountId: memberFromAccountId,
-        recipientHandle: memberForm.recipientHandle.trim(),
+        recipientEmail: normalizedRecipientEmail,
         amount,
         memo: memberForm.memo || undefined,
         scheduleMode: memberForm.scheduleMode,
@@ -362,7 +449,7 @@ export function TransfersPage() {
         endDate: memberForm.scheduleMode === 'SCHEDULED' && memberForm.endDate ? memberForm.endDate : undefined,
         timezone: memberTimezone,
       },
-      recipient: memberRecipient,
+      recipient: resolvedRecipient,
     });
   };
 
@@ -391,7 +478,7 @@ export function TransfersPage() {
     });
   };
 
-  const handleReviewOpen = () => {
+  const handleReviewOpen = async () => {
     setErrorMessage(null);
     try {
       if (mode === 'SELF') {
@@ -399,7 +486,7 @@ export function TransfersPage() {
         return;
       }
       if (mode === 'MEMBER') {
-        openMemberReview();
+        await openMemberReview();
         return;
       }
       openExternalReview();
@@ -415,6 +502,15 @@ export function TransfersPage() {
       : review?.payload.scheduleMode === 'SCHEDULED'
         ? 'Review scheduled external transfer'
         : 'Review external transfer';
+  const reviewSubmitPending = selfSubmitMutation.isPending || memberSubmitMutation.isPending || externalSubmitMutation.isPending;
+
+  useEffect(() => {
+    if (!successMessage) return;
+    const timeout = window.setTimeout(() => {
+      setSuccessMessage(null);
+    }, 10_000);
+    return () => window.clearTimeout(timeout);
+  }, [successMessage]);
 
   return (
     <div className="stack-xl">
@@ -425,9 +521,22 @@ export function TransfersPage() {
       />
 
       {successMessage ? (
-        <InlineAlert title="Success" tone="success">
-          {successMessage}
-        </InlineAlert>
+        <div
+          aria-live="polite"
+          className="floating-toast"
+          style={{
+            position: 'fixed',
+            right: 16,
+            bottom: 16,
+            zIndex: 1200,
+            maxWidth: 420,
+            width: 'calc(100vw - 32px)',
+          }}
+        >
+          <InlineAlert title="Success" tone="success">
+            {successMessage}
+          </InlineAlert>
+        </div>
       ) : null}
       {errorMessage ? (
         <InlineAlert title="Unable to continue" tone="warning">
@@ -484,33 +593,20 @@ export function TransfersPage() {
                     ))}
                   </select>
                 </Field>
-                <Field label="Recipient username or email">
-                  <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
-                    <input
-                      aria-label="Recipient username or email"
-                      onChange={(event) => {
-                        setMemberForm((current) => ({ ...current, recipientHandle: event.target.value }));
-                        setMemberRecipient(null);
-                      }}
-                      value={memberForm.recipientHandle}
-                    />
-                    <Button
-                      onClick={() => {
-                        setErrorMessage(null);
-                        resolveRecipientMutation.mutate(memberForm.recipientHandle);
-                      }}
-                      type="button"
-                      variant="secondary"
-                    >
-                      {resolveRecipientMutation.isPending ? 'Checking...' : 'Verify recipient'}
-                    </Button>
-                  </div>
+                <Field label="Recipient email">
+                  <input
+                    aria-label="Recipient email"
+                    autoCapitalize="none"
+                    autoCorrect="off"
+                    inputMode="email"
+                    onChange={(event) => {
+                      setMemberForm((current) => ({ ...current, recipientEmail: event.target.value }));
+                      setMemberRecipient(null);
+                    }}
+                    type="email"
+                    value={memberForm.recipientEmail}
+                  />
                 </Field>
-                {memberRecipient ? (
-                  <InlineAlert title="Recipient confirmed" tone="success">
-                    {memberRecipient.displayName} • {memberRecipient.defaultCheckingAccountMasked}
-                  </InlineAlert>
-                ) : null}
                 <Field label="Transfer mode">
                   <select aria-label="Transfer mode" onChange={(event) => setMemberForm((current) => ({ ...current, scheduleMode: event.target.value as TransferScheduleMode }))} value={memberForm.scheduleMode}>
                     <option value="NOW">Now</option>
@@ -593,15 +689,22 @@ export function TransfersPage() {
                         </select>
                       </Field>
                       <Field label="Routing number">
-                        <input aria-label="Routing number" inputMode="numeric" onChange={(event) => setNewExternalAccount((current) => ({ ...current, routingNumber: event.target.value }))} value={newExternalAccount.routingNumber} />
+                        <input aria-label="Routing number" inputMode="numeric" maxLength={9} onChange={(event) => setNewExternalAccount((current) => ({ ...current, routingNumber: digitsOnly(event.target.value, 9) }))} value={newExternalAccount.routingNumber} />
                       </Field>
                       <Field label="Account number">
-                        <input aria-label="Account number" inputMode="numeric" onChange={(event) => setNewExternalAccount((current) => ({ ...current, accountNumber: event.target.value }))} value={newExternalAccount.accountNumber} />
+                        <input aria-label="Account number" inputMode="numeric" maxLength={17} onChange={(event) => setNewExternalAccount((current) => ({ ...current, accountNumber: digitsOnly(event.target.value, 17) }))} value={newExternalAccount.accountNumber} />
                       </Field>
                       <Field label="Confirm account number">
-                        <input aria-label="Confirm account number" inputMode="numeric" onChange={(event) => setNewExternalAccount((current) => ({ ...current, confirmAccountNumber: event.target.value }))} value={newExternalAccount.confirmAccountNumber} />
+                        <input aria-label="Confirm account number" inputMode="numeric" maxLength={17} onChange={(event) => setNewExternalAccount((current) => ({ ...current, confirmAccountNumber: digitsOnly(event.target.value, 17) }))} value={newExternalAccount.confirmAccountNumber} />
                       </Field>
-                      <Button onClick={() => externalAccountCreateMutation.mutate(newExternalAccount)} type="button">
+                      <Button onClick={() => {
+                        try {
+                          setErrorMessage(null);
+                          externalAccountCreateMutation.mutate(validateExternalAccountInput(newExternalAccount));
+                        } catch (error) {
+                          setErrorMessage(error instanceof Error ? error.message : 'Unable to save external account.');
+                        }
+                      }} type="button">
                         {externalAccountCreateMutation.isPending ? 'Saving...' : 'Save external account'}
                       </Button>
                     </div>
@@ -657,42 +760,6 @@ export function TransfersPage() {
         <Card>
           <div className="stack-lg">
             <div className="stack-sm">
-              <p className="eyebrow">Member transfers</p>
-              <h3>Scheduled member transfers</h3>
-            </div>
-            {memberActivePlans.length ? memberActivePlans.map((plan) => (
-              <div className="summary-row" key={plan.id}>
-                <div className="summary-row__primary">
-                  <strong>{plan.recipientDisplayName}</strong>
-                  <span>{formatCurrency(plan.amount)} • {scheduleSummary(plan)}</span>
-                </div>
-                <div className="summary-row__meta">
-                  <StatusChip status={plan.status} />
-                  <Button onClick={() => setPlanPendingCancel({ kind: 'MEMBER', id: plan.id, label: `Cancel ${plan.recipientDisplayName} transfer?` })} type="button" variant="secondary">Cancel</Button>
-                </div>
-              </div>
-            )) : <p className="muted">No scheduled member transfers.</p>}
-          </div>
-          <div className="stack-lg" style={{ marginTop: 24 }}>
-            <div className="stack-sm">
-              <p className="eyebrow">External transfers</p>
-              <h3>Scheduled external transfers</h3>
-            </div>
-            {externalActivePlans.length ? externalActivePlans.map((plan: ExternalTransferPlan) => (
-              <div className="summary-row" key={plan.id}>
-                <div className="summary-row__primary">
-                  <strong>{plan.externalAccountLabel}</strong>
-                  <span>{formatCurrency(plan.amount)} • {scheduleSummary(plan)}</span>
-                </div>
-                <div className="summary-row__meta">
-                  <StatusChip status={plan.status} />
-                  <Button onClick={() => setPlanPendingCancel({ kind: 'EXTERNAL', id: plan.id, label: `Cancel ${plan.externalAccountLabel} transfer?` })} type="button" variant="secondary">Cancel</Button>
-                </div>
-              </div>
-            )) : <p className="muted">No scheduled external transfers.</p>}
-          </div>
-          <div className="stack-lg" style={{ marginTop: 24 }}>
-            <div className="stack-sm">
               <p className="eyebrow">External transfers</p>
               <h3>In-flight external transfers</h3>
             </div>
@@ -711,6 +778,33 @@ export function TransfersPage() {
         </Card>
       </div>
 
+      <Card>
+        <div className="stack-lg">
+          <div className="stack-sm">
+            <p className="eyebrow">Scheduled transfers</p>
+            <h3>Upcoming runs</h3>
+          </div>
+          {scheduledTransfers.length ? scheduledTransfers.map((plan) => (
+            <div className="summary-row" key={`${plan.kind}-${plan.id}`}>
+              <div className="summary-row__primary">
+                <strong>{plan.title}</strong>
+                <span>{formatCurrency(plan.amount)} • {plan.summary}</span>
+              </div>
+              <div className="summary-row__meta">
+                <StatusChip status={plan.status} />
+                <Button
+                  onClick={() => setPlanPendingCancel({ kind: plan.kind, id: plan.id, label: plan.cancelLabel })}
+                  type="button"
+                  variant="secondary"
+                >
+                  Cancel
+                </Button>
+              </div>
+            </div>
+          )) : <p className="muted">No scheduled transfers.</p>}
+        </div>
+      </Card>
+
       <Dialog
         actions={(
           <>
@@ -718,6 +812,7 @@ export function TransfersPage() {
             <Button
               onClick={() => {
                 if (!review) return;
+                setErrorMessage(null);
                 if (review.kind === 'SELF') {
                   selfSubmitMutation.mutate(review.payload);
                   return;
@@ -728,9 +823,16 @@ export function TransfersPage() {
                 }
                 externalSubmitMutation.mutate(review.payload);
               }}
+              disabled={reviewSubmitPending}
               type="button"
             >
-              {review?.kind === 'SELF' ? 'Submit transfer' : review?.kind === 'MEMBER' ? (review.payload.scheduleMode === 'SCHEDULED' ? 'Create schedule' : 'Submit member transfer') : (review?.payload.scheduleMode === 'SCHEDULED' ? 'Create schedule' : 'Submit external transfer')}
+              {reviewSubmitPending
+                ? 'Submitting...'
+                : review?.kind === 'SELF'
+                  ? 'Submit transfer'
+                  : review?.kind === 'MEMBER'
+                    ? (review.payload.scheduleMode === 'SCHEDULED' ? 'Create schedule' : 'Submit member transfer')
+                    : (review?.payload.scheduleMode === 'SCHEDULED' ? 'Create schedule' : 'Submit external transfer')}
             </Button>
           </>
         )}
@@ -741,6 +843,11 @@ export function TransfersPage() {
       >
         {review ? (
           <div className="stack-sm">
+            {errorMessage ? (
+              <InlineAlert title="Unable to submit transfer" tone="warning">
+                {errorMessage}
+              </InlineAlert>
+            ) : null}
             {'fromAccountId' in review.payload ? <p><strong>From:</strong> {accounts.find((account) => account.id === review.payload.fromAccountId)?.nickname ?? 'Checking account'}</p> : null}
             {review.kind === 'SELF' ? <p><strong>To:</strong> {accounts.find((account) => account.id === review.payload.toAccountId)?.nickname ?? 'Account'}</p> : null}
             {review.kind === 'MEMBER' ? <p><strong>Recipient:</strong> {review.recipient.displayName} • {review.recipient.defaultCheckingAccountMasked}</p> : null}

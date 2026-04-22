@@ -222,7 +222,6 @@ class UpdateCustomerProfileIn(BaseModel):
 
 class MemberTransferRecipient(BaseModel):
     userId: str
-    handle: str
     displayName: str
     email: str
     defaultCheckingAccountMasked: str
@@ -230,7 +229,7 @@ class MemberTransferRecipient(BaseModel):
 
 class CreateMemberTransferIn(BaseModel):
     fromAccountId: str
-    recipientHandle: str = Field(min_length=3, max_length=120)
+    recipientEmail: str = Field(min_length=3, max_length=120)
     amount: float = Field(gt=0)
     memo: Optional[str] = Field(default=None, max_length=80)
     scheduleMode: TransferScheduleMode = "NOW"
@@ -260,7 +259,7 @@ class MemberTransferPlan(BaseModel):
     id: str
     fromAccountId: str
     recipientUserId: str
-    recipientHandle: str
+    recipientEmail: str
     recipientDisplayName: str
     amount: float
     memo: Optional[str] = None

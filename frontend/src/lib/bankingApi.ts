@@ -195,10 +195,10 @@ export const transfersService = {
 };
 
 export const memberTransfersService = {
-  resolveRecipient(recipientHandle: string): Promise<MemberTransferRecipient> {
+  resolveRecipient(recipientEmail: string): Promise<MemberTransferRecipient> {
     return apiRequest<unknown>('/api/member-transfers/resolve-recipient', {
       method: 'POST',
-      body: { recipientHandle },
+      body: { recipientEmail },
     }).then(normalizeMemberTransferRecipient);
   },
   submit(input: MemberTransferRequest): Promise<MemberTransferSubmissionResult> {

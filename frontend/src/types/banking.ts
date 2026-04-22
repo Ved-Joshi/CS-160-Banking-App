@@ -157,7 +157,6 @@ export interface TransferSubmissionResult {
 
 export interface MemberTransferRecipient {
   userId: string;
-  handle: string;
   displayName: string;
   email: string;
   defaultCheckingAccountMasked: string;
@@ -165,7 +164,7 @@ export interface MemberTransferRecipient {
 
 export interface MemberTransferRequest {
   fromAccountId: string;
-  recipientHandle: string;
+  recipientEmail: string;
   amount: number;
   memo?: string;
   scheduleMode: TransferScheduleMode;
@@ -195,7 +194,7 @@ export interface MemberTransferPlan {
   id: string;
   fromAccountId: string;
   recipientUserId: string;
-  recipientHandle: string;
+  recipientEmail: string;
   recipientDisplayName: string;
   amount: number;
   memo?: string;

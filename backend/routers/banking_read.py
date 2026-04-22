@@ -350,7 +350,6 @@ def map_transaction(row: dict) -> Transaction:
 def map_member_transfer_recipient(row: dict) -> MemberTransferRecipient:
     return MemberTransferRecipient(
         userId=row["userId"],
-        handle=row["handle"],
         displayName=row["displayName"],
         email=row["email"],
         defaultCheckingAccountMasked=row["defaultCheckingAccountMasked"],
@@ -378,7 +377,7 @@ def map_member_transfer_plan(row: dict) -> MemberTransferPlan:
         id=row["id"],
         fromAccountId=row["from_account_id"],
         recipientUserId=row["recipient_user_id"],
-        recipientHandle=row.get("recipient_handle") or "",
+        recipientEmail=row.get("recipient_handle") or "",
         recipientDisplayName=row.get("recipient_display_name") or "Member",
         amount=cents_to_amount(row.get("amount_cents")),
         memo=row.get("memo"),
@@ -896,8 +895,8 @@ async def resolve_member_recipient(
     payload: dict,
     current_user: SupabaseUser = Depends(get_current_user),
 ) -> MemberTransferRecipient:
-    handle = str(payload.get("recipientHandle") or "").strip()
-    recipient = await resolve_member_recipient_for_user(current_user, handle)
+    recipient_email = str(payload.get("recipientEmail") or "").strip()
+    recipient = await resolve_member_recipient_for_user(current_user, recipient_email)
     return map_member_transfer_recipient(recipient.model_dump())
 
 

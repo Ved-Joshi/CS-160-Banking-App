@@ -115,10 +115,9 @@ describe('TransfersPage', () => {
     });
   });
 
-  it('resolves a member recipient before submission', async () => {
+  it('resolves a member recipient on review/submit path', async () => {
     mocks.resolveRecipient.mockResolvedValue({
       userId: 'user_2',
-      handle: 'alex',
       displayName: 'Alex Nguyen',
       email: 'alex@example.com',
       defaultCheckingAccountMasked: '...3344',
@@ -127,19 +126,19 @@ describe('TransfersPage', () => {
     renderPage();
 
     await userEvent.click(screen.getByRole('button', { name: 'Another SJ State user' }));
-    await userEvent.type(screen.getByLabelText('Recipient username or email'), 'alex');
-    await userEvent.click(screen.getByRole('button', { name: 'Verify recipient' }));
+    await userEvent.type(screen.getByLabelText('Recipient email'), 'alex@example.com');
+    await userEvent.type(screen.getByLabelText('Amount'), '1200');
+    await userEvent.click(screen.getByRole('button', { name: 'Review member transfer' }));
 
     await waitFor(() => {
-      expect(mocks.resolveRecipient.mock.calls[0]?.[0]).toBe('alex');
-      expect(screen.getByText(/Alex Nguyen/)).toBeInTheDocument();
+      expect(mocks.resolveRecipient.mock.calls[0]?.[0]).toBe('alex@example.com');
+      expect(screen.getAllByText(/Alex Nguyen/).length).toBeGreaterThan(0);
     });
   });
 
   it('submits a scheduled member transfer', async () => {
     mocks.resolveRecipient.mockResolvedValue({
       userId: 'user_2',
-      handle: 'alex',
       displayName: 'Alex Nguyen',
       email: 'alex@example.com',
       defaultCheckingAccountMasked: '...3344',
@@ -152,9 +151,7 @@ describe('TransfersPage', () => {
     renderPage();
 
     await userEvent.click(screen.getByRole('button', { name: 'Another SJ State user' }));
-    await userEvent.type(screen.getByLabelText('Recipient username or email'), 'alex');
-    await userEvent.click(screen.getByRole('button', { name: 'Verify recipient' }));
-    await waitFor(() => expect(screen.getByText(/Alex Nguyen/)).toBeInTheDocument());
+    await userEvent.type(screen.getByLabelText('Recipient email'), 'alex@example.com');
 
     await userEvent.selectOptions(screen.getByLabelText('Transfer mode'), 'SCHEDULED');
     await userEvent.clear(screen.getByLabelText('Member start date'));
@@ -163,17 +160,21 @@ describe('TransfersPage', () => {
     await userEvent.type(screen.getByLabelText('Member run time'), '09:30');
     await userEvent.type(screen.getByLabelText('Amount'), '1250');
     await userEvent.click(screen.getByRole('button', { name: 'Review scheduled member transfer' }));
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Create schedule' })).toBeInTheDocument());
+    await waitFor(() => {
+      expect(screen.getAllByText(/Alex Nguyen/).length).toBeGreaterThan(0);
+      expect(screen.getByRole('button', { name: 'Create schedule' })).toBeInTheDocument();
+    });
     await userEvent.click(screen.getByRole('button', { name: 'Create schedule' }));
 
     await waitFor(() => {
       expect(mocks.memberSubmit.mock.calls[0]?.[0]).toEqual(expect.objectContaining({
-        recipientHandle: 'alex',
+        recipientEmail: 'alex@example.com',
         scheduleMode: 'SCHEDULED',
         cadence: 'Once',
         startDate: '2099-05-01',
         runTime: '09:30',
       }));
+      expect(mocks.resolveRecipient.mock.calls[0]?.[0]).toBe('alex@example.com');
       expect(screen.getByText('Scheduled member transfer created')).toBeInTheDocument();
     });
   });
@@ -206,6 +207,24 @@ describe('TransfersPage', () => {
         nickname: 'Bills',
       }));
       expect(screen.getByText('External account linked')).toBeInTheDocument();
+    });
+  });
+
+  it('blocks invalid external account details before submit', async () => {
+    renderPage();
+
+    await userEvent.click(screen.getByRole('button', { name: 'External bank' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Add external account' }));
+    await userEvent.type(screen.getByLabelText('Bank name'), 'Wells Fargo');
+    await userEvent.type(screen.getByLabelText('External nickname'), 'Bills');
+    await userEvent.type(screen.getByLabelText('Routing number'), '123456789');
+    await userEvent.type(screen.getByLabelText('Account number'), '12345678');
+    await userEvent.type(screen.getByLabelText('Confirm account number'), '12345678');
+    await userEvent.click(screen.getByRole('button', { name: 'Save external account' }));
+
+    await waitFor(() => {
+      expect(mocks.externalCreateAccount).not.toHaveBeenCalled();
+      expect(screen.getByText('Routing number is invalid.')).toBeInTheDocument();
     });
   });
 
