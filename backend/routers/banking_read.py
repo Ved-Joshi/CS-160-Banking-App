@@ -29,6 +29,7 @@ from schemas.banking import (
     SignedUploadTarget,
     Transaction,
     TransferResult,
+    UpdateCustomerProfileIn,
     UpdateScheduledPaymentIn,
 )
 from utils.google_maps import SearchCenter, geocode_query, search_chase_atms
@@ -358,6 +359,57 @@ def format_address(profile: dict) -> str:
     return ", ".join(part for part in [street, locality] if part) or "—"
 
 
+def normalize_phone_e164(value: str) -> str:
+    digits = "".join(char for char in value if char.isdigit())
+    if len(digits) == 11 and digits.startswith("1"):
+        digits = digits[1:]
+    if len(digits) != 10:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Phone number must contain exactly 10 digits.",
+        )
+    return f"+1{digits}"
+
+
+def normalize_zip_code(value: str) -> str:
+    digits = "".join(char for char in value if char.isdigit())
+    if len(digits) == 5:
+        return digits
+    if len(digits) == 9:
+        return f"{digits[:5]}-{digits[5:]}"
+    raise HTTPException(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        detail="ZIP code must contain 5 or 9 digits.",
+    )
+
+
+def map_customer_profile(profile: dict, current_user: SupabaseUser) -> CustomerProfile:
+    first_name = profile.get("first_name") or current_user.user_metadata.get("firstName") or ""
+    middle_name = profile.get("middle_name") or current_user.user_metadata.get("middleName") or None
+    last_name = profile.get("last_name") or current_user.user_metadata.get("lastName") or ""
+    full_name = " ".join(
+        part for part in [first_name, middle_name, last_name] if part
+    ).strip() or current_user.email
+
+    return CustomerProfile(
+        id=current_user.id,
+        firstName=first_name,
+        middleName=middle_name,
+        lastName=last_name,
+        fullName=full_name,
+        email=profile.get("email") or current_user.email,
+        phone=profile.get("mobile_phone_e164") or current_user.phone or "—",
+        address=format_address(profile),
+        streetAddress=profile.get("street_address") or "",
+        apartmentUnit=profile.get("apartment_unit") or None,
+        city=profile.get("city") or "",
+        state=profile.get("state") or "",
+        zipCode=profile.get("zip_code") or "",
+        memberSince=profile.get("created_at") or current_user.created_at,
+        timezone=profile.get("timezone") or "UTC",
+    )
+
+
 async def require_owned_account(account_id: str, user_id: str, *, require_open: bool = False) -> dict:
     filters = {
         "id": f"eq.{account_id}",
@@ -480,25 +532,32 @@ async def get_profile(current_user: SupabaseUser = Depends(get_current_user)) ->
     if not rows:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Profile not found.")
 
-    profile = rows[0]
-    first_name = profile.get("first_name") or current_user.user_metadata.get("firstName") or ""
-    middle_name = profile.get("middle_name") or current_user.user_metadata.get("middleName") or None
-    last_name = profile.get("last_name") or current_user.user_metadata.get("lastName") or ""
-    full_name = " ".join(
-        part for part in [first_name, middle_name, last_name] if part
-    ).strip() or current_user.email
+    return map_customer_profile(rows[0], current_user)
 
-    return CustomerProfile(
-        id=current_user.id,
-        firstName=first_name,
-        middleName=middle_name,
-        lastName=last_name,
-        fullName=full_name,
-        email=profile.get("email") or current_user.email,
-        phone=profile.get("mobile_phone_e164") or current_user.phone or "—",
-        address=format_address(profile),
-        memberSince=profile.get("created_at") or current_user.created_at,
+
+@router.patch("/me/profile", response_model=CustomerProfile)
+async def update_profile(
+    payload: UpdateCustomerProfileIn,
+    current_user: SupabaseUser = Depends(get_current_user),
+) -> CustomerProfile:
+    updated_rows = await supabase_client.update_rows(
+        "profiles",
+        {
+            "first_name": payload.firstName.strip(),
+            "middle_name": payload.middleName.strip() if payload.middleName else None,
+            "last_name": payload.lastName.strip(),
+            "mobile_phone_e164": normalize_phone_e164(payload.phone),
+            "street_address": payload.streetAddress.strip(),
+            "apartment_unit": payload.apartmentUnit.strip() if payload.apartmentUnit else None,
+            "city": payload.city.strip(),
+            "state": payload.state.strip().upper(),
+            "zip_code": normalize_zip_code(payload.zipCode),
+        },
+        filters={"id": f"eq.{current_user.id}"},
     )
+    if not updated_rows:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Profile not found.")
+    return map_customer_profile(updated_rows[0], current_user)
 
 
 @router.get("/accounts", response_model=list[BankAccount])

@@ -19,6 +19,7 @@ import type {
   TransferPlan,
   TransferRequest,
   TransferSubmissionResult,
+  UpdateCustomerProfileInput,
 } from '../types/banking';
 import { apiRequest } from './apiClient';
 import {
@@ -35,6 +36,12 @@ import {
 export const profileService = {
   get(): Promise<CustomerProfile> {
     return apiRequest('/api/me/profile');
+  },
+  update(input: UpdateCustomerProfileInput): Promise<CustomerProfile> {
+    return apiRequest('/api/me/profile', {
+      method: 'PATCH',
+      body: input,
+    });
   },
 };
 

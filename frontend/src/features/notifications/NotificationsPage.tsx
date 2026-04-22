@@ -1,15 +1,10 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Button, Card, EmptyState, PageHeader, StatusChip } from '../../components/ui';
+import { useQuery } from '@tanstack/react-query';
+import { Card, EmptyState, PageHeader, StatusChip } from '../../components/ui';
 import { formatDateTime } from '../../lib/format';
 import { notificationsService } from '../../lib/bankingApi';
 
 export function NotificationsPage() {
-  const queryClient = useQueryClient();
   const { data: notifications = [] } = useQuery({ queryKey: ['notifications'], queryFn: notificationsService.list });
-  const mutation = useMutation({
-    mutationFn: notificationsService.markRead,
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['notifications'] }),
-  });
 
   if (!notifications.length) {
     return <EmptyState title="No notifications" description="System activity and alerts will appear here." />;
@@ -30,11 +25,6 @@ export function NotificationsPage() {
                 <p>{notification.body}</p>
                 <small className="muted">{formatDateTime(notification.createdAt)}</small>
               </div>
-              {!notification.read ? (
-                <Button onClick={() => mutation.mutate(notification.id)} type="button" variant="secondary">
-                  Mark read
-                </Button>
-              ) : null}
             </div>
           </Card>
         ))}

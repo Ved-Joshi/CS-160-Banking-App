@@ -34,8 +34,25 @@ export interface CustomerProfile {
   email: string;
   phone: string;
   address: string;
+  streetAddress: string;
+  apartmentUnit?: string | null;
+  city: string;
+  state: string;
+  zipCode: string;
   memberSince: string;
   timezone: string;
+}
+
+export interface UpdateCustomerProfileInput {
+  firstName: string;
+  middleName?: string;
+  lastName: string;
+  phone: string;
+  streetAddress: string;
+  apartmentUnit?: string;
+  city: string;
+  state: string;
+  zipCode: string;
 }
 
 export interface RegistrationInput {

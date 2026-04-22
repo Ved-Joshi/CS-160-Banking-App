@@ -192,4 +192,22 @@ class CustomerProfile(BaseModel):
     email: str
     phone: str
     address: str
+    streetAddress: str
+    apartmentUnit: Optional[str] = None
+    city: str
+    state: str
+    zipCode: str
     memberSince: str
+    timezone: str
+
+
+class UpdateCustomerProfileIn(BaseModel):
+    firstName: str = Field(min_length=1, max_length=80)
+    middleName: Optional[str] = Field(default=None, max_length=80)
+    lastName: str = Field(min_length=1, max_length=80)
+    phone: str = Field(min_length=10, max_length=20)
+    streetAddress: str = Field(min_length=1, max_length=160)
+    apartmentUnit: Optional[str] = Field(default=None, max_length=30)
+    city: str = Field(min_length=1, max_length=80)
+    state: str = Field(min_length=2, max_length=2)
+    zipCode: str = Field(min_length=5, max_length=10)
