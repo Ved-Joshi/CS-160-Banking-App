@@ -14,14 +14,14 @@ const paymentSchema = z.object({
   payeeId: z.string().min(1),
   accountId: z.string().min(1),
   amount: z.number().positive(),
-  cadence: z.enum(['Once', 'Weekly', 'Monthly', 'Biweekly']),
+  cadence: z.enum(['Once', 'Daily', 'Weekly', 'Monthly', 'Biweekly']),
   deliverBy: z.string().min(1),
 });
 
 const editPaymentSchema = z.object({
   payeeId: z.string().min(1),
   amount: z.number().positive(),
-  cadence: z.enum(['Once', 'Weekly', 'Monthly', 'Biweekly']),
+  cadence: z.enum(['Once', 'Daily', 'Weekly', 'Monthly', 'Biweekly']),
   deliverBy: z.string().min(1),
 });
 
@@ -469,6 +469,7 @@ export function BillPayPage() {
                     }}
                   >
                     <option value="Once">One time</option>
+                    <option value="Daily">Daily</option>
                     <option value="Weekly">Weekly</option>
                     <option value="Monthly">Monthly</option>
                     <option value="Biweekly">Biweekly</option>
@@ -777,6 +778,7 @@ export function BillPayPage() {
           <Field label="Cadence" error={editPaymentForm.formState.errors.cadence?.message}>
             <select {...editPaymentForm.register('cadence')}>
               <option value="Once">One time</option>
+              <option value="Daily">Daily</option>
               <option value="Weekly">Weekly</option>
               <option value="Monthly">Monthly</option>
               <option value="Biweekly">Biweekly</option>

@@ -9,7 +9,7 @@ TransactionStatus = Literal["PENDING", "COMPLETED", "FAILED"]
 DepositStatus = Literal["PENDING_REVIEW", "APPROVED", "DECLINED"]
 PaymentStatus = Literal["SCHEDULED", "PROCESSING", "COMPLETED", "FAILED", "CANCELLED"]
 NotificationType = Literal["deposit", "payment", "transfer", "security"]
-PaymentCadence = Literal["Once", "Weekly", "Biweekly", "Monthly"]
+PaymentCadence = Literal["Once", "Daily", "Weekly", "Biweekly", "Monthly"]
 TransferStatus = Literal["PENDING", "COMPLETED", "FAILED"]
 
 

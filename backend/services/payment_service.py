@@ -136,6 +136,8 @@ def _parse_payment_date(value: str | None) -> date:
 
 def _advance_payment_cadence(base_date: date, cadence: str) -> date:
     normalized = (cadence or "once").lower()
+    if normalized == "daily":
+        return base_date + timedelta(days=1)
     if normalized == "weekly":
         return base_date + timedelta(days=7)
     if normalized == "biweekly":
@@ -233,7 +235,7 @@ async def process_due_bill_payments(*, batch_size: int = 50) -> dict[str, int]:
         processed += 1
 
         cadence = (payment.get("cadence") or "once").lower()
-        is_recurring = cadence in {"weekly", "biweekly", "monthly"}
+        is_recurring = cadence in {"daily", "weekly", "biweekly", "monthly"}
         failure_reason: str | None = None
         succeeded_run = False
 

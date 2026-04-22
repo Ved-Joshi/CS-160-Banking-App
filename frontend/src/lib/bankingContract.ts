@@ -132,6 +132,7 @@ function normalizeTransferStatus(value: unknown): TransferResult['status'] {
 
 function normalizePaymentCadence(value: unknown): ScheduledPayment['cadence'] {
   const normalized = asString(value).toLowerCase();
+  if (normalized === 'daily') return 'Daily';
   if (normalized === 'weekly') return 'Weekly';
   if (normalized === 'biweekly') return 'Biweekly';
   if (normalized === 'monthly') return 'Monthly';

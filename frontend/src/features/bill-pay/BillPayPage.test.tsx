@@ -97,6 +97,28 @@ describe('BillPayPage', () => {
     });
   });
 
+  it('submits daily payment payload', async () => {
+    mocks.createPayment.mockResolvedValue({ id: 'pay_daily', status: 'SCHEDULED' });
+
+    renderPage();
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Schedule payment' })).toBeEnabled();
+    });
+
+    await userEvent.type(screen.getByLabelText('Amount'), '2500');
+    await userEvent.selectOptions(screen.getByLabelText('Cadence'), 'Daily');
+    await userEvent.click(screen.getByRole('button', { name: 'Schedule payment' }));
+
+    await waitFor(() => {
+      expect(mocks.createPayment).toHaveBeenCalledTimes(1);
+      expect(mocks.createPayment.mock.calls[0]?.[0]).toEqual(expect.objectContaining({
+        cadence: 'Daily',
+        amount: 25,
+      }));
+    });
+  });
+
   it('creates a first-time payee from the add-payee modal', async () => {
     mocks.listPayees.mockResolvedValue([]);
     mocks.createPayee.mockResolvedValue({

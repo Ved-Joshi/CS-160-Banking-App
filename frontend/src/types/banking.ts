@@ -161,7 +161,7 @@ export interface ScheduledPayment {
   payeeName: string;
   accountId: string;
   amount: number;
-  cadence: 'Once' | 'Weekly' | 'Biweekly' | 'Monthly';
+  cadence: 'Once' | 'Daily' | 'Weekly' | 'Biweekly' | 'Monthly';
   deliverBy: string;
   status: PaymentStatus;
   failureReason?: string;
@@ -171,14 +171,14 @@ export interface CreateScheduledPaymentInput {
   payeeId: string;
   accountId: string;
   amount: number;
-  cadence: 'Once' | 'Weekly' | 'Biweekly' | 'Monthly';
+  cadence: 'Once' | 'Daily' | 'Weekly' | 'Biweekly' | 'Monthly';
   deliverBy: string;
 }
 
 export interface UpdateScheduledPaymentInput {
   payeeId?: string;
   amount?: number;
-  cadence?: 'Once' | 'Weekly' | 'Biweekly' | 'Monthly';
+  cadence?: 'Once' | 'Daily' | 'Weekly' | 'Biweekly' | 'Monthly';
   deliverBy?: string;
 }
 

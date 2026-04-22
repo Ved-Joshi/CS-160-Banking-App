@@ -102,6 +102,7 @@ def normalize_transaction_status_filter(value: str | None) -> str | None:
 def map_payment_cadence(value: str) -> str:
     return {
         "once": "Once",
+        "daily": "Daily",
         "weekly": "Weekly",
         "biweekly": "Biweekly",
         "monthly": "Monthly",
@@ -121,6 +122,7 @@ def map_payment_status(value: str) -> str:
 def normalize_payment_cadence(value: str) -> str:
     return {
         "Once": "once",
+        "Daily": "daily",
         "Weekly": "weekly",
         "Biweekly": "biweekly",
         "Monthly": "monthly",
@@ -431,7 +433,9 @@ def compute_payment_next_run_at(deliver_by: str) -> str:
 def advance_payment_deliver_by(deliver_by: str, cadence: str) -> str:
     base_date = date.fromisoformat(deliver_by)
     normalized = cadence.lower()
-    if normalized == "weekly":
+    if normalized == "daily":
+        next_date = base_date + timedelta(days=1)
+    elif normalized == "weekly":
         next_date = base_date + timedelta(days=7)
     elif normalized == "biweekly":
         next_date = base_date + timedelta(days=14)
