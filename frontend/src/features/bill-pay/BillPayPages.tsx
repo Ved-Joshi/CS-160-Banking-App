@@ -4,15 +4,17 @@ import { useEffect, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { Link, useSearchParams } from 'react-router-dom';
 import { z } from 'zod';
-import { Button, Card, DataTable, EmptyState, Field, InlineAlert, PageHeader, StatusChip } from '../../components/ui';
+import { Button, Card, DataTable, Dialog, EmptyState, Field, InlineAlert, PageHeader, StatusChip } from '../../components/ui';
 import { accountsService, payeesService, paymentsService } from '../../lib/bankingApi';
 import { formatCurrency, formatDate } from '../../lib/format';
+import { queryKeys } from '../../lib/queryKeys';
+import type { ScheduledPayment } from '../../types/banking';
 
 const paymentSchema = z.object({
   payeeId: z.string().min(1),
   accountId: z.string().min(1),
   amount: z.number().positive(),
-  cadence: z.enum(['Once', 'Monthly', 'Biweekly']),
+  cadence: z.enum(['Once', 'Weekly', 'Monthly', 'Biweekly']),
   deliverBy: z.string().min(1),
 });
 
@@ -31,16 +33,29 @@ export function BillPayPage() {
   const queryClient = useQueryClient();
   const [searchParams] = useSearchParams();
   const preferredAccountId = searchParams.get('accountId') ?? '';
-  const { data: payees = [] } = useQuery({ queryKey: ['payees'], queryFn: payeesService.list });
-  const { data: payments = [] } = useQuery({ queryKey: ['payments'], queryFn: paymentsService.list });
-  const { data: accounts = [] } = useQuery({ queryKey: ['accounts'], queryFn: accountsService.list });
+  const { data: payees = [] } = useQuery({ queryKey: queryKeys.payees(), queryFn: payeesService.list });
+  const { data: payments = [] } = useQuery({ queryKey: queryKeys.payments(), queryFn: paymentsService.list });
+  const { data: accounts = [] } = useQuery({ queryKey: queryKeys.accounts(), queryFn: accountsService.list });
   const mutation = useMutation({
     mutationFn: paymentsService.create,
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['payments'] });
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: queryKeys.payments() }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.notifications() }),
+      ]);
+    },
+  });
+  const cancelMutation = useMutation({
+    mutationFn: paymentsService.cancel,
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: queryKeys.payments() }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.notifications() }),
+      ]);
     },
   });
   const [amountDigits, setAmountDigits] = useState('');
+  const [paymentPendingCancel, setPaymentPendingCancel] = useState<ScheduledPayment | null>(null);
   const form = useForm<z.infer<typeof paymentSchema>>({
     resolver: zodResolver(paymentSchema),
     defaultValues: {
@@ -81,12 +96,20 @@ export function BillPayPage() {
     form.setValue('amount', normalizedAmount);
   }, [amountDigits, amountDisplay, form]);
 
+  const canCancelPayment = (status: ScheduledPayment['status']) => status === 'SCHEDULED' || status === 'PROCESSING';
   const rows = payments.map((payment) => [
     payment.payeeName,
     formatDate(payment.deliverBy),
     payment.cadence,
     <StatusChip key={`${payment.id}-status`} status={payment.status} />,
     formatCurrency(payment.amount),
+    canCancelPayment(payment.status) ? (
+      <Button key={`${payment.id}-cancel`} onClick={() => setPaymentPendingCancel(payment)} type="button" variant="primary">
+        Cancel
+      </Button>
+    ) : (
+      <span className="muted" key={`${payment.id}-no-action`}>—</span>
+    ),
   ]);
 
   return (
@@ -98,6 +121,10 @@ export function BillPayPage() {
             className="stack-lg"
             onSubmit={form.handleSubmit(async (values) => {
               if (!canSchedule) return;
+              if (values.deliverBy < new Date().toISOString().slice(0, 10)) {
+                form.setError('deliverBy', { type: 'manual', message: 'Deliver by date cannot be in the past.' });
+                return;
+              }
               try {
                 await mutation.mutateAsync(values);
               } catch {
@@ -172,6 +199,7 @@ export function BillPayPage() {
             <Field label="Cadence" error={form.formState.errors.cadence?.message}>
               <select {...form.register('cadence')} disabled={!canSchedule}>
                 <option value="Once">One time</option>
+                <option value="Weekly">Weekly</option>
                 <option value="Monthly">Monthly</option>
                 <option value="Biweekly">Biweekly</option>
               </select>
@@ -208,7 +236,7 @@ export function BillPayPage() {
       {rows.length ? (
         <Card>
           <h3>Scheduled payments</h3>
-          <DataTable headers={['Payee', 'Deliver by', 'Cadence', 'Status', 'Amount']} rows={rows} />
+          <DataTable headers={['Payee', 'Deliver by', 'Cadence', 'Status', 'Amount', 'Actions']} rows={rows} />
         </Card>
       ) : (
         <EmptyState
@@ -216,12 +244,76 @@ export function BillPayPage() {
           description="Scheduled bill payments will appear here after you create one."
         />
       )}
+      {cancelMutation.error ? (
+        <InlineAlert title="Unable to cancel payment" tone="warning">
+          {cancelMutation.error instanceof Error ? cancelMutation.error.message : 'Something went wrong.'}
+        </InlineAlert>
+      ) : null}
+      <Dialog
+        actions={(
+          <>
+            <Button
+              onClick={() => {
+                if (cancelMutation.isPending) return;
+                setPaymentPendingCancel(null);
+              }}
+              type="button"
+              variant="secondary"
+            >
+              Keep payment
+            </Button>
+            <Button
+              disabled={cancelMutation.isPending || !paymentPendingCancel}
+              onClick={() => {
+                if (!paymentPendingCancel) return;
+                cancelMutation.mutate(paymentPendingCancel.id, {
+                  onSuccess: () => {
+                    setPaymentPendingCancel(null);
+                  },
+                });
+              }}
+              type="button"
+              variant="destructive"
+            >
+              {cancelMutation.isPending ? 'Cancelling...' : 'Confirm cancel'}
+            </Button>
+          </>
+        )}
+        description="This stops future attempts for this scheduled bill payment."
+        onClose={() => {
+          if (cancelMutation.isPending) return;
+          setPaymentPendingCancel(null);
+        }}
+        open={paymentPendingCancel !== null}
+        title={paymentPendingCancel ? `Cancel ${paymentPendingCancel.payeeName} payment?` : 'Cancel payment?'}
+      >
+        {paymentPendingCancel ? (
+          <div className="stack-sm">
+            <div className="summary-row">
+              <div className="summary-row__primary">
+                <strong>Deliver by</strong>
+              </div>
+              <div className="summary-row__secondary">
+                <span>{formatDate(paymentPendingCancel.deliverBy)}</span>
+              </div>
+            </div>
+            <div className="summary-row">
+              <div className="summary-row__primary">
+                <strong>Amount</strong>
+              </div>
+              <div className="summary-row__secondary">
+                <span>{formatCurrency(paymentPendingCancel.amount)}</span>
+              </div>
+            </div>
+          </div>
+        ) : null}
+      </Dialog>
     </div>
   );
 }
 
 export function PayeesPage() {
-  const { data: payees = [] } = useQuery({ queryKey: ['payees'], queryFn: payeesService.list });
+  const { data: payees = [] } = useQuery({ queryKey: queryKeys.payees(), queryFn: payeesService.list });
 
   if (!payees.length) {
     return <EmptyState title="No payees" description="This profile does not have any active payees yet." />;

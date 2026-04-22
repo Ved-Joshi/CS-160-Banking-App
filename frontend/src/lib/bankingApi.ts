@@ -22,6 +22,8 @@ import { apiRequest } from './apiClient';
 import {
   normalizeAccount,
   normalizeAccounts,
+  normalizePayment,
+  normalizePayments,
   normalizeTransactions,
   normalizeTransferPlan,
   normalizeTransferPlans,
@@ -77,13 +79,18 @@ export const transactionsService = {
 
 export const paymentsService = {
   list(): Promise<ScheduledPayment[]> {
-    return apiRequest('/api/payments');
+    return apiRequest<unknown[]>('/api/payments').then(normalizePayments);
   },
   create(input: CreateScheduledPaymentInput): Promise<ScheduledPayment> {
-    return apiRequest('/api/payments', {
+    return apiRequest<unknown>('/api/payments', {
       method: 'POST',
       body: input,
-    });
+    }).then(normalizePayment);
+  },
+  cancel(paymentId: string): Promise<ScheduledPayment> {
+    return apiRequest<unknown>(`/api/payments/${paymentId}/cancel`, {
+      method: 'POST',
+    }).then(normalizePayment);
   },
 };
 

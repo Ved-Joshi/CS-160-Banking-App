@@ -5,5 +5,6 @@ export const queryKeys = {
   transferPlans: () => ['transfer-plans'] as const,
   notifications: () => ['notifications'] as const,
   payments: () => ['payments'] as const,
+  payees: () => ['payees'] as const,
   deposits: () => ['deposits'] as const,
 };

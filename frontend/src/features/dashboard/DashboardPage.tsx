@@ -17,7 +17,7 @@ export function DashboardPage() {
   const totalAvailable = accounts.reduce((sum, account) => sum + account.balances.availableBalance, 0);
   const displayedAccounts = accounts.slice(0, 3);
   const recentTransactions = transactions.slice(0, 5);
-  const upcomingPayments = payments.slice(0, 5);
+  const upcomingPayments = payments.filter((payment) => payment.status === 'SCHEDULED' || payment.status === 'PROCESSING').slice(0, 5);
   const pendingDeposit = deposits.find((deposit) => deposit.status === 'PENDING_REVIEW');
 
   return (
