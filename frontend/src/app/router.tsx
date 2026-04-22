@@ -2,7 +2,7 @@ import { Navigate, createBrowserRouter } from 'react-router-dom';
 import { AppShell } from '../components/layout';
 import { AccountsPage, AccountDetailPage, OpenAccountPage } from '../features/accounts/AccountsPages';
 import { AtmLocatorPage } from '../features/atm-locator/AtmLocatorPage';
-import { BillPayPage, PayeesPage } from '../features/bill-pay/BillPayPages';
+import { BillPayPage } from '../features/bill-pay/BillPayPages';
 import { DashboardPage } from '../features/dashboard/DashboardPage';
 import { DepositsPage, DepositDetailPage } from '../features/deposits/DepositPages';
 import { LoginPage, RegisterPage, ResetPasswordPage, WelcomePage } from '../features/auth/AuthPages';
@@ -34,7 +34,6 @@ export const router = createBrowserRouter([
           { path: 'accounts/:accountId', element: <AccountDetailPage /> },
           { path: 'transfers', element: <TransfersPage /> },
           { path: 'bill-pay', element: <BillPayPage /> },
-          { path: 'bill-pay/payees', element: <PayeesPage /> },
           { path: 'deposits', element: <DepositsPage /> },
           { path: 'deposits/:depositId', element: <DepositDetailPage /> },
           { path: 'transactions', element: <TransactionsPage /> },

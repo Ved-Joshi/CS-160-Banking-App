@@ -149,6 +149,12 @@ export interface Payee {
   accountMask: string;
 }
 
+export interface CreatePayeeInput {
+  name: string;
+  category: string;
+  accountLast4?: string;
+}
+
 export interface ScheduledPayment {
   id: string;
   payeeId: string;
@@ -158,6 +164,7 @@ export interface ScheduledPayment {
   cadence: 'Once' | 'Weekly' | 'Biweekly' | 'Monthly';
   deliverBy: string;
   status: PaymentStatus;
+  failureReason?: string;
 }
 
 export interface CreateScheduledPaymentInput {
@@ -166,6 +173,13 @@ export interface CreateScheduledPaymentInput {
   amount: number;
   cadence: 'Once' | 'Weekly' | 'Biweekly' | 'Monthly';
   deliverBy: string;
+}
+
+export interface UpdateScheduledPaymentInput {
+  payeeId?: string;
+  amount?: number;
+  cadence?: 'Once' | 'Weekly' | 'Biweekly' | 'Monthly';
+  deliverBy?: string;
 }
 
 export interface DepositImage {

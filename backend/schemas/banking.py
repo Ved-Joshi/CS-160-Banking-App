@@ -45,6 +45,13 @@ class CreateScheduledPaymentIn(BaseModel):
     deliverBy: str
 
 
+class UpdateScheduledPaymentIn(BaseModel):
+    payeeId: Optional[str] = None
+    amount: Optional[float] = Field(default=None, gt=0)
+    cadence: Optional[PaymentCadence] = None
+    deliverBy: Optional[str] = None
+
+
 class Transaction(BaseModel):
     id: str
     accountId: str
@@ -77,6 +84,12 @@ class Payee(BaseModel):
     accountMask: str
 
 
+class CreatePayeeIn(BaseModel):
+    name: str = Field(min_length=1, max_length=80)
+    category: str = Field(default="Other", min_length=1, max_length=50)
+    accountLast4: Optional[str] = Field(default=None, min_length=4, max_length=4, pattern=r"^\d{4}$")
+
+
 class ScheduledPayment(BaseModel):
     id: str
     payeeId: str
@@ -86,6 +99,7 @@ class ScheduledPayment(BaseModel):
     cadence: PaymentCadence
     deliverBy: str
     status: PaymentStatus
+    failureReason: Optional[str] = None
 
 
 class DepositImage(BaseModel):

@@ -749,6 +749,7 @@ small {
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
+
 .stat-list {
   display: grid;
   gap: 1rem;
@@ -915,6 +916,61 @@ small {
 .table-wrap {
   overflow-x: auto;
   -webkit-overflow-scrolling: touch;
+}
+
+.payment-actions {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.65rem;
+}
+
+.payment-deliver-by {
+  display: grid;
+  gap: 0.2rem;
+  justify-items: center;
+}
+
+.payment-action-icon {
+  min-height: 2.25rem;
+  width: 2.25rem;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--navy-800);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.payment-action-icon:focus-visible {
+  outline: 2px solid rgba(36, 91, 171, 0.45);
+  outline-offset: 2px;
+  border-radius: 0.45rem;
+}
+
+.payment-action-icon__svg {
+  width: 1.45rem;
+  height: 1.45rem;
+  fill: currentColor;
+}
+
+.payment-action-icon:hover {
+  opacity: 0.78;
+}
+
+.payment-action-icon--retry {
+  color: var(--link-blue);
+}
+
+.payment-action-icon--delay {
+  color: var(--warning);
+}
+
+.payment-action-icon--delete {
+  color: var(--red-700);
 }
 
 .data-table {

@@ -6,7 +6,9 @@ import type {
   CreateBankAccountInput,
   CreateDepositInput,
   CreateDepositUploadUrlsInput,
+  CreatePayeeInput,
   CreateScheduledPaymentInput,
+  UpdateScheduledPaymentInput,
   CustomerProfile,
   Deposit,
   DepositUploadUrls,
@@ -92,6 +94,17 @@ export const paymentsService = {
       method: 'POST',
     }).then(normalizePayment);
   },
+  update(paymentId: string, input: UpdateScheduledPaymentInput): Promise<ScheduledPayment> {
+    return apiRequest<unknown>(`/api/payments/${paymentId}`, {
+      method: 'PATCH',
+      body: input,
+    }).then(normalizePayment);
+  },
+  retry(paymentId: string): Promise<ScheduledPayment> {
+    return apiRequest<unknown>(`/api/payments/${paymentId}/retry`, {
+      method: 'POST',
+    }).then(normalizePayment);
+  },
 };
 
 export const depositsService = {
@@ -118,6 +131,12 @@ export const depositsService = {
 export const payeesService = {
   list(): Promise<Payee[]> {
     return apiRequest('/api/payees');
+  },
+  create(input: CreatePayeeInput): Promise<Payee> {
+    return apiRequest('/api/payees', {
+      method: 'POST',
+      body: input,
+    });
   },
 };
 
