@@ -5,22 +5,24 @@ import { Controller, useForm } from 'react-hook-form';
 import { Link, useSearchParams } from 'react-router-dom';
 import { z } from 'zod';
 import { Button, Card, DataTable, Dialog, EmptyState, Field, InlineAlert, PageHeader, StatusChip } from '../../components/ui';
-import { accountsService, payeesService, paymentsService } from '../../lib/bankingApi';
+import { accountsService, payeesService, paymentsService, profileService } from '../../lib/bankingApi';
 import { formatCurrency, formatDate } from '../../lib/format';
 import { queryKeys } from '../../lib/queryKeys';
 import type { ScheduledPayment, UpdateScheduledPaymentInput } from '../../types/banking';
 
+const MAX_PAYMENT_AMOUNT = 100000;
+
 const paymentSchema = z.object({
   payeeId: z.string().min(1),
   accountId: z.string().min(1),
-  amount: z.number().positive(),
+  amount: z.number().positive().max(MAX_PAYMENT_AMOUNT),
   cadence: z.enum(['Once', 'Daily', 'Weekly', 'Monthly', 'Biweekly']),
   deliverBy: z.string().min(1),
 });
 
 const editPaymentSchema = z.object({
   payeeId: z.string().min(1),
-  amount: z.number().positive(),
+  amount: z.number().positive().max(MAX_PAYMENT_AMOUNT),
   cadence: z.enum(['Once', 'Daily', 'Weekly', 'Monthly', 'Biweekly']),
   deliverBy: z.string().min(1),
 });
@@ -55,36 +57,62 @@ function formatDateInputValue(date: Date): string {
   return `${year}-${month}-${day}`;
 }
 
-function parseDateInputValue(value: string): Date {
+function parseDateInputValue(value: string): { year: number; month: number; day: number } | null {
   const [year, month, day] = value.split('-').map(Number);
-  return new Date(year, (month || 1) - 1, day || 1);
+  if (!Number.isFinite(year) || !Number.isFinite(month) || !Number.isFinite(day)) return null;
+  return { year, month, day };
+}
+
+function toDayNumber(value: string): number | null {
+  const parsed = parseDateInputValue(value);
+  if (!parsed) return null;
+  return Date.UTC(parsed.year, parsed.month - 1, parsed.day) / 86400000;
+}
+
+function getTodayInTimezone(timezone: string): string {
+  try {
+    const formatter = new Intl.DateTimeFormat('en-CA', {
+      timeZone: timezone,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    });
+    const parts = formatter.formatToParts(new Date());
+    const year = parts.find((part) => part.type === 'year')?.value ?? '';
+    const month = parts.find((part) => part.type === 'month')?.value ?? '';
+    const day = parts.find((part) => part.type === 'day')?.value ?? '';
+    if (year && month && day) {
+      return `${year}-${month}-${day}`;
+    }
+  } catch {
+    // Fall through to local date.
+  }
+  return formatDateInputValue(new Date());
 }
 
 function addDaysToDateInput(value: string, days: number): string {
-  const next = parseDateInputValue(value);
+  const parsed = parseDateInputValue(value);
+  if (!parsed) return value;
+  const next = new Date(parsed.year, parsed.month - 1, parsed.day);
   next.setDate(next.getDate() + days);
   return formatDateInputValue(next);
 }
 
-function daysFromToday(dateValue: string | undefined): number | null {
+function daysFromToday(dateValue: string | undefined, timezone: string): number | null {
   if (typeof dateValue !== 'string' || dateValue.length === 0) return null;
-  const parts = dateValue.split('-').map(Number);
-  if (parts.length !== 3 || Number.isNaN(parts[0]) || Number.isNaN(parts[1]) || Number.isNaN(parts[2])) {
-    return null;
-  }
-  const targetDay = Date.UTC(parts[0], parts[1] - 1, parts[2]) / 86400000;
-  const now = new Date();
-  const todayDay = Date.UTC(now.getFullYear(), now.getMonth(), now.getDate()) / 86400000;
+  const targetDay = toDayNumber(dateValue);
+  const todayDay = toDayNumber(getTodayInTimezone(timezone));
+  if (targetDay === null || todayDay === null) return null;
   return targetDay - todayDay;
 }
 
-function formatRecurringNextRunLabel(deliverBy: string): string | null {
-  const dayDiff = daysFromToday(deliverBy);
+function formatRecurringNextRunLabel(deliverBy: string, timezone: string): string | null {
+  const dayDiff = daysFromToday(deliverBy, timezone);
   if (dayDiff === null) return null;
-  if (dayDiff === 0) return 'Next run today';
+  if (dayDiff === 0) return 'Due today';
   if (dayDiff === 1) return 'Next run in 1 day';
   if (dayDiff > 1) return `Next run in ${dayDiff} days`;
-  if (dayDiff === -1) return '1 day overdue';
+  if (dayDiff === -1) return 'Overdue by 1 day';
   return `${Math.abs(dayDiff)} days overdue`;
 }
 
@@ -122,6 +150,7 @@ export function BillPayPage() {
   const queryClient = useQueryClient();
   const [searchParams] = useSearchParams();
   const preferredAccountId = searchParams.get('accountId') ?? '';
+  const { data: profile } = useQuery({ queryKey: ['profile'], queryFn: profileService.get });
   const { data: payees = [] } = useQuery({ queryKey: queryKeys.payees(), queryFn: payeesService.list });
   const { data: payments = [] } = useQuery({ queryKey: queryKeys.payments(), queryFn: paymentsService.list });
   const { data: accounts = [] } = useQuery({ queryKey: queryKeys.accounts(), queryFn: accountsService.list });
@@ -173,14 +202,16 @@ export function BillPayPage() {
         queryClient.invalidateQueries({ queryKey: queryKeys.transactions() }),
         queryClient.invalidateQueries({ queryKey: queryKeys.notifications() }),
       ]);
-      const recurringNext = updatedPayment.cadence !== 'Once'
-        ? formatRecurringNextRunLabel(updatedPayment.deliverBy)
+      const recurringNext = updatedPayment.cadence !== 'Once' && profile?.timezone
+        ? formatRecurringNextRunLabel(updatedPayment.deliverBy, profile.timezone)
         : null;
       if (updatedPayment.failureReason) {
         setRetryFeedback({
           tone: 'warning',
           title: 'Retry failed',
-          message: updatedPayment.failureReason,
+          message: updatedPayment.cadence === 'Once'
+            ? updatedPayment.failureReason
+            : `${updatedPayment.failureReason} This recurring payment remains scheduled.`,
         });
         return;
       }
@@ -248,11 +279,17 @@ export function BillPayPage() {
   const hasAccounts = accounts.length > 0;
   const hasPayees = payees.length > 0;
   const canSchedule = hasAccounts && hasPayees;
-  const todayDate = formatDateInputValue(new Date());
+  const userTimezone = profile?.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+  const todayDate = getTodayInTimezone(userTimezone);
   const amountDisplay = formatAmountDigits(amountDigits);
   const amountInputValue = `$${amountDisplay}`;
   const editAmountDisplay = formatAmountDigits(editAmountDigits);
   const editAmountInputValue = `$${editAmountDisplay}`;
+
+  useEffect(() => {
+    if (paymentPendingRetry) return;
+    setRetryDelayDate(addDaysToDateInput(todayDate, 1));
+  }, [todayDate, paymentPendingRetry]);
 
   useEffect(() => {
     if (!hasAccounts) return;
@@ -292,7 +329,7 @@ export function BillPayPage() {
   }, [editAmountDigits, editPaymentForm]);
   const deliverByLabel = isRecurringCadence ? 'Start delivering by' : 'Deliver by';
 
-  const canCancelPayment = (status: ScheduledPayment['status']) => status === 'SCHEDULED' || status === 'PROCESSING' || status === 'FAILED';
+  const canCancelPayment = (status: ScheduledPayment['status']) => status === 'SCHEDULED' || status === 'FAILED';
   const canRetryPayment = (status: ScheduledPayment['status']) => status === 'FAILED';
   const canEditPayment = (payment: ScheduledPayment) => payment.cadence !== 'Once' && payment.status === 'SCHEDULED';
   const visiblePayments = payments.filter(
@@ -304,7 +341,7 @@ export function BillPayPage() {
       <div className="payment-deliver-by" key={`${payment.id}-deliver-by`}>
         <span>{formatDate(payment.deliverBy)}</span>
         {payment.cadence !== 'Once' ? (
-          <small className="muted">{formatRecurringNextRunLabel(payment.deliverBy) ?? ''}</small>
+          <small className="muted">{formatRecurringNextRunLabel(payment.deliverBy, userTimezone) ?? ''}</small>
         ) : null}
       </div>
     ),
@@ -378,8 +415,12 @@ export function BillPayPage() {
             className="stack-lg"
             onSubmit={paymentForm.handleSubmit(async (values) => {
               if (!canSchedule) return;
-              if (values.deliverBy < new Date().toISOString().slice(0, 10)) {
+              if (values.deliverBy < todayDate) {
                 paymentForm.setError('deliverBy', { type: 'manual', message: 'Deliver by date cannot be in the past.' });
+                return;
+              }
+              if (values.amount > MAX_PAYMENT_AMOUNT) {
+                paymentForm.setError('amount', { type: 'manual', message: `Amount cannot exceed $${MAX_PAYMENT_AMOUNT.toFixed(2)}.` });
                 return;
               }
               try {
@@ -428,7 +469,14 @@ export function BillPayPage() {
                 onKeyDown={(event) => {
                   if (event.key >= '0' && event.key <= '9') {
                     event.preventDefault();
-                    setAmountDigits((prev) => `${prev}${event.key}`.slice(0, 12));
+                    setAmountDigits((prev) => {
+                      const nextDigits = `${prev}${event.key}`.slice(0, 12);
+                      const nextAmount = Number(formatAmountDigits(nextDigits));
+                      if (nextAmount > MAX_PAYMENT_AMOUNT) {
+                        return prev;
+                      }
+                      return nextDigits;
+                    });
                     return;
                   }
                   if (event.key === 'Backspace') {
@@ -448,7 +496,10 @@ export function BillPayPage() {
                 onPaste={(event) => {
                   event.preventDefault();
                   const pasted = event.clipboardData.getData('text').replace(/\D/g, '').slice(0, 12);
-                  setAmountDigits(pasted);
+                  const nextAmount = Number(formatAmountDigits(pasted));
+                  if (nextAmount <= MAX_PAYMENT_AMOUNT) {
+                    setAmountDigits(pasted);
+                  }
                 }}
                 type="text"
                 value={amountInputValue}
@@ -739,13 +790,20 @@ export function BillPayPage() {
                 event.currentTarget.setSelectionRange(0, event.currentTarget.value.length);
                 setEditReplaceOnType(true);
               }}
-              onKeyDown={(event) => {
-                if (event.key >= '0' && event.key <= '9') {
-                  event.preventDefault();
-                  setEditAmountDigits((prev) => (editReplaceOnType ? event.key : `${prev}${event.key}`).slice(0, 12));
-                  setEditReplaceOnType(false);
-                  return;
-                }
+                onKeyDown={(event) => {
+                  if (event.key >= '0' && event.key <= '9') {
+                    event.preventDefault();
+                    setEditAmountDigits((prev) => {
+                      const nextDigits = (editReplaceOnType ? event.key : `${prev}${event.key}`).slice(0, 12);
+                      const nextAmount = Number(formatAmountDigits(nextDigits));
+                      if (nextAmount > MAX_PAYMENT_AMOUNT) {
+                        return prev;
+                      }
+                      return nextDigits;
+                    });
+                    setEditReplaceOnType(false);
+                    return;
+                  }
                 if (event.key === 'Backspace') {
                   event.preventDefault();
                   setEditAmountDigits((prev) => prev.slice(0, -1));
@@ -765,12 +823,15 @@ export function BillPayPage() {
               onChange={() => {
                 // Input value is controlled via masked key handlers above.
               }}
-              onPaste={(event) => {
-                event.preventDefault();
-                const pasted = event.clipboardData.getData('text').replace(/\D/g, '').slice(0, 12);
-                setEditAmountDigits(pasted);
-                setEditReplaceOnType(false);
-              }}
+                onPaste={(event) => {
+                  event.preventDefault();
+                  const pasted = event.clipboardData.getData('text').replace(/\D/g, '').slice(0, 12);
+                  const nextAmount = Number(formatAmountDigits(pasted));
+                  if (nextAmount <= MAX_PAYMENT_AMOUNT) {
+                    setEditAmountDigits(pasted);
+                  }
+                  setEditReplaceOnType(false);
+                }}
               type="text"
               value={editAmountInputValue}
             />

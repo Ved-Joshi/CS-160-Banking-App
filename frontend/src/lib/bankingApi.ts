@@ -33,6 +33,13 @@ import {
   normalizeTransferSubmissionResult,
 } from './bankingContract';
 
+function createIdempotencyKey(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+  return `idem-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
 export const profileService = {
   get(): Promise<CustomerProfile> {
     return apiRequest('/api/me/profile');
@@ -94,6 +101,7 @@ export const paymentsService = {
     return apiRequest<unknown>('/api/payments', {
       method: 'POST',
       body: input,
+      headers: { 'Idempotency-Key': createIdempotencyKey() },
     }).then(normalizePayment);
   },
   cancel(paymentId: string): Promise<ScheduledPayment> {
@@ -110,6 +118,7 @@ export const paymentsService = {
   retry(paymentId: string): Promise<ScheduledPayment> {
     return apiRequest<unknown>(`/api/payments/${paymentId}/retry`, {
       method: 'POST',
+      headers: { 'Idempotency-Key': createIdempotencyKey() },
     }).then(normalizePayment);
   },
 };

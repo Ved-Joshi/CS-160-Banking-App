@@ -40,14 +40,14 @@ class CreateBankAccountIn(BaseModel):
 class CreateScheduledPaymentIn(BaseModel):
     payeeId: str
     accountId: str
-    amount: float = Field(gt=0)
+    amount: float = Field(gt=0, le=100000)
     cadence: PaymentCadence
     deliverBy: str
 
 
 class UpdateScheduledPaymentIn(BaseModel):
     payeeId: Optional[str] = None
-    amount: Optional[float] = Field(default=None, gt=0)
+    amount: Optional[float] = Field(default=None, gt=0, le=100000)
     cadence: Optional[PaymentCadence] = None
     deliverBy: Optional[str] = None
 

@@ -8,6 +8,7 @@ import { BillPayPage } from './BillPayPages';
 
 const mocks = vi.hoisted(() => ({
   listAccounts: vi.fn(),
+  getProfile: vi.fn(),
   listPayees: vi.fn(),
   createPayee: vi.fn(),
   listPayments: vi.fn(),
@@ -18,6 +19,9 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock('../../lib/bankingApi', () => ({
+  profileService: {
+    get: mocks.getProfile,
+  },
   accountsService: {
     list: mocks.listAccounts,
   },
@@ -57,6 +61,7 @@ function renderPage() {
 describe('BillPayPage', () => {
   beforeEach(() => {
     mocks.listAccounts.mockReset();
+    mocks.getProfile.mockReset();
     mocks.listPayees.mockReset();
     mocks.listPayments.mockReset();
     mocks.createPayee.mockReset();
@@ -65,6 +70,7 @@ describe('BillPayPage', () => {
     mocks.updatePayment.mockReset();
     mocks.retryPayment.mockReset();
 
+    mocks.getProfile.mockResolvedValue({ timezone: 'America/Los_Angeles' });
     mocks.listAccounts.mockResolvedValue([
       { id: 'acct_1', nickname: 'Checking' },
       { id: 'acct_2', nickname: 'Savings' },
@@ -151,7 +157,7 @@ describe('BillPayPage', () => {
     });
   });
 
-  it('shows delete for scheduled/processing/failed and confirms cancel', async () => {
+  it('shows delete for scheduled/failed only and confirms cancel', async () => {
     mocks.listPayments.mockResolvedValue([
       {
         id: 'pay_1',
@@ -174,6 +180,14 @@ describe('BillPayPage', () => {
         payeeName: 'Phone',
         deliverBy: '2026-06-02',
         cadence: 'Monthly',
+        status: 'PROCESSING',
+        amount: 20,
+      },
+      {
+        id: 'pay_4',
+        payeeName: 'Gym',
+        deliverBy: '2026-06-02',
+        cadence: 'Monthly',
         status: 'COMPLETED',
         amount: 20,
       },
@@ -186,6 +200,7 @@ describe('BillPayPage', () => {
       expect(screen.getByRole('button', { name: 'Delete PG&E payment' })).toBeInTheDocument();
       expect(screen.getByRole('button', { name: 'Delete Water payment' })).toBeInTheDocument();
       expect(screen.queryByRole('button', { name: 'Delete Phone payment' })).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Delete Gym payment' })).not.toBeInTheDocument();
     });
 
     await userEvent.click(screen.getByRole('button', { name: 'Delete PG&E payment' }));

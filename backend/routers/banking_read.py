@@ -1,10 +1,9 @@
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, timezone
 import logging
-from calendar import monthrange
 from pathlib import PurePosixPath
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Header, Query, status
 
 from dependencies.auth import get_current_user
 from schemas.banking import (
@@ -34,7 +33,19 @@ from schemas.banking import (
 )
 from utils.google_maps import SearchCenter, geocode_query, search_chase_atms
 from utils.supabase import SupabaseUser, amount_to_cents, cents_to_amount, random_last4, supabase_client
-from services.payment_service import execute_payment_for_user
+from services.payment_service import (
+    attempt_payment_run,
+    build_payment_update_payload,
+    execute_payment_for_user,
+    finalize_idempotency_key,
+    get_idempotency_replay,
+    get_user_timezone_name,
+    local_today_for_timezone,
+    next_run_at_for_date,
+    parse_deliver_by_with_timezone,
+    reserve_idempotency_key,
+    validate_payment_amount_or_raise,
+)
 from services.transfer_service import create_transfer_for_user
 
 router = APIRouter(prefix="/api", tags=["banking"])
@@ -455,52 +466,6 @@ def parse_transfer_date(value: str) -> str:
         ) from exc
 
 
-def parse_deliver_by(value: str) -> str:
-    try:
-        parsed = datetime.strptime(value, "%Y-%m-%d").date()
-    except ValueError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Deliver by date must be in YYYY-MM-DD format.",
-        ) from exc
-
-    # Compare against server's local date (not UTC) to match client's date-only input.
-    # This prevents rejecting valid same-day dates due to timezone mismatches.
-    if parsed < date.today():
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Deliver by date cannot be in the past.",
-        )
-
-    return parsed.isoformat()
-
-
-def compute_payment_next_run_at(deliver_by: str) -> str:
-    run_date = date.fromisoformat(deliver_by)
-    local_tz = datetime.now().astimezone().tzinfo or timezone.utc
-    local_midnight = datetime.combine(run_date, datetime.min.time(), tzinfo=local_tz)
-    return local_midnight.astimezone(timezone.utc).isoformat()
-
-
-def advance_payment_deliver_by(deliver_by: str, cadence: str) -> str:
-    base_date = date.fromisoformat(deliver_by)
-    normalized = cadence.lower()
-    if normalized == "daily":
-        next_date = base_date + timedelta(days=1)
-    elif normalized == "weekly":
-        next_date = base_date + timedelta(days=7)
-    elif normalized == "biweekly":
-        next_date = base_date + timedelta(days=14)
-    elif normalized == "monthly":
-        year = base_date.year + (1 if base_date.month == 12 else 0)
-        month = 1 if base_date.month == 12 else base_date.month + 1
-        day = min(base_date.day, monthrange(year, month)[1])
-        next_date = date(year, month, day)
-    else:
-        next_date = base_date
-    return next_date.isoformat()
-
-
 def build_atm_center(
     *,
     lat: float | None,
@@ -764,84 +729,103 @@ async def list_payments(current_user: SupabaseUser = Depends(get_current_user)) 
 @router.post("/payments", response_model=ScheduledPayment, status_code=status.HTTP_201_CREATED)
 async def create_payment(
     payload: CreateScheduledPaymentIn,
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
     current_user: SupabaseUser = Depends(get_current_user),
 ) -> ScheduledPayment:
+    if not idempotency_key:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Idempotency-Key header is required.",
+        )
+
+    validate_payment_amount_or_raise(payload.amount)
+    idempotency_endpoint = "/api/payments"
+    idempotency_payload = {
+        "payeeId": payload.payeeId,
+        "accountId": payload.accountId,
+        "amount": payload.amount,
+        "cadence": payload.cadence,
+        "deliverBy": payload.deliverBy,
+    }
+    replay = await get_idempotency_replay(
+        user_id=current_user.id,
+        endpoint=idempotency_endpoint,
+        idempotency_key=idempotency_key,
+        request_payload=idempotency_payload,
+    )
+    if replay is not None:
+        return ScheduledPayment.model_validate(replay)
+    await reserve_idempotency_key(
+        user_id=current_user.id,
+        endpoint=idempotency_endpoint,
+        idempotency_key=idempotency_key,
+        request_payload=idempotency_payload,
+    )
+
     account = await require_owned_account(payload.accountId, current_user.id, require_open=True)
     payee = await require_owned_payee(payload.payeeId, current_user.id)
-    deliver_by = parse_deliver_by(payload.deliverBy)
+    timezone_name = await get_user_timezone_name(current_user.id)
+    deliver_by = parse_deliver_by_with_timezone(payload.deliverBy, timezone_name)
     normalized_cadence = normalize_payment_cadence(payload.cadence)
     amount_cents = amount_to_cents(payload.amount)
 
-    created = await supabase_client.insert_row(
-        "bill_payments",
-        {
-            "user_id": current_user.id,
-            "payee_id": payee["id"],
-            "account_id": account["id"],
-            "amount_cents": amount_cents,
-            "cadence": normalized_cadence,
-            "deliver_by": deliver_by,
-            "status": "scheduled",
-            "next_run_at": compute_payment_next_run_at(deliver_by),
-            "failure_reason": None,
-        },
-    )
-
-    should_run_now = normalized_cadence == "once" or deliver_by == date.today().isoformat()
-    if should_run_now:
-        run_failed = False
-        failure_reason = "Insufficient balance."
-        if int(account.get("available_balance_cents") or 0) >= amount_cents:
-            try:
-                await supabase_client.rpc(
-                    "submit_bill_payment",
-                    {
-                        "p_user_id": current_user.id,
-                        "p_payment_id": created["id"],
-                        "p_account_id": account["id"],
-                        "p_amount_cents": amount_cents,
-                    },
-                )
-                run_failed = False
-            except HTTPException as exc:
-                detail = str(exc.detail)
-                failure_reason = "Insufficient balance." if "insufficient" in detail.lower() else detail
-                run_failed = True
-        else:
-            run_failed = True
-
-        now_iso = datetime.now(timezone.utc).isoformat()
-        if normalized_cadence == "once":
-            update_payload = {
-                "status": "failed" if run_failed else "completed",
-                "next_run_at": None,
-                "processed_at": now_iso,
-                "failure_reason": failure_reason if run_failed else None,
-            }
-        else:
-            next_deliver_by = advance_payment_deliver_by(deliver_by, normalized_cadence)
-            update_payload = {
-                "status": "scheduled",
-                "deliver_by": next_deliver_by,
-                "next_run_at": compute_payment_next_run_at(next_deliver_by),
-                "processed_at": now_iso,
-                "failure_reason": failure_reason if run_failed else None,
-            }
-
-        updated_rows = await supabase_client.update_rows(
+    try:
+        created = await supabase_client.insert_row(
             "bill_payments",
-            update_payload,
-            filters={
-                "id": f"eq.{created['id']}",
-                "user_id": f"eq.{current_user.id}",
+            {
+                "user_id": current_user.id,
+                "payee_id": payee["id"],
+                "account_id": account["id"],
+                "amount_cents": amount_cents,
+                "cadence": normalized_cadence,
+                "deliver_by": deliver_by,
+                "status": "scheduled",
+                "next_run_at": next_run_at_for_date(deliver_by, timezone_name),
+                "failure_reason": None,
             },
         )
-        updated = updated_rows[0] if updated_rows else created
-        updated["payee"] = {"name": payee.get("name")}
-        return map_payment(updated)
 
-    created["payee"] = {"name": payee.get("name")}
-    return map_payment(created)
+        local_today = local_today_for_timezone(timezone_name)
+        should_run_now = normalized_cadence == "once" or date.fromisoformat(deliver_by) == local_today
+        if should_run_now:
+            now_utc = datetime.now(timezone.utc)
+            succeeded_run, failure_reason = await attempt_payment_run(created)
+            update_payload = build_payment_update_payload(
+                payment=created,
+                succeeded_run=succeeded_run,
+                failure_reason=failure_reason,
+                now_utc=now_utc,
+                timezone_name=timezone_name,
+            )
+            updated_rows = await supabase_client.update_rows(
+                "bill_payments",
+                update_payload,
+                filters={
+                    "id": f"eq.{created['id']}",
+                    "user_id": f"eq.{current_user.id}",
+                },
+            )
+            created = updated_rows[0] if updated_rows else created
+
+        created["payee"] = {"name": payee.get("name")}
+        response = map_payment(created)
+        await finalize_idempotency_key(
+            user_id=current_user.id,
+            endpoint=idempotency_endpoint,
+            idempotency_key=idempotency_key,
+            response_body=response.model_dump(),
+            response_status=status.HTTP_201_CREATED,
+        )
+        return response
+    except HTTPException as exc:
+        await finalize_idempotency_key(
+            user_id=current_user.id,
+            endpoint=idempotency_endpoint,
+            idempotency_key=idempotency_key,
+            response_body={"detail": exc.detail},
+            response_status=exc.status_code,
+        )
+        raise
 
 
 @router.patch("/payments/{payment_id}", response_model=ScheduledPayment)
@@ -872,10 +856,16 @@ async def update_payment(
     payee_id = payload.payeeId or payment["payee_id"]
     payee = await require_owned_payee(payee_id, current_user.id)
 
+    timezone_name = await get_user_timezone_name(current_user.id)
     cadence_label = payload.cadence or map_payment_cadence(payment.get("cadence", "once"))
     cadence = normalize_payment_cadence(cadence_label)
-    deliver_by = parse_deliver_by(payload.deliverBy or payment.get("deliver_by") or date.today().isoformat())
-    amount_cents = amount_to_cents(payload.amount if payload.amount is not None else cents_to_amount(payment.get("amount_cents")))
+    deliver_by = parse_deliver_by_with_timezone(
+        payload.deliverBy or payment.get("deliver_by") or local_today_for_timezone(timezone_name).isoformat(),
+        timezone_name,
+    )
+    amount_value = payload.amount if payload.amount is not None else cents_to_amount(payment.get("amount_cents"))
+    validate_payment_amount_or_raise(amount_value)
+    amount_cents = amount_to_cents(amount_value)
 
     rows = await supabase_client.update_rows(
         "bill_payments",
@@ -885,7 +875,7 @@ async def update_payment(
             "cadence": cadence,
             "deliver_by": deliver_by,
             "status": "scheduled",
-            "next_run_at": compute_payment_next_run_at(deliver_by),
+            "next_run_at": next_run_at_for_date(deliver_by, timezone_name),
             "failure_reason": None,
         },
         filters={
@@ -902,8 +892,32 @@ async def update_payment(
 @router.post("/payments/{payment_id}/retry", response_model=ScheduledPayment)
 async def retry_payment(
     payment_id: str,
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
     current_user: SupabaseUser = Depends(get_current_user),
 ) -> ScheduledPayment:
+    if not idempotency_key:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Idempotency-Key header is required.",
+        )
+
+    idempotency_endpoint = f"/api/payments/{payment_id}/retry"
+    idempotency_payload = {"paymentId": payment_id}
+    replay = await get_idempotency_replay(
+        user_id=current_user.id,
+        endpoint=idempotency_endpoint,
+        idempotency_key=idempotency_key,
+        request_payload=idempotency_payload,
+    )
+    if replay is not None:
+        return ScheduledPayment.model_validate(replay)
+    await reserve_idempotency_key(
+        user_id=current_user.id,
+        endpoint=idempotency_endpoint,
+        idempotency_key=idempotency_key,
+        request_payload=idempotency_payload,
+    )
+
     payment_rows = await supabase_client.select_rows(
         "bill_payments",
         filters={
@@ -930,91 +944,60 @@ async def retry_payment(
     )
     payee_name = payee_rows[0]["name"] if payee_rows else "Manual Payee"
 
-    # Mark as processing so submit_bill_payment RPC accepts execution.
-    processing_rows = await supabase_client.update_rows(
-        "bill_payments",
-        {
-            "status": "processing",
-            "failure_reason": None,
-        },
-        filters={
-            "id": f"eq.{payment_id}",
-            "user_id": f"eq.{current_user.id}",
-        },
-    )
-    if processing_rows:
-        payment = processing_rows[0]
-
-    amount_cents = int(payment.get("amount_cents") or 0)
-    failure_reason = "Insufficient balance."
-    run_failed = False
-    account_rows = await supabase_client.select_rows(
-        "accounts",
-        filters={
-            "id": f"eq.{payment['account_id']}",
-            "user_id": f"eq.{current_user.id}",
-            "status": "eq.open",
-        },
-        limit=1,
-    )
-    if not account_rows or int(account_rows[0].get("available_balance_cents") or 0) < amount_cents:
-        run_failed = True
-    else:
-        try:
-            await supabase_client.rpc(
-                "submit_bill_payment",
-                {
-                    "p_user_id": current_user.id,
-                    "p_payment_id": payment["id"],
-                    "p_account_id": payment["account_id"],
-                    "p_amount_cents": amount_cents,
-                },
-            )
-        except HTTPException as exc:
-            detail = str(exc.detail)
-            failure_reason = "Insufficient balance." if "insufficient" in detail.lower() else detail
-            run_failed = True
-
-    now_iso = datetime.now(timezone.utc).isoformat()
-    cadence = normalize_payment_cadence(cadence_label)
-    if cadence == "once":
-        update_payload = {
-            "status": "failed" if run_failed else "completed",
-            "next_run_at": None,
-            "processed_at": now_iso,
-            "failure_reason": failure_reason if run_failed else None,
-        }
-    else:
-        if run_failed:
-            update_payload = {
-                "status": "failed",
-                "processed_at": now_iso,
-                "failure_reason": failure_reason,
-                "next_run_at": None,
-            }
-        else:
-            base_deliver_by = date.today().isoformat()
-            next_deliver_by = advance_payment_deliver_by(base_deliver_by, cadence)
-            update_payload = {
-                "status": "scheduled",
-                "deliver_by": next_deliver_by,
-                "next_run_at": compute_payment_next_run_at(next_deliver_by),
-                "processed_at": now_iso,
+    try:
+        processing_rows = await supabase_client.update_rows(
+            "bill_payments",
+            {
+                "status": "processing",
                 "failure_reason": None,
-            }
+            },
+            filters={
+                "id": f"eq.{payment_id}",
+                "user_id": f"eq.{current_user.id}",
+            },
+        )
+        if processing_rows:
+            payment = processing_rows[0]
 
-    rows = await supabase_client.update_rows(
-        "bill_payments",
-        update_payload,
-        filters={
-            "id": f"eq.{payment_id}",
-            "user_id": f"eq.{current_user.id}",
-        },
-    )
-    if not rows:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Payment not found.")
-    rows[0]["payee"] = {"name": payee_name}
-    return map_payment(rows[0])
+        timezone_name = await get_user_timezone_name(current_user.id)
+        now_utc = datetime.now(timezone.utc)
+        succeeded_run, failure_reason = await attempt_payment_run(payment)
+        update_payload = build_payment_update_payload(
+            payment=payment,
+            succeeded_run=succeeded_run,
+            failure_reason=failure_reason,
+            now_utc=now_utc,
+            timezone_name=timezone_name,
+        )
+        rows = await supabase_client.update_rows(
+            "bill_payments",
+            update_payload,
+            filters={
+                "id": f"eq.{payment_id}",
+                "user_id": f"eq.{current_user.id}",
+            },
+        )
+        if not rows:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Payment not found.")
+        rows[0]["payee"] = {"name": payee_name}
+        response = map_payment(rows[0])
+        await finalize_idempotency_key(
+            user_id=current_user.id,
+            endpoint=idempotency_endpoint,
+            idempotency_key=idempotency_key,
+            response_body=response.model_dump(),
+            response_status=status.HTTP_200_OK,
+        )
+        return response
+    except HTTPException as exc:
+        await finalize_idempotency_key(
+            user_id=current_user.id,
+            endpoint=idempotency_endpoint,
+            idempotency_key=idempotency_key,
+            response_body={"detail": exc.detail},
+            response_status=exc.status_code,
+        )
+        raise
 
 
 @router.post("/payments/{payment_id}/cancel", response_model=ScheduledPayment)
@@ -1034,10 +1017,10 @@ async def cancel_payment(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Payment not found.")
 
     payment = payment_rows[0]
-    if payment.get("status") not in {"scheduled", "processing", "failed"}:
+    if payment.get("status") not in {"scheduled", "failed"}:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Only scheduled, processing, or failed payments can be cancelled.",
+            detail="Only scheduled or failed payments can be cancelled.",
         )
 
     rows = await supabase_client.update_rows(
