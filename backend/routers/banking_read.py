@@ -867,6 +867,21 @@ async def retry_payment(
     )
     payee_name = payee_rows[0]["name"] if payee_rows else "Manual Payee"
 
+    # Mark as processing so submit_bill_payment RPC accepts execution.
+    processing_rows = await supabase_client.update_rows(
+        "bill_payments",
+        {
+            "status": "processing",
+            "failure_reason": None,
+        },
+        filters={
+            "id": f"eq.{payment_id}",
+            "user_id": f"eq.{current_user.id}",
+        },
+    )
+    if processing_rows:
+        payment = processing_rows[0]
+
     amount_cents = int(payment.get("amount_cents") or 0)
     failure_reason = "Insufficient balance."
     run_failed = False
@@ -907,15 +922,23 @@ async def retry_payment(
             "failure_reason": failure_reason if run_failed else None,
         }
     else:
-        base_deliver_by = date.today().isoformat()
-        next_deliver_by = advance_payment_deliver_by(base_deliver_by, cadence)
-        update_payload = {
-            "status": "scheduled",
-            "deliver_by": next_deliver_by,
-            "next_run_at": compute_payment_next_run_at(next_deliver_by),
-            "processed_at": now_iso,
-            "failure_reason": failure_reason if run_failed else None,
-        }
+        if run_failed:
+            update_payload = {
+                "status": "failed",
+                "processed_at": now_iso,
+                "failure_reason": failure_reason,
+                "next_run_at": None,
+            }
+        else:
+            base_deliver_by = date.today().isoformat()
+            next_deliver_by = advance_payment_deliver_by(base_deliver_by, cadence)
+            update_payload = {
+                "status": "scheduled",
+                "deliver_by": next_deliver_by,
+                "next_run_at": compute_payment_next_run_at(next_deliver_by),
+                "processed_at": now_iso,
+                "failure_reason": None,
+            }
 
     rows = await supabase_client.update_rows(
         "bill_payments",
