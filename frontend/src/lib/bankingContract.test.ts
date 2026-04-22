@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   normalizeAccount,
+  normalizePayment,
   normalizeTransaction,
   normalizeTransferPlan,
   normalizeTransferResult,
@@ -121,5 +122,23 @@ describe('banking contract normalization', () => {
     expect(result.mode).toBe('SCHEDULED');
     expect(result.plan?.cadence).toBe('Monthly');
     expect(result.plan?.status).toBe('PROCESSING');
+  });
+
+  it('normalizes payment cadence/status and amount from /api payloads', () => {
+    const payment = normalizePayment({
+      id: 'pay_1',
+      payee_id: 'payee_1',
+      account_id: 'acct_1',
+      amount_cents: 4099,
+      cadence: 'weekly',
+      deliver_by: '2026-06-01',
+      status: 'processing',
+      payee: { name: 'PG&E' },
+    });
+
+    expect(payment.payeeName).toBe('PG&E');
+    expect(payment.amount).toBe(40.99);
+    expect(payment.cadence).toBe('Weekly');
+    expect(payment.status).toBe('PROCESSING');
   });
 });

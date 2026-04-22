@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Header, HTTPException, status
 
 from config import settings
+from services.payment_service import process_due_bill_payments
 from services.transfer_service import process_due_transfer_plans
 
 
@@ -12,7 +13,7 @@ def _authorize_runner(secret: str | None) -> None:
     if not configured:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Transfer runner secret is not configured.",
+            detail="Runner secret is not configured.",
         )
     if not secret or secret != configured:
         raise HTTPException(
@@ -29,3 +30,13 @@ async def run_due_transfer_plans(
     _authorize_runner(x_runner_secret)
     bounded_limit = max(1, min(limit, 250))
     return await process_due_transfer_plans(batch_size=bounded_limit)
+
+
+@router.post("/process-bill-payments")
+async def run_due_bill_payments(
+    x_runner_secret: str | None = Header(default=None),
+    limit: int = 50,
+) -> dict[str, int]:
+    _authorize_runner(x_runner_secret)
+    bounded_limit = max(1, min(limit, 250))
+    return await process_due_bill_payments(batch_size=bounded_limit)

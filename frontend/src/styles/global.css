@@ -429,6 +429,40 @@ p {
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.8);
 }
 
+.top-header__icon-link {
+  width: 2.7rem;
+  height: 2.7rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 0;
+  color: var(--navy-900);
+  border-radius: 0.65rem;
+  background: transparent;
+}
+
+.top-header__icon-link:hover,
+.top-header__icon-link:focus-visible {
+  background: rgba(49, 82, 126, 0.08);
+}
+
+.top-header__icon-link--active {
+  color: var(--red-700);
+}
+
+.top-header__icon-svg {
+  width: 1.62rem;
+  height: 1.62rem;
+  display: block;
+  fill: currentColor;
+}
+
+.top-header__icon-svg--notifications,
+.top-header__icon-svg--settings {
+  width: 1.62rem;
+  height: 1.62rem;
+}
+
 .auth-secondary-action,
 .auth-support-copy {
   display: flex;
@@ -749,6 +783,12 @@ small {
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
+.settings-profile-wrap {
+  width: min(860px, 100%);
+  margin: 0 auto;
+}
+
+
 .stat-list {
   display: grid;
   gap: 1rem;
@@ -915,6 +955,61 @@ small {
 .table-wrap {
   overflow-x: auto;
   -webkit-overflow-scrolling: touch;
+}
+
+.payment-actions {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.65rem;
+}
+
+.payment-deliver-by {
+  display: grid;
+  gap: 0.2rem;
+  justify-items: center;
+}
+
+.payment-action-icon {
+  min-height: 2.25rem;
+  width: 2.25rem;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--navy-800);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.payment-action-icon:focus-visible {
+  outline: 2px solid rgba(36, 91, 171, 0.45);
+  outline-offset: 2px;
+  border-radius: 0.45rem;
+}
+
+.payment-action-icon__svg {
+  width: 1.45rem;
+  height: 1.45rem;
+  fill: currentColor;
+}
+
+.payment-action-icon:hover {
+  opacity: 0.78;
+}
+
+.payment-action-icon--retry {
+  color: var(--link-blue);
+}
+
+.payment-action-icon--delay {
+  color: var(--warning);
+}
+
+.payment-action-icon--delete {
+  color: var(--red-700);
 }
 
 .data-table {
@@ -1785,14 +1880,19 @@ small {
   }
 
   .top-header__actions {
-    width: 100%;
+    width: auto;
+    margin-left: auto;
+    gap: 0.45rem;
   }
 
-  .top-header__actions .utility-link {
-    flex: 1 1 calc(50% - 0.4rem);
-    text-align: center;
-    padding: 0.65rem 0.55rem;
-    font-size: 0.82rem;
+  .top-header__icon-link {
+    width: 2.45rem;
+    height: 2.45rem;
+  }
+
+  .top-header__icon-svg {
+    width: 1.55rem;
+    height: 1.55rem;
   }
 
   .page-content {

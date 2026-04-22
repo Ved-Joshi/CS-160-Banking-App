@@ -34,8 +34,25 @@ export interface CustomerProfile {
   email: string;
   phone: string;
   address: string;
+  streetAddress: string;
+  apartmentUnit?: string | null;
+  city: string;
+  state: string;
+  zipCode: string;
   memberSince: string;
   timezone: string;
+}
+
+export interface UpdateCustomerProfileInput {
+  firstName: string;
+  middleName?: string;
+  lastName: string;
+  phone: string;
+  streetAddress: string;
+  apartmentUnit?: string;
+  city: string;
+  state: string;
+  zipCode: string;
 }
 
 export interface RegistrationInput {
@@ -149,23 +166,37 @@ export interface Payee {
   accountMask: string;
 }
 
+export interface CreatePayeeInput {
+  name: string;
+  category: string;
+  accountLast4?: string;
+}
+
 export interface ScheduledPayment {
   id: string;
   payeeId: string;
   payeeName: string;
   accountId: string;
   amount: number;
-  cadence: 'Once' | 'Monthly' | 'Biweekly';
+  cadence: 'Once' | 'Daily' | 'Weekly' | 'Biweekly' | 'Monthly';
   deliverBy: string;
   status: PaymentStatus;
+  failureReason?: string;
 }
 
 export interface CreateScheduledPaymentInput {
   payeeId: string;
   accountId: string;
   amount: number;
-  cadence: 'Once' | 'Weekly' | 'Biweekly' | 'Monthly';
+  cadence: 'Once' | 'Daily' | 'Weekly' | 'Biweekly' | 'Monthly';
   deliverBy: string;
+}
+
+export interface UpdateScheduledPaymentInput {
+  payeeId?: string;
+  amount?: number;
+  cadence?: 'Once' | 'Daily' | 'Weekly' | 'Biweekly' | 'Monthly';
+  deliverBy?: string;
 }
 
 export interface DepositImage {

@@ -9,7 +9,7 @@ TransactionStatus = Literal["PENDING", "COMPLETED", "FAILED"]
 DepositStatus = Literal["PENDING_REVIEW", "APPROVED", "DECLINED"]
 PaymentStatus = Literal["SCHEDULED", "PROCESSING", "COMPLETED", "FAILED", "CANCELLED"]
 NotificationType = Literal["deposit", "payment", "transfer", "security"]
-PaymentCadence = Literal["Once", "Weekly", "Biweekly", "Monthly"]
+PaymentCadence = Literal["Once", "Daily", "Weekly", "Biweekly", "Monthly"]
 TransferStatus = Literal["PENDING", "COMPLETED", "FAILED"]
 
 
@@ -40,9 +40,16 @@ class CreateBankAccountIn(BaseModel):
 class CreateScheduledPaymentIn(BaseModel):
     payeeId: str
     accountId: str
-    amount: float = Field(gt=0)
+    amount: float = Field(gt=0, le=100000)
     cadence: PaymentCadence
     deliverBy: str
+
+
+class UpdateScheduledPaymentIn(BaseModel):
+    payeeId: Optional[str] = None
+    amount: Optional[float] = Field(default=None, gt=0, le=100000)
+    cadence: Optional[PaymentCadence] = None
+    deliverBy: Optional[str] = None
 
 
 class Transaction(BaseModel):
@@ -77,6 +84,12 @@ class Payee(BaseModel):
     accountMask: str
 
 
+class CreatePayeeIn(BaseModel):
+    name: str = Field(min_length=1, max_length=80)
+    category: str = Field(default="Other", min_length=1, max_length=50)
+    accountLast4: Optional[str] = Field(default=None, min_length=4, max_length=4, pattern=r"^\d{4}$")
+
+
 class ScheduledPayment(BaseModel):
     id: str
     payeeId: str
@@ -86,6 +99,7 @@ class ScheduledPayment(BaseModel):
     cadence: PaymentCadence
     deliverBy: str
     status: PaymentStatus
+    failureReason: Optional[str] = None
 
 
 class DepositImage(BaseModel):
@@ -178,4 +192,22 @@ class CustomerProfile(BaseModel):
     email: str
     phone: str
     address: str
+    streetAddress: str
+    apartmentUnit: Optional[str] = None
+    city: str
+    state: str
+    zipCode: str
     memberSince: str
+    timezone: str
+
+
+class UpdateCustomerProfileIn(BaseModel):
+    firstName: str = Field(min_length=1, max_length=80)
+    middleName: Optional[str] = Field(default=None, max_length=80)
+    lastName: str = Field(min_length=1, max_length=80)
+    phone: str = Field(min_length=10, max_length=20)
+    streetAddress: str = Field(min_length=1, max_length=160)
+    apartmentUnit: Optional[str] = Field(default=None, max_length=30)
+    city: str = Field(min_length=1, max_length=80)
+    state: str = Field(min_length=2, max_length=2)
+    zipCode: str = Field(min_length=5, max_length=10)

@@ -1,4 +1,4 @@
-import type { BankAccount, Transaction, TransferPlan, TransferResult, TransferSubmissionResult } from '../types/banking';
+import type { BankAccount, ScheduledPayment, Transaction, TransferPlan, TransferResult, TransferSubmissionResult } from '../types/banking';
 
 type UnknownRecord = Record<string, unknown>;
 
@@ -130,6 +130,40 @@ function normalizeTransferStatus(value: unknown): TransferResult['status'] {
   return 'PENDING';
 }
 
+function normalizePaymentCadence(value: unknown): ScheduledPayment['cadence'] {
+  const normalized = asString(value).toLowerCase();
+  if (normalized === 'daily') return 'Daily';
+  if (normalized === 'weekly') return 'Weekly';
+  if (normalized === 'biweekly') return 'Biweekly';
+  if (normalized === 'monthly') return 'Monthly';
+  return 'Once';
+}
+
+function normalizePaymentStatus(value: unknown): ScheduledPayment['status'] {
+  const normalized = asString(value).toLowerCase();
+  if (normalized === 'processing') return 'PROCESSING';
+  if (normalized === 'completed') return 'COMPLETED';
+  if (normalized === 'failed') return 'FAILED';
+  if (normalized === 'cancelled') return 'CANCELLED';
+  return 'SCHEDULED';
+}
+
+export function normalizePayment(input: unknown): ScheduledPayment {
+  const row = asRecord(input);
+  const amount = row.amount ?? centsToDollars(row.amount_cents);
+  return {
+    id: asString(row.id),
+    payeeId: asString(row.payeeId) || asString(row.payee_id),
+    payeeName: asString(row.payeeName) || asString(asRecord(row.payee).name, 'Manual Payee'),
+    accountId: asString(row.accountId) || asString(row.account_id),
+    amount: asNumber(amount, 0),
+    cadence: normalizePaymentCadence(row.cadence),
+    deliverBy: asString(row.deliverBy) || asString(row.deliver_by) || asString(row.created_at),
+    status: normalizePaymentStatus(row.status),
+    failureReason: asString(row.failureReason) || asString(row.failure_reason) || undefined,
+  };
+}
+
 export function normalizeTransferResult(input: unknown): TransferResult {
   const row = asRecord(input);
   return {
@@ -200,4 +234,9 @@ export function normalizeTransactions(input: unknown): Transaction[] {
 export function normalizeTransferPlans(input: unknown): TransferPlan[] {
   if (!Array.isArray(input)) return [];
   return input.map(normalizeTransferPlan);
+}
+
+export function normalizePayments(input: unknown): ScheduledPayment[] {
+  if (!Array.isArray(input)) return [];
+  return input.map(normalizePayment);
 }

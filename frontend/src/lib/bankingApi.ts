@@ -6,7 +6,9 @@ import type {
   CreateBankAccountInput,
   CreateDepositInput,
   CreateDepositUploadUrlsInput,
+  CreatePayeeInput,
   CreateScheduledPaymentInput,
+  UpdateScheduledPaymentInput,
   CustomerProfile,
   Deposit,
   DepositUploadUrls,
@@ -17,20 +19,36 @@ import type {
   TransferPlan,
   TransferRequest,
   TransferSubmissionResult,
+  UpdateCustomerProfileInput,
 } from '../types/banking';
 import { apiRequest } from './apiClient';
 import {
   normalizeAccount,
   normalizeAccounts,
+  normalizePayment,
+  normalizePayments,
   normalizeTransactions,
   normalizeTransferPlan,
   normalizeTransferPlans,
   normalizeTransferSubmissionResult,
 } from './bankingContract';
 
+function createIdempotencyKey(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+  return `idem-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
 export const profileService = {
   get(): Promise<CustomerProfile> {
     return apiRequest('/api/me/profile');
+  },
+  update(input: UpdateCustomerProfileInput): Promise<CustomerProfile> {
+    return apiRequest('/api/me/profile', {
+      method: 'PATCH',
+      body: input,
+    });
   },
 };
 
@@ -77,13 +95,31 @@ export const transactionsService = {
 
 export const paymentsService = {
   list(): Promise<ScheduledPayment[]> {
-    return apiRequest('/api/payments');
+    return apiRequest<unknown[]>('/api/payments').then(normalizePayments);
   },
   create(input: CreateScheduledPaymentInput): Promise<ScheduledPayment> {
-    return apiRequest('/api/payments', {
+    return apiRequest<unknown>('/api/payments', {
       method: 'POST',
       body: input,
-    });
+      headers: { 'Idempotency-Key': createIdempotencyKey() },
+    }).then(normalizePayment);
+  },
+  cancel(paymentId: string): Promise<ScheduledPayment> {
+    return apiRequest<unknown>(`/api/payments/${paymentId}/cancel`, {
+      method: 'POST',
+    }).then(normalizePayment);
+  },
+  update(paymentId: string, input: UpdateScheduledPaymentInput): Promise<ScheduledPayment> {
+    return apiRequest<unknown>(`/api/payments/${paymentId}`, {
+      method: 'PATCH',
+      body: input,
+    }).then(normalizePayment);
+  },
+  retry(paymentId: string): Promise<ScheduledPayment> {
+    return apiRequest<unknown>(`/api/payments/${paymentId}/retry`, {
+      method: 'POST',
+      headers: { 'Idempotency-Key': createIdempotencyKey() },
+    }).then(normalizePayment);
   },
 };
 
@@ -111,6 +147,12 @@ export const depositsService = {
 export const payeesService = {
   list(): Promise<Payee[]> {
     return apiRequest('/api/payees');
+  },
+  create(input: CreatePayeeInput): Promise<Payee> {
+    return apiRequest('/api/payees', {
+      method: 'POST',
+      body: input,
+    });
   },
 };
 
