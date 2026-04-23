@@ -3,24 +3,26 @@ from zoneinfo import ZoneInfo
 
 from fastapi import HTTPException, status
 
+from config import settings
 from schemas.banking import (
     CreateExternalAccountIn,
+    CompleteExternalLinkIn,
     CreateExternalTransferIn,
     CreateMemberTransferIn,
     MemberTransferRecipient,
     TransferResult,
 )
-from utils.supabase import SupabaseUser, amount_to_cents, random_last4, supabase_client
+from services.external_linking_provider import get_external_linking_provider
+from services.stripe_sandbox_service import (
+    create_financial_connections_session,
+    create_stripe_customer_for_linking,
+    get_financial_connections_account,
+)
+from utils.banking_numbers import validate_account_number, validate_routing_number
+from utils.supabase import SupabaseUser, amount_to_cents, supabase_client
 
 STALE_PROCESSING_TIMEOUT_MINUTES = 10
 EXTERNAL_SETTLEMENT_DELAY_SECONDS = 15
-
-
-def _normalize_digits(value: str, *, field_name: str) -> str:
-    digits = "".join(char for char in value if char.isdigit())
-    if not digits:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"{field_name} is required.")
-    return digits
 
 
 def _validate_email(value: str) -> str:
@@ -53,32 +55,6 @@ def _validate_display_name(value: str, *, field_name: str) -> str:
             detail=f"{field_name} must be between 2 and 80 characters.",
         )
     return normalized
-
-
-def _validate_routing_number(value: str) -> str:
-    digits = _normalize_digits(value, field_name="Routing number")
-    if len(digits) != 9:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Routing number must be 9 digits.")
-    checksum = (
-        3 * (int(digits[0]) + int(digits[3]) + int(digits[6]))
-        + 7 * (int(digits[1]) + int(digits[4]) + int(digits[7]))
-        + int(digits[2]) + int(digits[5]) + int(digits[8])
-    )
-    if checksum % 10 != 0:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Routing number is invalid.")
-    return digits
-
-
-def _validate_account_number(value: str, *, field_name: str) -> str:
-    digits = _normalize_digits(value, field_name=field_name)
-    if len(digits) < 4 or len(digits) > 17:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"{field_name} must be between 4 and 17 digits.",
-        )
-    if set(digits) == {"0"}:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"{field_name} cannot be all zeros.")
-    return digits
 
 
 def _is_admin(current_user: SupabaseUser) -> bool:
@@ -642,9 +618,9 @@ async def process_due_member_transfer_plans(*, batch_size: int = 50) -> dict[str
 
 
 async def create_external_account_for_user(current_user: SupabaseUser, payload: CreateExternalAccountIn) -> dict:
-    routing_number = _validate_routing_number(payload.routingNumber)
-    account_number = _validate_account_number(payload.accountNumber, field_name="Account number")
-    confirm_account_number = _validate_account_number(payload.confirmAccountNumber, field_name="Confirm account number")
+    routing_number = validate_routing_number(payload.routingNumber)
+    account_number = validate_account_number(payload.accountNumber, field_name="Account number")
+    confirm_account_number = validate_account_number(payload.confirmAccountNumber, field_name="Confirm account number")
     bank_name = _validate_bank_name(payload.bankName)
     nickname = _validate_display_name(payload.nickname, field_name="Nickname")
     if account_number != confirm_account_number:
@@ -671,6 +647,14 @@ async def create_external_account_for_user(current_user: SupabaseUser, payload: 
             detail="This external account is already linked.",
         )
 
+    provider = get_external_linking_provider(settings.EXTERNAL_ACCOUNT_PROVIDER)
+    linking_result = await provider.link_external_account(
+        user_id=current_user.id,
+        bank_name=bank_name,
+        routing_number=routing_number,
+        account_number=account_number,
+    )
+
     return await supabase_client.insert_row(
         "external_accounts",
         {
@@ -680,7 +664,94 @@ async def create_external_account_for_user(current_user: SupabaseUser, payload: 
             "account_type": payload.accountType.lower(),
             "masked_account_number": masked,
             "routing_number": routing_number,
+            "verification_status": linking_result.verification_status,
+            "provider": linking_result.provider,
+            "provider_customer_id": linking_result.provider_customer_id,
+            "provider_account_id": linking_result.provider_account_id,
+            "is_active": True,
+        },
+    )
+
+
+async def create_external_link_session_for_user(current_user: SupabaseUser) -> dict[str, str]:
+    if settings.EXTERNAL_ACCOUNT_PROVIDER.strip().lower() != "stripe_sandbox":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Stripe sandbox linking is not enabled.",
+        )
+    customer_id = await create_stripe_customer_for_linking(current_user.email)
+    session = await create_financial_connections_session(customer_id=customer_id)
+    return {
+        "clientSecret": session["clientSecret"],
+        "sessionId": session["sessionId"],
+        "publishableKey": session["publishableKey"],
+    }
+
+
+def _extract_last4_from_stripe_account(account: dict) -> str:
+    direct_last4 = str(account.get("last4") or "").strip()
+    if direct_last4.isdigit() and len(direct_last4) == 4:
+        return direct_last4
+    display_name = str(account.get("display_name") or "")
+    digits = "".join(char for char in display_name if char.isdigit())
+    if len(digits) >= 4:
+        return digits[-4:]
+    return "0000"
+
+
+def _map_stripe_account_type(account: dict) -> str:
+    subcategory = str(account.get("subcategory") or "").lower()
+    if "sav" in subcategory:
+        return "savings"
+    return "checking"
+
+
+async def complete_external_link_for_user(current_user: SupabaseUser, payload: CompleteExternalLinkIn) -> dict:
+    if settings.EXTERNAL_ACCOUNT_PROVIDER.strip().lower() != "stripe_sandbox":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Stripe sandbox linking is not enabled.",
+        )
+    account_id = payload.accountId.strip()
+    account = await get_financial_connections_account(account_id)
+    institution = account.get("institution") if isinstance(account.get("institution"), dict) else {}
+    bank_name = str(institution.get("name") or account.get("institution_name") or "Linked bank").strip()
+    if not bank_name:
+        bank_name = "Linked bank"
+    provider_account_id = str(account.get("id") or "").strip()
+    if not provider_account_id:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Stripe account id is missing.")
+    account_holder = account.get("account_holder") if isinstance(account.get("account_holder"), dict) else {}
+    provider_customer_id = str(account_holder.get("customer") or "").strip() or None
+    last4 = _extract_last4_from_stripe_account(account)
+    duplicate_rows = await supabase_client.select_rows(
+        "external_accounts",
+        filters={
+            "user_id": f"eq.{current_user.id}",
+            "provider": "eq.stripe_sandbox",
+            "provider_account_id": f"eq.{provider_account_id}",
+            "is_active": "eq.true",
+        },
+        limit=1,
+    )
+    if duplicate_rows:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="This external account is already linked.",
+        )
+    return await supabase_client.insert_row(
+        "external_accounts",
+        {
+            "user_id": current_user.id,
+            "bank_name": bank_name[:120],
+            "nickname": bank_name[:80],
+            "account_type": _map_stripe_account_type(account),
+            "masked_account_number": f"...{last4}",
+            "routing_number": "000000000",
             "verification_status": "verified",
+            "provider": "stripe_sandbox",
+            "provider_customer_id": provider_customer_id,
+            "provider_account_id": provider_account_id,
             "is_active": True,
         },
     )

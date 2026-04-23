@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64" role="img" aria-label="Citi">
+  <rect width="64" height="64" rx="14" fill="#FFFFFF"/>
+  <rect x="6" y="10" width="52" height="44" rx="10" fill="#F7FAFF" stroke="#D5DFEC"/>
+  <path d="M16 29c4-8 9-12 16-12s12 4 16 12" stroke="#E31837" stroke-width="4" fill="none" stroke-linecap="round"/>
+  <text x="32" y="39" font-size="15" text-anchor="middle" fill="#1F4DA0" font-family="Arial, sans-serif" font-weight="700">citi</text>
+</svg>

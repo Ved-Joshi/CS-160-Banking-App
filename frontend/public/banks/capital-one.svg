@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64" role="img" aria-label="Capital One">
+  <rect width="64" height="64" rx="14" fill="#FFFFFF"/>
+  <rect x="6" y="10" width="52" height="44" rx="10" fill="#F7FAFF" stroke="#D5DFEC"/>
+  <path d="M12 35c10-8 20-9 40-5" stroke="#1B4F9C" stroke-width="4" fill="none" stroke-linecap="round"/>
+  <path d="M22 39c9-1 16-1 30 3" stroke="#C8102E" stroke-width="4" fill="none" stroke-linecap="round"/>
+</svg>

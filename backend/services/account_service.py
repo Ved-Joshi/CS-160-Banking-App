@@ -1,6 +1,7 @@
 from fastapi import HTTPException, status
 
-from utils.supabase import SupabaseUser, random_last4, supabase_client
+from utils.banking_numbers import generate_unique_account_identifiers
+from utils.supabase import SupabaseUser, supabase_client
 
 
 def _is_admin(current_user: SupabaseUser) -> bool:
@@ -26,11 +27,14 @@ async def create_account_for_user(
             limit=1,
         )
         is_default_internal_receive = len(existing_default) == 0
+    routing_number, account_number = await generate_unique_account_identifiers()
     payload = {
         "user_id": current_user.id,
         "nickname": nickname,
         "account_type": account_type,
-        "account_last4": random_last4(),
+        "account_last4": account_number[-4:],
+        "account_number": account_number,
+        "routing_number": routing_number,
         "status": "open",
         "available_balance_cents": 0,
         "current_balance_cents": 0,

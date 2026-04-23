@@ -8,6 +8,8 @@ import type {
   CreateDepositUploadUrlsInput,
   CreatePayeeInput,
   CreateExternalAccountInput,
+  CompleteExternalLinkInput,
+  ExternalLinkSession,
   ExternalAccount,
   ExternalTransfer,
   ExternalTransferPlan,
@@ -223,6 +225,17 @@ export const externalAccountsService = {
   },
   create(input: CreateExternalAccountInput): Promise<ExternalAccount> {
     return apiRequest<unknown>('/api/external-accounts', {
+      method: 'POST',
+      body: input,
+    }).then(normalizeExternalAccount);
+  },
+  createLinkSession(): Promise<ExternalLinkSession> {
+    return apiRequest<ExternalLinkSession>('/api/external-accounts/link-session', {
+      method: 'POST',
+    });
+  },
+  completeLink(input: CompleteExternalLinkInput): Promise<ExternalAccount> {
+    return apiRequest<unknown>('/api/external-accounts/link-complete', {
       method: 'POST',
       body: input,
     }).then(normalizeExternalAccount);

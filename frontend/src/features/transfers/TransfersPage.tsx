@@ -13,7 +13,6 @@ import {
 import { formatCurrency, formatDate } from '../../lib/format';
 import { queryKeys } from '../../lib/queryKeys';
 import type {
-  CreateExternalAccountInput,
   ExternalAccount,
   MemberTransferRecipient,
   TransferCadence,
@@ -21,6 +20,7 @@ import type {
 } from '../../types/banking';
 
 type TransferMode = 'SELF' | 'MEMBER' | 'EXTERNAL';
+type CommonBank = { id: string; name: string; logoSrc: string };
 
 type ReviewState =
   | { kind: 'SELF'; payload: { fromAccountId: string; toAccountId: string; amount: number; memo?: string; transferDate: string } }
@@ -29,6 +29,18 @@ type ReviewState =
 
 const CADENCE_OPTIONS: TransferCadence[] = ['Once', 'Daily', 'Weekly', 'Biweekly', 'Monthly'];
 const TRANSFER_LIVE_REFRESH_MS = 10_000;
+const COMMON_BANKS: CommonBank[] = [
+  { id: 'chase', name: 'Chase', logoSrc: '/banks/chase.png' },
+  { id: 'bank_of_america', name: 'Bank of America', logoSrc: '/banks/bank-of-america.png' },
+  { id: 'wells_fargo', name: 'Wells Fargo', logoSrc: '/banks/wells-fargo.png' },
+  { id: 'citi', name: 'Citi', logoSrc: '/banks/citi.png' },
+  { id: 'us_bank', name: 'U.S. Bank', logoSrc: '/banks/us-bank.png' },
+  { id: 'capital_one', name: 'Capital One', logoSrc: '/banks/capital-one.png' },
+  { id: 'pnc', name: 'PNC Bank', logoSrc: '/banks/pnc.png' },
+  { id: 'goldman_sachs', name: 'Goldman Sachs', logoSrc: '/banks/goldman-sachs.png' },
+  { id: 'truist', name: 'Truist', logoSrc: '/banks/truist.svg' },
+  { id: 'td_bank', name: 'TD Bank', logoSrc: '/banks/td-bank.png' },
+];
 
 function formatAmountDigits(digits: string): string {
   const cleaned = digits.replace(/\D/g, '').slice(0, 12);
@@ -58,10 +70,6 @@ function getLocalToday(): string {
   return `${year}-${month}-${day}`;
 }
 
-function digitsOnly(value: string, maxLength: number): string {
-  return value.replace(/\D/g, '').slice(0, maxLength);
-}
-
 function normalizeEmail(value: string): string {
   return value.trim().toLowerCase();
 }
@@ -71,52 +79,6 @@ function isValidEmail(value: string): boolean {
   if (!normalized || normalized.startsWith('@') || normalized.endsWith('@')) return false;
   const [local, domain] = normalized.split('@');
   return Boolean(local && domain && domain.includes('.') && !domain.startsWith('.') && !domain.endsWith('.'));
-}
-
-function normalizeDisplayName(value: string): string {
-  return value.trim().replace(/\s+/g, ' ');
-}
-
-function isValidBankName(value: string): boolean {
-  const normalized = normalizeDisplayName(value);
-  if (normalized.length < 2 || normalized.length > 80) return false;
-  if (!/[a-z]/i.test(normalized)) return false;
-  return /^[A-Za-z0-9 .&'-]+$/.test(normalized);
-}
-
-function isValidRoutingNumber(value: string): boolean {
-  const digits = digitsOnly(value, 9);
-  if (digits.length !== 9) return false;
-  const checksum =
-    (3 * (Number(digits[0]) + Number(digits[3]) + Number(digits[6])))
-    + (7 * (Number(digits[1]) + Number(digits[4]) + Number(digits[7])))
-    + Number(digits[2]) + Number(digits[5]) + Number(digits[8]);
-  return checksum % 10 === 0;
-}
-
-function validateExternalAccountInput(input: CreateExternalAccountInput) {
-  const routingNumber = digitsOnly(input.routingNumber, 9);
-  const accountNumber = digitsOnly(input.accountNumber, 17);
-  const confirmAccountNumber = digitsOnly(input.confirmAccountNumber, 17);
-  const bankName = normalizeDisplayName(input.bankName);
-  const nickname = normalizeDisplayName(input.nickname);
-
-  if (!isValidBankName(bankName)) throw new Error('Enter a valid bank name.');
-  if (nickname.length < 2 || nickname.length > 80) throw new Error('Nickname must be between 2 and 80 characters.');
-  if (!isValidRoutingNumber(routingNumber)) throw new Error('Routing number is invalid.');
-  if (accountNumber.length < 4 || accountNumber.length > 17) throw new Error('Account number must be between 4 and 17 digits.');
-  if (/^0+$/.test(accountNumber)) throw new Error('Account number cannot be all zeros.');
-  if (accountNumber !== confirmAccountNumber) throw new Error('Account numbers must match.');
-  if (routingNumber === accountNumber) throw new Error('Account number cannot match the routing number.');
-
-  return {
-    ...input,
-    bankName,
-    nickname,
-    routingNumber,
-    accountNumber,
-    confirmAccountNumber,
-  };
 }
 
 function AmountInput({
@@ -172,6 +134,15 @@ function scheduleSummary(plan: { cadence: string; nextRunAt?: string; lastFailur
   return `${plan.cadence} • Next run ${formatDate(plan.nextRunAt)}`;
 }
 
+function sanitizeDigits(value: string): string {
+  return value.replace(/\D/g, '');
+}
+
+function findCommonBankByName(bankName: string): CommonBank | undefined {
+  const normalized = bankName.trim().toLowerCase();
+  return COMMON_BANKS.find((bank) => bank.name.toLowerCase() === normalized);
+}
+
 export function TransfersPage() {
   const queryClient = useQueryClient();
   const [searchParams] = useSearchParams();
@@ -184,10 +155,17 @@ export function TransfersPage() {
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [memberRecipient, setMemberRecipient] = useState<MemberTransferRecipient | null>(null);
   const [planPendingCancel, setPlanPendingCancel] = useState<{ kind: 'MEMBER' | 'EXTERNAL'; id: string; label: string } | null>(null);
-  const [showExternalAccountForm, setShowExternalAccountForm] = useState(false);
+  const [isExternalAccountDialogOpen, setIsExternalAccountDialogOpen] = useState(false);
   const [selfAmountDigits, setSelfAmountDigits] = useState('');
   const [memberAmountDigits, setMemberAmountDigits] = useState('');
   const [externalAmountDigits, setExternalAmountDigits] = useState('');
+  const [externalLinkForm, setExternalLinkForm] = useState({
+    bankId: COMMON_BANKS[0]?.id ?? '',
+    accountType: 'Checking' as ExternalAccount['accountType'],
+    routingNumber: '',
+    accountNumber: '',
+    confirmAccountNumber: '',
+  });
 
   const [selfForm, setSelfForm] = useState({
     fromAccountId: '',
@@ -218,14 +196,6 @@ export function TransfersPage() {
     runTime: '09:00',
     endDate: '',
     timezone: '',
-  });
-  const [newExternalAccount, setNewExternalAccount] = useState<CreateExternalAccountInput>({
-    bankName: '',
-    nickname: '',
-    accountType: 'Checking',
-    routingNumber: '',
-    accountNumber: '',
-    confirmAccountNumber: '',
   });
 
   const { data: accounts = [] } = useQuery({ queryKey: queryKeys.accounts(), queryFn: accountsService.list });
@@ -265,6 +235,9 @@ export function TransfersPage() {
   const memberTimezone = memberForm.timezone || profile?.timezone || browserTimezone;
   const externalFromAccountId = externalForm.fromAccountId || firstCheckingAccountId;
   const selectedExternalAccountId = externalForm.externalAccountId || externalAccounts[0]?.id || '';
+  const selectedExternalAccount = externalAccounts.find((account) => account.id === selectedExternalAccountId);
+  const selectedLinkedBank = selectedExternalAccount ? findCommonBankByName(selectedExternalAccount.bankName) : undefined;
+  const selectedBankForLink = COMMON_BANKS.find((bank) => bank.id === externalLinkForm.bankId);
   const externalTimezone = externalForm.timezone || profile?.timezone || browserTimezone;
   const memberActivePlans = memberPlans.filter((plan) => plan.status === 'SCHEDULED' || plan.status === 'PROCESSING');
   const externalActivePlans = externalPlans.filter((plan) => plan.status === 'SCHEDULED' || plan.status === 'PROCESSING');
@@ -350,25 +323,55 @@ export function TransfersPage() {
 
   const externalAccountCreateMutation = useMutation({
     mutationFn: externalAccountsService.create,
-    onSuccess: async () => {
+    onSuccess: async (createdAccount) => {
       await queryClient.invalidateQueries({ queryKey: queryKeys.externalAccounts() });
-      setSuccessMessage('External account linked');
-      setErrorMessage(null);
-      setShowExternalAccountForm(false);
-      setNewExternalAccount({
-        bankName: '',
-        nickname: '',
+      setExternalForm((current) => ({
+        ...current,
+        externalAccountId: createdAccount.id,
+      }));
+      setExternalLinkForm({
+        bankId: COMMON_BANKS[0]?.id ?? '',
         accountType: 'Checking',
         routingNumber: '',
         accountNumber: '',
         confirmAccountNumber: '',
       });
+      setSuccessMessage('External account linked');
+      setErrorMessage(null);
+      setIsExternalAccountDialogOpen(false);
     },
     onError: (error: Error) => {
       setErrorMessage(error.message);
       setSuccessMessage(null);
     },
   });
+
+  const handleExternalAccountCreate = async () => {
+    const selectedBank = COMMON_BANKS.find((bank) => bank.id === externalLinkForm.bankId);
+    if (!selectedBank) {
+      throw new Error('Choose a bank.');
+    }
+    const routingNumber = sanitizeDigits(externalLinkForm.routingNumber);
+    const accountNumber = sanitizeDigits(externalLinkForm.accountNumber);
+    const confirmAccountNumber = sanitizeDigits(externalLinkForm.confirmAccountNumber);
+    if (routingNumber.length !== 9) {
+      throw new Error('Routing number must be 9 digits.');
+    }
+    if (accountNumber.length < 4 || accountNumber.length > 17) {
+      throw new Error('Account number must be between 4 and 17 digits.');
+    }
+    if (accountNumber !== confirmAccountNumber) {
+      throw new Error('Account numbers do not match.');
+    }
+    await externalAccountCreateMutation.mutateAsync({
+      bankName: selectedBank.name,
+      nickname: selectedBank.name,
+      accountType: externalLinkForm.accountType,
+      routingNumber,
+      accountNumber,
+      confirmAccountNumber,
+    });
+  };
 
   const externalSubmitMutation = useMutation({
     mutationFn: externalTransfersService.submit,
@@ -693,53 +696,30 @@ export function TransfersPage() {
                     ))}
                   </select>
                 </Field>
-                <Field label="Linked external account">
-                  <select aria-label="Linked external account" onChange={(event) => setExternalForm((current) => ({ ...current, externalAccountId: event.target.value }))} value={selectedExternalAccountId}>
-                    {externalAccounts.map((account) => (
-                      <option key={account.id} value={account.id}>{account.bankName} • {account.nickname} ({account.maskedAccountNumber})</option>
-                    ))}
-                  </select>
-                </Field>
-                <Button onClick={() => setShowExternalAccountForm((current) => !current)} type="button" variant="secondary">
-                  {showExternalAccountForm ? 'Hide add external account' : 'Add external account'}
+                <Button onClick={() => setIsExternalAccountDialogOpen(true)} type="button" variant="secondary">
+                  Choose bank
                 </Button>
-                {showExternalAccountForm ? (
-                  <Card>
-                    <div className="stack-lg">
-                      <Field label="Bank name">
-                        <input aria-label="Bank name" onChange={(event) => setNewExternalAccount((current) => ({ ...current, bankName: event.target.value }))} value={newExternalAccount.bankName} />
-                      </Field>
-                      <Field label="Nickname">
-                        <input aria-label="External nickname" onChange={(event) => setNewExternalAccount((current) => ({ ...current, nickname: event.target.value }))} value={newExternalAccount.nickname} />
-                      </Field>
-                      <Field label="Account type">
-                        <select aria-label="External account type" onChange={(event) => setNewExternalAccount((current) => ({ ...current, accountType: event.target.value as CreateExternalAccountInput['accountType'] }))} value={newExternalAccount.accountType}>
-                          <option value="Checking">Checking</option>
-                          <option value="Savings">Savings</option>
-                        </select>
-                      </Field>
-                      <Field label="Routing number">
-                        <input aria-label="Routing number" inputMode="numeric" maxLength={9} onChange={(event) => setNewExternalAccount((current) => ({ ...current, routingNumber: digitsOnly(event.target.value, 9) }))} value={newExternalAccount.routingNumber} />
-                      </Field>
-                      <Field label="Account number">
-                        <input aria-label="Account number" inputMode="numeric" maxLength={17} onChange={(event) => setNewExternalAccount((current) => ({ ...current, accountNumber: digitsOnly(event.target.value, 17) }))} value={newExternalAccount.accountNumber} />
-                      </Field>
-                      <Field label="Confirm account number">
-                        <input aria-label="Confirm account number" inputMode="numeric" maxLength={17} onChange={(event) => setNewExternalAccount((current) => ({ ...current, confirmAccountNumber: digitsOnly(event.target.value, 17) }))} value={newExternalAccount.confirmAccountNumber} />
-                      </Field>
-                      <Button onClick={() => {
-                        try {
-                          setErrorMessage(null);
-                          externalAccountCreateMutation.mutate(validateExternalAccountInput(newExternalAccount));
-                        } catch (error) {
-                          setErrorMessage(error instanceof Error ? error.message : 'Unable to save external account.');
-                        }
-                      }} type="button">
-                        {externalAccountCreateMutation.isPending ? 'Saving...' : 'Save external account'}
-                      </Button>
+                {selectedExternalAccountId ? (
+                  <div className="stack-sm">
+                    <strong>Linked external account</strong>
+                    <div className="selected-bank-card">
+                      {selectedLinkedBank ? (
+                        <img
+                          alt={`${selectedExternalAccount?.bankName ?? 'External bank'} logo`}
+                          className="selected-bank-card__logo"
+                          src={selectedLinkedBank.logoSrc}
+                        />
+                      ) : null}
+                      <span className="muted">
+                        {selectedExternalAccount?.bankName ?? 'External bank'} ({selectedExternalAccount?.maskedAccountNumber ?? '...----'})
+                      </span>
                     </div>
-                  </Card>
-                ) : null}
+                  </div>
+                ) : (
+                  <InlineAlert title="Link a bank account first" tone="warning">
+                    Use `Choose bank` to pick a bank and add account details before submitting an external transfer.
+                  </InlineAlert>
+                )}
                 <Field label="Transfer mode">
                   <select aria-label="External transfer mode" onChange={(event) => setExternalForm((current) => ({ ...current, scheduleMode: event.target.value as TransferScheduleMode }))} value={externalForm.scheduleMode}>
                     <option value="NOW">Now</option>
@@ -843,6 +823,131 @@ export function TransfersPage() {
           )) : <p className="muted">No scheduled transfers.</p>}
         </div>
       </Card>
+
+      <Dialog
+        actions={(
+          <>
+            <Button
+              onClick={() => {
+                if (externalAccountCreateMutation.isPending) return;
+                setIsExternalAccountDialogOpen(false);
+              }}
+              type="button"
+              variant="secondary"
+            >
+              Cancel
+            </Button>
+            <Button
+              disabled={externalAccountCreateMutation.isPending}
+              onClick={async () => {
+                try {
+                  setErrorMessage(null);
+                  await handleExternalAccountCreate();
+                } catch (error) {
+                  setErrorMessage(error instanceof Error ? error.message : 'Unable to link external account.');
+                }
+              }}
+              type="button"
+            >
+              {externalAccountCreateMutation.isPending ? 'Linking...' : 'Link bank'}
+            </Button>
+          </>
+        )}
+        description="Sandbox linked via Stripe mock. Pick a common bank and provide account details to simulate live linking."
+        onClose={() => {
+          if (externalAccountCreateMutation.isPending) return;
+          setIsExternalAccountDialogOpen(false);
+        }}
+        open={isExternalAccountDialogOpen}
+        title="Choose bank"
+      >
+        {externalAccountCreateMutation.error instanceof Error ? (
+          <InlineAlert title="Unable to save external account" tone="warning">
+            {externalAccountCreateMutation.error.message}
+          </InlineAlert>
+        ) : null}
+        <form className="stack-md" onSubmit={(event) => event.preventDefault()}>
+          <Field label="Select a bank">
+            <div className="bank-picker-grid" role="radiogroup" aria-label="Bank selection">
+              {COMMON_BANKS.map((bank) => (
+                <button
+                  aria-label={`Select ${bank.name}`}
+                  aria-checked={externalLinkForm.bankId === bank.id}
+                  className={`bank-picker-option${externalLinkForm.bankId === bank.id ? ' bank-picker-option--selected' : ''}`}
+                  key={bank.id}
+                  onClick={() => setExternalLinkForm((current) => ({ ...current, bankId: bank.id }))}
+                  role="radio"
+                  type="button"
+                >
+                  <span className="bank-picker-option__check" aria-hidden="true">
+                    {externalLinkForm.bankId === bank.id ? '✓' : ''}
+                  </span>
+                  <img alt={`${bank.name} logo`} className="bank-picker-option__logo" src={bank.logoSrc} />
+                  <span>{bank.name}</span>
+                </button>
+              ))}
+            </div>
+          </Field>
+          {selectedBankForLink ? (
+            <div className="selected-bank-card selected-bank-card--active" aria-live="polite">
+              <img alt={`${selectedBankForLink.name} logo`} className="selected-bank-card__logo" src={selectedBankForLink.logoSrc} />
+              <div className="stack-sm">
+                <strong>Selected bank: {selectedBankForLink.name}</strong>
+                <span className="muted">Account details below will be linked to this bank.</span>
+              </div>
+            </div>
+          ) : null}
+          <Field label="Account type">
+            <select
+              aria-label="External account type"
+              onChange={(event) => {
+                setExternalLinkForm((current) => ({
+                  ...current,
+                  accountType: event.target.value as ExternalAccount['accountType'],
+                }));
+              }}
+              value={externalLinkForm.accountType}
+            >
+              <option value="Checking">Checking</option>
+              <option value="Savings">Savings</option>
+            </select>
+          </Field>
+          <Field label="Routing number">
+            <input
+              aria-label="External routing number"
+              inputMode="numeric"
+              maxLength={9}
+              onChange={(event) =>
+                setExternalLinkForm((current) => ({ ...current, routingNumber: sanitizeDigits(event.target.value).slice(0, 9) }))}
+              placeholder="123456789"
+              value={externalLinkForm.routingNumber}
+            />
+          </Field>
+          <Field label="Account number">
+            <input
+              aria-label="External account number"
+              inputMode="numeric"
+              maxLength={17}
+              onChange={(event) =>
+                setExternalLinkForm((current) => ({ ...current, accountNumber: sanitizeDigits(event.target.value).slice(0, 17) }))}
+              placeholder="Enter account number"
+              value={externalLinkForm.accountNumber}
+            />
+          </Field>
+          <Field label="Confirm account number">
+            <input
+              aria-label="External confirm account number"
+              inputMode="numeric"
+              maxLength={17}
+              onChange={(event) =>
+                setExternalLinkForm((current) => ({ ...current, confirmAccountNumber: sanitizeDigits(event.target.value).slice(0, 17) }))}
+              placeholder="Re-enter account number"
+              value={externalLinkForm.confirmAccountNumber}
+            />
+          </Field>
+          <p className="muted">Sandbox simulation only. No real money movement or real bank verification.</p>
+        </form>
+      </Dialog>
 
       <Dialog
         actions={(

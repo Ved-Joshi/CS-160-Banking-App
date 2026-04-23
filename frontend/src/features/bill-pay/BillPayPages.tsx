@@ -11,6 +11,7 @@ import { queryKeys } from '../../lib/queryKeys';
 import type { ScheduledPayment, UpdateScheduledPaymentInput } from '../../types/banking';
 
 const MAX_PAYMENT_AMOUNT = 100000;
+const BILL_PAY_LIVE_REFRESH_MS = 10_000;
 
 const paymentSchema = z.object({
   payeeId: z.string().min(1),
@@ -30,6 +31,24 @@ const editPaymentSchema = z.object({
 const payeeSetupSchema = z.object({
   name: z.string().trim().min(1, 'Payee name is required.').max(80, 'Payee name is too long.'),
   category: z.enum(['Utilities', 'Internet', 'Phone', 'Insurance', 'Rent', 'Loan', 'Credit Card', 'Healthcare', 'Other']),
+  routingNumber: z.string().regex(/^\d{9}$/, 'Routing number must be 9 digits.'),
+  accountNumber: z.string().regex(/^\d{4,17}$/, 'Account number must be 4 to 17 digits.'),
+  confirmAccountNumber: z.string().regex(/^\d{4,17}$/, 'Confirm account number must be 4 to 17 digits.'),
+}).superRefine((value, ctx) => {
+  if (value.accountNumber !== value.confirmAccountNumber) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['confirmAccountNumber'],
+      message: 'Account number confirmation does not match.',
+    });
+  }
+  if (value.routingNumber === value.accountNumber) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['accountNumber'],
+      message: 'Account number cannot match routing number.',
+    });
+  }
 });
 
 const PAYEE_CATEGORY_OPTIONS = ['Utilities', 'Internet', 'Phone', 'Insurance', 'Rent', 'Loan', 'Credit Card', 'Healthcare', 'Other'] as const;
@@ -43,6 +62,10 @@ function formatAmountDigits(digits: string): string {
   const integerPart = cleaned.slice(0, -2).replace(/^0+(?=\d)/, '') || '0';
   const centsPart = cleaned.slice(-2);
   return `${integerPart}.${centsPart}`;
+}
+
+function digitsOnly(value: string, maxLength: number): string {
+  return value.replace(/\D/g, '').slice(0, maxLength);
 }
 
 function toAmountDigits(amount: number): string {
@@ -151,8 +174,16 @@ export function BillPayPage() {
   const [searchParams] = useSearchParams();
   const preferredAccountId = searchParams.get('accountId') ?? '';
   const { data: profile } = useQuery({ queryKey: ['profile'], queryFn: profileService.get });
-  const { data: payees = [] } = useQuery({ queryKey: queryKeys.payees(), queryFn: payeesService.list });
-  const { data: payments = [] } = useQuery({ queryKey: queryKeys.payments(), queryFn: paymentsService.list });
+  const { data: payees = [] } = useQuery({
+    queryKey: queryKeys.payees(),
+    queryFn: payeesService.list,
+    refetchInterval: BILL_PAY_LIVE_REFRESH_MS,
+  });
+  const { data: payments = [] } = useQuery({
+    queryKey: queryKeys.payments(),
+    queryFn: paymentsService.list,
+    refetchInterval: BILL_PAY_LIVE_REFRESH_MS,
+  });
   const { data: accounts = [] } = useQuery({ queryKey: queryKeys.accounts(), queryFn: accountsService.list });
 
   const createPayeeMutation = useMutation({
@@ -253,6 +284,9 @@ export function BillPayPage() {
     defaultValues: {
       name: '',
       category: 'Utilities',
+      routingNumber: '',
+      accountNumber: '',
+      confirmAccountNumber: '',
     },
   });
 
@@ -263,7 +297,7 @@ export function BillPayPage() {
       accountId: '',
       amount: 0,
       cadence: 'Once',
-      deliverBy: new Date().toISOString().slice(0, 10),
+      deliverBy: formatDateInputValue(new Date()),
     },
   });
   const editPaymentForm = useForm<z.infer<typeof editPaymentSchema>>({
@@ -272,7 +306,7 @@ export function BillPayPage() {
       payeeId: '',
       amount: 0,
       cadence: 'Once',
-      deliverBy: new Date().toISOString().slice(0, 10),
+      deliverBy: formatDateInputValue(new Date()),
     },
   });
 
@@ -290,6 +324,13 @@ export function BillPayPage() {
     if (paymentPendingRetry) return;
     setRetryDelayDate(addDaysToDateInput(todayDate, 1));
   }, [todayDate, paymentPendingRetry]);
+
+  useEffect(() => {
+    const deliverBy = paymentForm.getValues('deliverBy');
+    if (!deliverBy || deliverBy < todayDate) {
+      paymentForm.setValue('deliverBy', todayDate);
+    }
+  }, [paymentForm, todayDate]);
 
   useEffect(() => {
     if (!hasAccounts) return;
@@ -870,6 +911,9 @@ export function BillPayPage() {
                 payeeForm.reset({
                   name: '',
                   category: values.category,
+                  routingNumber: '',
+                  accountNumber: '',
+                  confirmAccountNumber: '',
                 });
                 paymentForm.setValue('payeeId', created.id);
                 setIsPayeeDialogOpen(false);
@@ -905,6 +949,36 @@ export function BillPayPage() {
                 </option>
               ))}
             </select>
+          </Field>
+          <Field label="Routing number" error={payeeForm.formState.errors.routingNumber?.message}>
+            <input
+              {...payeeForm.register('routingNumber', {
+                setValueAs: (value) => digitsOnly(String(value ?? ''), 9),
+              })}
+              inputMode="numeric"
+              maxLength={9}
+              placeholder="123456789"
+            />
+          </Field>
+          <Field label="Account number" error={payeeForm.formState.errors.accountNumber?.message}>
+            <input
+              {...payeeForm.register('accountNumber', {
+                setValueAs: (value) => digitsOnly(String(value ?? ''), 17),
+              })}
+              inputMode="numeric"
+              maxLength={17}
+              placeholder="Account number"
+            />
+          </Field>
+          <Field label="Confirm account number" error={payeeForm.formState.errors.confirmAccountNumber?.message}>
+            <input
+              {...payeeForm.register('confirmAccountNumber', {
+                setValueAs: (value) => digitsOnly(String(value ?? ''), 17),
+              })}
+              inputMode="numeric"
+              maxLength={17}
+              placeholder="Re-enter account number"
+            />
           </Field>
         </form>
       </Dialog>

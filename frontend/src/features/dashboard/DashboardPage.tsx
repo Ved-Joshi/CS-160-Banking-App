@@ -6,11 +6,13 @@ import { formatCurrency, formatDate } from '../../lib/format';
 import { queryKeys } from '../../lib/queryKeys';
 import { useAuth } from '../auth/useAuth';
 
+const DASHBOARD_REFRESH_MS = 15_000;
+
 export function DashboardPage() {
   const { user } = useAuth();
-  const { data: accounts = [] } = useQuery({ queryKey: queryKeys.accounts(), queryFn: accountsService.list });
-  const { data: transactions = [] } = useQuery({ queryKey: queryKeys.transactions(), queryFn: transactionsService.list });
-  const { data: payments = [] } = useQuery({ queryKey: queryKeys.payments(), queryFn: paymentsService.list });
+  const { data: accounts = [] } = useQuery({ queryKey: queryKeys.accounts(), queryFn: accountsService.list, refetchInterval: DASHBOARD_REFRESH_MS });
+  const { data: transactions = [] } = useQuery({ queryKey: queryKeys.transactions(), queryFn: transactionsService.list, refetchInterval: DASHBOARD_REFRESH_MS });
+  const { data: payments = [] } = useQuery({ queryKey: queryKeys.payments(), queryFn: paymentsService.list, refetchInterval: DASHBOARD_REFRESH_MS });
   const { data: deposits = [] } = useQuery({ queryKey: queryKeys.deposits(), queryFn: depositsService.list });
 
   const displayName = [user?.firstName, user?.lastName].filter(Boolean).join(' ') || user?.username || user?.email || accounts[0]?.nickname || 'Welcome';

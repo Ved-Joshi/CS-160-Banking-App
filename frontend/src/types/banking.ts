@@ -225,6 +225,8 @@ export interface ExternalAccount {
   maskedAccountNumber: string;
   routingNumber: string;
   verificationStatus: 'PENDING' | 'VERIFIED' | 'FAILED';
+  provider?: string;
+  providerAccountId?: string;
   isActive: boolean;
   createdAt: string;
 }
@@ -236,6 +238,16 @@ export interface CreateExternalAccountInput {
   routingNumber: string;
   accountNumber: string;
   confirmAccountNumber: string;
+}
+
+export interface ExternalLinkSession {
+  clientSecret: string;
+  sessionId: string;
+  publishableKey: string;
+}
+
+export interface CompleteExternalLinkInput {
+  accountId: string;
 }
 
 export interface ExternalTransferRequest {
@@ -304,7 +316,9 @@ export interface Payee {
 export interface CreatePayeeInput {
   name: string;
   category: string;
-  accountLast4?: string;
+  routingNumber: string;
+  accountNumber: string;
+  confirmAccountNumber: string;
 }
 
 export interface ScheduledPayment {

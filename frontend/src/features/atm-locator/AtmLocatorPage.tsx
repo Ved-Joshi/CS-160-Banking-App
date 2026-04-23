@@ -31,6 +31,15 @@ function buildSearchInput(target: SearchTarget, radiusMiles: number, openNow: bo
   };
 }
 
+function isSafeDirectionsUrl(value: string): boolean {
+  try {
+    const parsed = new URL(value);
+    return parsed.protocol === 'http:' || parsed.protocol === 'https:';
+  } catch {
+    return false;
+  }
+}
+
 export function AtmLocatorPage() {
   const [searchText, setSearchText] = useState('');
   const [radiusMiles, setRadiusMiles] = useState(10);
@@ -366,8 +375,10 @@ export function AtmLocatorPage() {
                           variant="secondary"
                           onClick={(event) => {
                             event.stopPropagation();
+                            if (!isSafeDirectionsUrl(atm.directionsUrl)) return;
                             window.open(atm.directionsUrl, '_blank', 'noopener,noreferrer');
                           }}
+                          disabled={!isSafeDirectionsUrl(atm.directionsUrl)}
                         >
                           Directions
                         </Button>

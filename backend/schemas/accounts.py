@@ -19,6 +19,7 @@ class AccountOut(BaseModel):
     nickname: Optional[str] = None
     account_type: AccountType
     account_last4: Optional[str] = None
+    account_number: Optional[str] = None
     routing_number: Optional[str] = None
     status: AccountStatus
     available_balance_cents: int

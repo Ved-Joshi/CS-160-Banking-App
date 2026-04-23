@@ -15,6 +15,8 @@ from schemas.banking import (
     CreateDepositIn,
     CreateDepositUploadUrlsIn,
     CreatePayeeIn,
+    CreateExternalLinkSessionOut,
+    CompleteExternalLinkIn,
     CreateExternalAccountIn,
     CreateExternalTransferIn,
     CreateMemberTransferIn,
@@ -43,7 +45,12 @@ from schemas.banking import (
     UpdateScheduledPaymentIn,
 )
 from utils.google_maps import SearchCenter, geocode_query, search_chase_atms
-from utils.supabase import SupabaseUser, amount_to_cents, cents_to_amount, random_last4, supabase_client
+from utils.banking_numbers import (
+    generate_unique_account_identifiers,
+    validate_account_number,
+    validate_routing_number,
+)
+from utils.supabase import SupabaseUser, amount_to_cents, cents_to_amount, supabase_client
 from services.payment_service import (
     attempt_payment_run,
     build_payment_update_payload,
@@ -60,6 +67,8 @@ from services.payment_service import (
 from services.transfer_service import (
     cancel_external_transfer_plan_for_user,
     cancel_member_transfer_plan_for_user,
+    complete_external_link_for_user,
+    create_external_link_session_for_user,
     create_external_account_for_user,
     create_external_transfer_for_user,
     create_member_transfer_for_user,
@@ -404,6 +413,8 @@ def map_external_account(row: dict) -> ExternalAccount:
         maskedAccountNumber=row.get("masked_account_number") or "...----",
         routingNumber=row.get("routing_number") or "",
         verificationStatus=map_external_verification_status(row.get("verification_status", "verified")),
+        provider=row.get("provider"),
+        providerAccountId=row.get("provider_account_id"),
         isActive=bool(row.get("is_active", True)),
         createdAt=row.get("created_at") or "",
     )
@@ -450,11 +461,13 @@ def map_external_transfer_plan(row: dict) -> ExternalTransferPlan:
 
 
 def map_payee(row: dict) -> Payee:
+    account_number = row.get("account_number")
+    account_last4 = row.get("account_last4") or (account_number[-4:] if isinstance(account_number, str) and len(account_number) >= 4 else None)
     return Payee(
         id=row["id"],
         name=row.get("name") or "Unnamed payee",
         category=row.get("category") or "Other",
-        accountMask=f"...{row.get('account_last4') or '----'}",
+        accountMask=f"...{account_last4 or '----'}",
     )
 
 
@@ -752,7 +765,7 @@ async def create_account(
         )
 
     account_type = normalize_account_type(payload.type)
-    routing_number = "121000358" if account_type in {"checking", "savings"} else None
+    routing_number, account_number = await generate_unique_account_identifiers()
     is_default_internal_receive = False
     if account_type == "checking":
         existing_default = await supabase_client.select_rows(
@@ -772,7 +785,8 @@ async def create_account(
             "user_id": current_user.id,
             "nickname": payload.nickname.strip(),
             "account_type": account_type,
-            "account_last4": random_last4(),
+            "account_last4": account_number[-4:],
+            "account_number": account_number,
             "routing_number": routing_number,
             "status": "open",
             "available_balance_cents": 0,
@@ -956,6 +970,23 @@ async def create_external_account(
     return map_external_account(row)
 
 
+@router.post("/external-accounts/link-session", response_model=CreateExternalLinkSessionOut)
+async def create_external_account_link_session(
+    current_user: SupabaseUser = Depends(get_current_user),
+) -> CreateExternalLinkSessionOut:
+    session = await create_external_link_session_for_user(current_user)
+    return CreateExternalLinkSessionOut(**session)
+
+
+@router.post("/external-accounts/link-complete", response_model=ExternalAccount, status_code=status.HTTP_201_CREATED)
+async def complete_external_account_link(
+    payload: CompleteExternalLinkIn,
+    current_user: SupabaseUser = Depends(get_current_user),
+) -> ExternalAccount:
+    row = await complete_external_link_for_user(current_user, payload)
+    return map_external_account(row)
+
+
 @router.get("/external-transfers", response_model=list[ExternalTransfer])
 async def list_external_transfers(
     current_user: SupabaseUser = Depends(get_current_user),
@@ -1022,13 +1053,23 @@ async def create_payee(
     payload: CreatePayeeIn,
     current_user: SupabaseUser = Depends(get_current_user),
 ) -> Payee:
+    routing_number = validate_routing_number(payload.routingNumber)
+    account_number = validate_account_number(payload.accountNumber, field_name="Account number")
+    confirm_account_number = validate_account_number(payload.confirmAccountNumber, field_name="Confirm account number")
+    if account_number != confirm_account_number:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Account number confirmation does not match.")
+    if account_number == routing_number:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Account number cannot match the routing number.")
+
     created = await supabase_client.insert_row(
         "payees",
         {
             "user_id": current_user.id,
             "name": payload.name.strip(),
             "category": payload.category.strip(),
-            "account_last4": payload.accountLast4,
+            "account_last4": account_number[-4:],
+            "routing_number": routing_number,
+            "account_number": account_number,
             "is_active": True,
         },
     )

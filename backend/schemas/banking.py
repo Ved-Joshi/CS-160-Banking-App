@@ -94,7 +94,9 @@ class Payee(BaseModel):
 class CreatePayeeIn(BaseModel):
     name: str = Field(min_length=1, max_length=80)
     category: str = Field(default="Other", min_length=1, max_length=50)
-    accountLast4: Optional[str] = Field(default=None, min_length=4, max_length=4, pattern=r"^\d{4}$")
+    routingNumber: str = Field(min_length=9, max_length=9, pattern=r"^\d{9}$")
+    accountNumber: str = Field(min_length=4, max_length=17, pattern=r"^\d{4,17}$")
+    confirmAccountNumber: str = Field(min_length=4, max_length=17, pattern=r"^\d{4,17}$")
 
 
 class ScheduledPayment(BaseModel):
@@ -291,6 +293,16 @@ class CreateExternalAccountIn(BaseModel):
     confirmAccountNumber: str = Field(min_length=4, max_length=17)
 
 
+class CreateExternalLinkSessionOut(BaseModel):
+    clientSecret: str
+    sessionId: str
+    publishableKey: str
+
+
+class CompleteExternalLinkIn(BaseModel):
+    accountId: str = Field(min_length=1, max_length=100)
+
+
 class ExternalAccount(BaseModel):
     id: str
     bankName: str
@@ -299,6 +311,8 @@ class ExternalAccount(BaseModel):
     maskedAccountNumber: str
     routingNumber: str
     verificationStatus: ExternalAccountVerificationStatus
+    provider: Optional[str] = None
+    providerAccountId: Optional[str] = None
     isActive: bool
     createdAt: str
 

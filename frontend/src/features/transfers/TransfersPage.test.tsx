@@ -179,11 +179,11 @@ describe('TransfersPage', () => {
     });
   });
 
-  it('creates an external account inline', async () => {
+  it('creates an external account via sandbox bank picker', async () => {
     mocks.externalCreateAccount.mockResolvedValue({
       id: 'ext_2',
       bankName: 'Wells Fargo',
-      nickname: 'Bills',
+      nickname: 'Wells Fargo',
       maskedAccountNumber: '...7777',
       accountType: 'Checking',
       verificationStatus: 'VERIFIED',
@@ -193,38 +193,37 @@ describe('TransfersPage', () => {
     renderPage();
 
     await userEvent.click(screen.getByRole('button', { name: 'External bank' }));
-    await userEvent.click(screen.getByRole('button', { name: 'Add external account' }));
-    await userEvent.type(screen.getByLabelText('Bank name'), 'Wells Fargo');
-    await userEvent.type(screen.getByLabelText('External nickname'), 'Bills');
-    await userEvent.type(screen.getByLabelText('Routing number'), '121000248');
-    await userEvent.type(screen.getByLabelText('Account number'), '12345678');
-    await userEvent.type(screen.getByLabelText('Confirm account number'), '12345678');
-    await userEvent.click(screen.getByRole('button', { name: 'Save external account' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Choose bank' }));
+    await userEvent.click(screen.getByRole('radio', { name: /Wells Fargo/ }));
+    fireEvent.change(screen.getByLabelText('External routing number'), { target: { value: '121000248' } });
+    fireEvent.change(screen.getByLabelText('External account number'), { target: { value: '000123456789' } });
+    fireEvent.change(screen.getByLabelText('External confirm account number'), { target: { value: '000123456789' } });
+    await userEvent.click(screen.getByRole('button', { name: 'Link bank' }));
 
     await waitFor(() => {
       expect(mocks.externalCreateAccount.mock.calls[0]?.[0]).toEqual(expect.objectContaining({
         bankName: 'Wells Fargo',
-        nickname: 'Bills',
+        nickname: 'Wells Fargo',
+        routingNumber: '121000248',
+        accountNumber: '000123456789',
+        confirmAccountNumber: '000123456789',
       }));
       expect(screen.getByText('External account linked')).toBeInTheDocument();
     });
   });
 
-  it('blocks invalid external account details before submit', async () => {
+  it('surfaces external account validation errors in the UI', async () => {
     renderPage();
 
     await userEvent.click(screen.getByRole('button', { name: 'External bank' }));
-    await userEvent.click(screen.getByRole('button', { name: 'Add external account' }));
-    await userEvent.type(screen.getByLabelText('Bank name'), 'Wells Fargo');
-    await userEvent.type(screen.getByLabelText('External nickname'), 'Bills');
-    await userEvent.type(screen.getByLabelText('Routing number'), '123456789');
-    await userEvent.type(screen.getByLabelText('Account number'), '12345678');
-    await userEvent.type(screen.getByLabelText('Confirm account number'), '12345678');
-    await userEvent.click(screen.getByRole('button', { name: 'Save external account' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Choose bank' }));
+    await userEvent.type(screen.getByLabelText('External routing number'), '1');
+    await userEvent.type(screen.getByLabelText('External account number'), '000123456789');
+    await userEvent.type(screen.getByLabelText('External confirm account number'), '000123456789');
+    await userEvent.click(screen.getByRole('button', { name: 'Link bank' }));
 
     await waitFor(() => {
-      expect(mocks.externalCreateAccount).not.toHaveBeenCalled();
-      expect(screen.getByText('Routing number is invalid.')).toBeInTheDocument();
+      expect(screen.getByText('Routing number must be 9 digits.')).toBeInTheDocument();
     });
   });
 

@@ -344,6 +344,8 @@ export function normalizeExternalAccount(input: unknown): ExternalAccount {
       : asString(row.verificationStatus || row.verification_status).toUpperCase() === 'PENDING'
         ? 'PENDING'
         : 'VERIFIED',
+    provider: asString(row.provider) || undefined,
+    providerAccountId: asString(row.providerAccountId) || asString(row.provider_account_id) || undefined,
     isActive: asBoolean(row.isActive, asBoolean(row.is_active, true)),
     createdAt: asString(row.createdAt) || asString(row.created_at),
   };
