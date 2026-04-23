@@ -7,6 +7,7 @@ AccountType = Literal["Checking", "Savings", "Credit"]
 TransactionType = Literal["Deposit", "Withdrawal", "Transfer", "Bill Pay", "ATM", "Interest"]
 TransactionStatus = Literal["PENDING", "COMPLETED", "FAILED"]
 DepositStatus = Literal["PENDING_REVIEW", "APPROVED", "DECLINED"]
+DepositType = Literal["cash", "check"]
 PaymentStatus = Literal["SCHEDULED", "PROCESSING", "COMPLETED", "FAILED", "CANCELLED"]
 NotificationType = Literal["deposit", "payment", "transfer", "security"]
 PaymentCadence = Literal["Once", "Daily", "Weekly", "Biweekly", "Monthly"]
@@ -126,6 +127,7 @@ class Deposit(BaseModel):
     id: str
     accountId: str
     amount: float
+    depositType: DepositType
     submittedAt: str
     status: DepositStatus
     note: Optional[str] = None
@@ -152,8 +154,7 @@ class DepositUploadUrls(BaseModel):
 class CreateDepositIn(BaseModel):
     accountId: str
     amount: float = Field(gt=0)
-    frontImagePath: str = Field(min_length=1)
-    backImagePath: str = Field(min_length=1)
+    depositType: DepositType
 
 
 class NotificationItem(BaseModel):

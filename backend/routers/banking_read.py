@@ -1,5 +1,4 @@
 from datetime import date, datetime, timezone
-import logging
 from pathlib import PurePosixPath
 from uuid import uuid4
 
@@ -87,7 +86,6 @@ from services.transfer_service import (
 )
 
 router = APIRouter(prefix="/api", tags=["banking"])
-logger = logging.getLogger(__name__)
 
 
 def map_account_type(value: str) -> str:
@@ -509,6 +507,7 @@ def map_deposit(row: dict) -> Deposit:
         id=row["id"],
         accountId=row["account_id"],
         amount=cents_to_amount(row.get("amount_cents")),
+        depositType=row.get("deposit_type") or "check",
         submittedAt=submitted_at,
         status=map_deposit_status(row.get("status", "submitted")),
         note=row.get("note"),
@@ -1535,38 +1534,22 @@ async def create_deposit(
     payload: CreateDepositIn,
     current_user: SupabaseUser = Depends(get_current_user),
 ) -> Deposit:
-    account = await require_owned_account(payload.accountId, current_user.id, require_open=True)
-    for image_path in [payload.frontImagePath, payload.backImagePath]:
-        if not image_path.startswith(f"{current_user.id}/"):
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Deposit image paths must belong to the authenticated user.",
-            )
-
-    created = await supabase_client.insert_row(
-        "deposits",
+    await require_owned_account(payload.accountId, current_user.id, require_open=True)
+    result = await supabase_client.rpc(
+        "submit_customer_deposit",
         {
-            "user_id": current_user.id,
-            "account_id": account["id"],
-            "amount_cents": amount_to_cents(payload.amount),
-            "status": "under_review",
-            "note": "Submitted successfully. Review typically completes in 1 business day.",
-            "front_image_path": payload.frontImagePath,
-            "back_image_path": payload.backImagePath,
+            "p_user_id": current_user.id,
+            "p_account_id": payload.accountId,
+            "p_amount_cents": amount_to_cents(payload.amount),
+            "p_deposit_type": payload.depositType,
         },
     )
-    try:
-        await supabase_client.insert_row(
-            "notifications",
-            {
-                "user_id": current_user.id,
-                "type": "deposit",
-                "title": "Deposit pending review",
-                "body": f"Your deposit to {account.get('nickname') or 'your account'} is now under review.",
-            },
+    created = result[0] if isinstance(result, list) else result
+    if not created:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Supabase did not return the created deposit row.",
         )
-    except HTTPException as exc:
-        logger.warning("Notification insert failed after deposit creation: %s", exc.detail)
     return map_deposit(created)
 
 

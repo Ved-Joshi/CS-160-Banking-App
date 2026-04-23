@@ -1,7 +1,8 @@
 from fastapi import HTTPException, status
 
 from utils.banking_numbers import generate_unique_account_identifiers
-from utils.supabase import SupabaseUser, supabase_client
+from services.ledger_service import ensure_customer_ledger_account
+from utils.supabase import SupabaseUser, random_last4, supabase_client
 
 
 def _is_admin(current_user: SupabaseUser) -> bool:
@@ -42,7 +43,12 @@ async def create_account_for_user(
         "is_default_internal_receive": is_default_internal_receive,
     }
 
-    return await supabase_client.insert_row("accounts", payload)
+    account = await supabase_client.insert_row("accounts", payload)
+    
+    # Ensure corresponding ledger account is created
+    await ensure_customer_ledger_account(account)
+    
+    return account
 
 
 async def list_accounts_for_user(current_user: SupabaseUser) -> list[dict]:

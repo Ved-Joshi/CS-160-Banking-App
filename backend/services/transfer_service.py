@@ -20,6 +20,7 @@ from services.stripe_sandbox_service import (
 )
 from utils.banking_numbers import validate_account_number, validate_routing_number
 from utils.supabase import SupabaseUser, amount_to_cents, supabase_client
+from services.ledger_service import ensure_ledger_accounts_for_transfer
 
 STALE_PROCESSING_TIMEOUT_MINUTES = 10
 EXTERNAL_SETTLEMENT_DELAY_SECONDS = 15
@@ -260,6 +261,13 @@ async def create_transfer_for_user(
             detail="Insufficient balance.",
         )
 
+    # Ensure ledger accounts exist for both accounts (safety check)
+    await ensure_ledger_accounts_for_transfer(from_account, to_account)
+
+    # Call transactional RPC: all mutations happen atomically in Postgres
+    # The RPC uses FOR UPDATE to lock both accounts, validates state, and performs
+    # all updates (accounts, transfer, ledger_journals, ledger_postings, transactions, notifications)
+    # in one transaction
     try:
         result = await supabase_client.rpc(
             "submit_internal_transfer",
@@ -1082,6 +1090,13 @@ async def retry_external_transfer_plan_for_user(user_id: str, plan_id: str) -> d
     cadence = plan["cadence"]
     failure_reason = None
 
+    # Ensure ledger accounts exist for both accounts (safety check)
+    await ensure_ledger_accounts_for_transfer(from_account, to_account)
+
+    # Call transactional RPC: all mutations happen atomically in Postgres
+    # The RPC uses FOR UPDATE to lock both accounts, validates state, and performs
+    # all updates (accounts, transfer, ledger_journals, ledger_postings, transactions, notifications)
+    # in one transaction
     try:
         settle_after = datetime.now(timezone.utc) + timedelta(seconds=EXTERNAL_SETTLEMENT_DELAY_SECONDS)
         await supabase_client.rpc(
