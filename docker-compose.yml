@@ -1,6 +1,8 @@
 services:
   backend:
-    build: ./backend
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
     ports:
       - "8000:8000"
     volumes:
@@ -10,15 +12,46 @@ services:
     environment:
       - PYTHONPATH=/app
     command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/openapi.json', timeout=5)"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
     container_name: banking-backend
 
   frontend:
-    build: ./frontend
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
     ports:
-      - "3000:3000"
-    environment:
-      - VITE_API_URL=http://localhost:8000
+      - "5173:5173"
+    env_file:
+      - ./frontend/.env
     container_name: banking-frontend
     depends_on:
-      - backend
-   
+      backend:
+        condition: service_healthy
+
+  scheduler:
+    image: curlimages/curl:8.7.1
+    container_name: banking-scheduler
+    depends_on:
+      backend:
+        condition: service_healthy
+    env_file:
+      - ./backend/.env
+    command:
+      - /bin/sh
+      - -c
+      - |
+        if [ -z "$$TRANSFER_RUNNER_SECRET" ]; then
+          echo "TRANSFER_RUNNER_SECRET is not set; scheduler is idle."
+          tail -f /dev/null
+        fi
+        while true; do
+          curl -fsS -X POST "http://backend:8000/internal/jobs/process-transfer-plans?limit=50" -H "X-Runner-Secret: $$TRANSFER_RUNNER_SECRET" >/dev/null || true
+          curl -fsS -X POST "http://backend:8000/internal/jobs/process-member-transfer-plans?limit=50" -H "X-Runner-Secret: $$TRANSFER_RUNNER_SECRET" >/dev/null || true
+          curl -fsS -X POST "http://backend:8000/internal/jobs/process-external-transfers?limit=50" -H "X-Runner-Secret: $$TRANSFER_RUNNER_SECRET" >/dev/null || true
+          curl -fsS -X POST "http://backend:8000/internal/jobs/process-bill-payments?limit=50" -H "X-Runner-Secret: $$TRANSFER_RUNNER_SECRET" >/dev/null || true
+          sleep 60
+        done
