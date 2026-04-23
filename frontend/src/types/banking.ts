@@ -8,6 +8,7 @@ export type TransactionType =
   | 'Interest';
 export type TransactionStatus = 'PENDING' | 'COMPLETED' | 'FAILED';
 export type DepositStatus = 'PENDING_REVIEW' | 'APPROVED' | 'DECLINED';
+export type DepositType = 'cash' | 'check';
 export type PaymentStatus = 'SCHEDULED' | 'PROCESSING' | 'COMPLETED' | 'FAILED' | 'CANCELLED';
 export type TransferStatus = 'PENDING' | 'COMPLETED' | 'FAILED';
 export type TransferScheduleMode = 'NOW' | 'SCHEDULED';
@@ -209,6 +210,7 @@ export interface Deposit {
   id: string;
   accountId: string;
   amount: number;
+  depositType: DepositType;
   submittedAt: string;
   status: DepositStatus;
   note?: string;
@@ -238,8 +240,7 @@ export interface CreateDepositUploadUrlsInput {
 export interface CreateDepositInput {
   accountId: string;
   amount: number;
-  frontImagePath: string;
-  backImagePath: string;
+  depositType: DepositType;
 }
 
 export interface AtmLocation {
