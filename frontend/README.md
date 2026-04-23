@@ -63,3 +63,7 @@ npm run build
 npm run lint
 npm run test
 ```
+
+## API Contract Note
+
+Frontend integration is standardized on `/api/*` endpoints. See [`docs/api-contract.md`](/Users/vedjoshi/CS-160-Banking-App/frontend/docs/api-contract.md) for details.

@@ -212,6 +212,46 @@ const registerSchema = z.object({
   path: ['passwordConfirmation'],
 });
 
+function requiredLabel(label: string): React.ReactNode {
+  return (
+    <>
+      {label} <span className="required-indicator">*</span>
+    </>
+  );
+}
+
+const TAX_ID_MASK_TEMPLATE = '___-__-____';
+const TAX_ID_DIGIT_POSITIONS = [0, 1, 2, 4, 5, 7, 8, 9, 10] as const;
+
+function extractTaxIdDigits(value: string): string {
+  return value.replace(/\D/g, '').slice(0, 9);
+}
+
+function formatTaxIdInput(value: string): string {
+  const digits = extractTaxIdDigits(value);
+  const masked = TAX_ID_MASK_TEMPLATE.split('');
+  for (let i = 0; i < TAX_ID_DIGIT_POSITIONS.length; i += 1) {
+    const nextDigit = digits[i];
+    if (!nextDigit) break;
+    masked[TAX_ID_DIGIT_POSITIONS[i]] = nextDigit;
+  }
+  return masked.join('');
+}
+
+function caretToDigitIndex(caret: number): number {
+  let count = 0;
+  for (const position of TAX_ID_DIGIT_POSITIONS) {
+    if (position < caret) count += 1;
+  }
+  return count;
+}
+
+function digitIndexToCaret(index: number): number {
+  if (index <= 0) return TAX_ID_DIGIT_POSITIONS[0];
+  if (index >= TAX_ID_DIGIT_POSITIONS.length) return TAX_ID_MASK_TEMPLATE.length;
+  return TAX_ID_DIGIT_POSITIONS[index];
+}
+
 export function RegisterPage() {
   const navigate = useNavigate();
   const { register } = useAuth();
@@ -233,7 +273,7 @@ export function RegisterPage() {
       dateOfBirth: '',
       password: '',
       passwordConfirmation: '',
-      taxId: '',
+      taxId: '___-__-____',
     },
   });
 
@@ -258,37 +298,37 @@ export function RegisterPage() {
           {serverError ? <InlineAlert title="Unable to create access" tone="warning">{serverError}</InlineAlert> : null}
           {submitted ? <InlineAlert title="Enrollment started" tone="success">Your online banking access has been created successfully.</InlineAlert> : null}
           <div className="grid-two">
-            <Field label="First name" error={form.formState.errors.firstName?.message}>
+            <Field label={requiredLabel('First name')} error={form.formState.errors.firstName?.message}>
               <input {...form.register('firstName')} autoComplete="given-name" />
             </Field>
             <Field label="Middle name (optional)" error={form.formState.errors.middleName?.message}>
               <input {...form.register('middleName')} autoComplete="additional-name" />
             </Field>
-            <Field label="Last name" error={form.formState.errors.lastName?.message}>
+            <Field label={requiredLabel('Last name')} error={form.formState.errors.lastName?.message}>
               <input {...form.register('lastName')} autoComplete="family-name" />
             </Field>
           </div>
           <div className="grid-two">
-            <Field label="Email address" error={form.formState.errors.email?.message}>
+            <Field label={requiredLabel('Email address')} error={form.formState.errors.email?.message}>
               <input {...form.register('email')} autoComplete="email" type="email" />
             </Field>
-            <Field label="Mobile phone number" error={form.formState.errors.mobilePhone?.message}>
+            <Field label={requiredLabel('Mobile phone number')} error={form.formState.errors.mobilePhone?.message}>
               <input {...form.register('mobilePhone')} autoComplete="tel" inputMode="tel" type="tel" />
             </Field>
           </div>
           <div className="stack-md">
             <p className="eyebrow">Residential address</p>
             <div className="grid-two">
-              <Field label="Street address" error={form.formState.errors.streetAddress?.message}>
+              <Field label={requiredLabel('Street address')} error={form.formState.errors.streetAddress?.message}>
                 <input {...form.register('streetAddress')} autoComplete="address-line1" />
               </Field>
               <Field label="Apartment/unit (optional)" error={form.formState.errors.apartmentUnit?.message}>
                 <input {...form.register('apartmentUnit')} autoComplete="address-line2" />
               </Field>
-              <Field label="City" error={form.formState.errors.city?.message}>
+              <Field label={requiredLabel('City')} error={form.formState.errors.city?.message}>
                 <input {...form.register('city')} autoComplete="address-level2" />
               </Field>
-              <Field label="State" error={form.formState.errors.state?.message}>
+              <Field label={requiredLabel('State')} error={form.formState.errors.state?.message}>
                 <select {...form.register('state')} autoComplete="address-level1">
                   <option value="">Select a state</option>
                   {US_STATES.map(([code, name]) => (
@@ -298,22 +338,114 @@ export function RegisterPage() {
                   ))}
                 </select>
               </Field>
-              <Field label="ZIP code" error={form.formState.errors.zipCode?.message}>
+              <Field label={requiredLabel('ZIP code')} error={form.formState.errors.zipCode?.message}>
                 <input {...form.register('zipCode')} autoComplete="postal-code" inputMode="numeric" />
               </Field>
-              <Field label="Date of Birth" error={form.formState.errors.dateOfBirth?.message}>
+              <Field label={requiredLabel('Date of Birth')} error={form.formState.errors.dateOfBirth?.message}>
                 <input {...form.register('dateOfBirth')} autoComplete="bday" type="date" />
               </Field>
             </div>
           </div>
-          <Field label="Social Security Number (SSN) or Tax Identification Number (TIN)" error={form.formState.errors.taxId?.message}>
-            <input {...form.register('taxId')} autoComplete="off" inputMode="numeric" />
+          <Field label={requiredLabel('Social Security Number (SSN) or Tax Identification Number (TIN)')} error={form.formState.errors.taxId?.message}>
+            <input
+              {...form.register('taxId', {
+                onChange: (event) => {
+                  event.target.value = formatTaxIdInput(event.target.value);
+                },
+              })}
+              autoComplete="off"
+              inputMode="numeric"
+              placeholder="___-__-____"
+              onFocus={(event) => {
+                const value = event.currentTarget.value || TAX_ID_MASK_TEMPLATE;
+                if (!extractTaxIdDigits(value).length) {
+                  requestAnimationFrame(() => {
+                    event.currentTarget.setSelectionRange(0, 0);
+                  });
+                }
+              }}
+              onKeyDown={(event) => {
+                if (event.metaKey || event.ctrlKey || event.altKey) return;
+                const input = event.currentTarget;
+                const currentMasked = form.getValues('taxId') || TAX_ID_MASK_TEMPLATE;
+                const currentDigits = extractTaxIdDigits(currentMasked);
+                const selectionStart = input.selectionStart ?? 0;
+                const selectionEnd = input.selectionEnd ?? selectionStart;
+
+                const applyDigits = (nextDigits: string, nextCaretDigitIndex: number) => {
+                  const nextMasked = formatTaxIdInput(nextDigits);
+                  form.setValue('taxId', nextMasked, { shouldDirty: true, shouldValidate: true });
+                  const nextCaret = digitIndexToCaret(nextCaretDigitIndex);
+                  requestAnimationFrame(() => {
+                    input.setSelectionRange(nextCaret, nextCaret);
+                  });
+                };
+
+                if (/^\d$/.test(event.key)) {
+                  event.preventDefault();
+                  const startDigitIndex = caretToDigitIndex(selectionStart);
+                  const endDigitIndex = caretToDigitIndex(selectionEnd);
+                  const hasSelection = selectionEnd > selectionStart;
+                  const nextDigits = hasSelection
+                    ? `${currentDigits.slice(0, startDigitIndex)}${event.key}${currentDigits.slice(endDigitIndex)}`
+                    : `${currentDigits.slice(0, startDigitIndex)}${event.key}${currentDigits.slice(startDigitIndex)}`;
+                  applyDigits(nextDigits.slice(0, 9), Math.min(startDigitIndex + 1, 9));
+                  return;
+                }
+
+                if (event.key === 'Backspace') {
+                  event.preventDefault();
+                  const startDigitIndex = caretToDigitIndex(selectionStart);
+                  const endDigitIndex = caretToDigitIndex(selectionEnd);
+                  const hasSelection = selectionEnd > selectionStart;
+                  if (hasSelection) {
+                    const nextDigits = `${currentDigits.slice(0, startDigitIndex)}${currentDigits.slice(endDigitIndex)}`;
+                    applyDigits(nextDigits, startDigitIndex);
+                    return;
+                  }
+                  if (startDigitIndex <= 0) return;
+                  const removeIndex = startDigitIndex - 1;
+                  const nextDigits = `${currentDigits.slice(0, removeIndex)}${currentDigits.slice(removeIndex + 1)}`;
+                  applyDigits(nextDigits, removeIndex);
+                  return;
+                }
+
+                if (event.key === 'Delete') {
+                  event.preventDefault();
+                  const startDigitIndex = caretToDigitIndex(selectionStart);
+                  const endDigitIndex = caretToDigitIndex(selectionEnd);
+                  const hasSelection = selectionEnd > selectionStart;
+                  if (hasSelection) {
+                    const nextDigits = `${currentDigits.slice(0, startDigitIndex)}${currentDigits.slice(endDigitIndex)}`;
+                    applyDigits(nextDigits, startDigitIndex);
+                    return;
+                  }
+                  if (startDigitIndex >= currentDigits.length) return;
+                  const nextDigits = `${currentDigits.slice(0, startDigitIndex)}${currentDigits.slice(startDigitIndex + 1)}`;
+                  applyDigits(nextDigits, startDigitIndex);
+                  return;
+                }
+
+                const allowedKeys = ['Tab', 'ArrowLeft', 'ArrowRight', 'Home', 'End', 'Enter'];
+                if (allowedKeys.includes(event.key)) return;
+                event.preventDefault();
+              }}
+              onPaste={(event) => {
+                event.preventDefault();
+                const pastedDigits = extractTaxIdDigits(event.clipboardData.getData('text'));
+                const masked = formatTaxIdInput(pastedDigits);
+                form.setValue('taxId', masked, { shouldDirty: true, shouldValidate: true });
+                requestAnimationFrame(() => {
+                  event.currentTarget.setSelectionRange(masked.length, masked.length);
+                });
+              }}
+            />
           </Field>
           <div className="grid-two">
-            <Field label="Password" error={form.formState.errors.password?.message}>
+            <Field label={requiredLabel('Password')} error={form.formState.errors.password?.message}>
               <input {...form.register('password')} autoComplete="new-password" type="password" />
             </Field>
-            <Field label="Password confirmation" error={form.formState.errors.passwordConfirmation?.message}>
+            <Field label={requiredLabel('Password confirmation')} error={form.formState.errors.passwordConfirmation?.message}>
               <input {...form.register('passwordConfirmation')} autoComplete="new-password" type="password" />
             </Field>
           </div>

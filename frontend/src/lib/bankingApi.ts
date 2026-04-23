@@ -6,7 +6,9 @@ import type {
   CreateBankAccountInput,
   CreateDepositInput,
   CreateDepositUploadUrlsInput,
+  CreatePayeeInput,
   CreateScheduledPaymentInput,
+  UpdateScheduledPaymentInput,
   CustomerProfile,
   Deposit,
   DepositUploadUrls,
@@ -14,35 +16,65 @@ import type {
   Payee,
   ScheduledPayment,
   Transaction,
+  TransferPlan,
   TransferRequest,
-  TransferResult,
+  TransferSubmissionResult,
+  UpdateCustomerProfileInput,
 } from '../types/banking';
 import { apiRequest } from './apiClient';
+import {
+  normalizeAccount,
+  normalizeAccounts,
+  normalizePayment,
+  normalizePayments,
+  normalizeTransactions,
+  normalizeTransferPlan,
+  normalizeTransferPlans,
+  normalizeTransferSubmissionResult,
+} from './bankingContract';
+
+function createIdempotencyKey(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+  return `idem-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
 
 export const profileService = {
   get(): Promise<CustomerProfile> {
     return apiRequest('/api/me/profile');
   },
+  update(input: UpdateCustomerProfileInput): Promise<CustomerProfile> {
+    return apiRequest('/api/me/profile', {
+      method: 'PATCH',
+      body: input,
+    });
+  },
 };
 
 export const accountsService = {
   list(): Promise<BankAccount[]> {
-    return apiRequest('/api/accounts');
+    return apiRequest<unknown[]>('/api/accounts').then(normalizeAccounts);
   },
   get(accountId: string): Promise<BankAccount> {
-    return apiRequest(`/api/accounts/${accountId}`);
+    return apiRequest<unknown>(`/api/accounts/${accountId}`).then(normalizeAccount);
   },
   create(input: CreateBankAccountInput): Promise<BankAccount> {
-    return apiRequest('/api/accounts', {
+    return apiRequest<unknown>('/api/accounts', {
       method: 'POST',
       body: input,
+    }).then(normalizeAccount);
+  },
+  close(accountId: string): Promise<void> {
+    return apiRequest(`/api/accounts/${accountId}/close`, {
+      method: 'POST',
     });
   },
 };
 
 export const transactionsService = {
   list(): Promise<Transaction[]> {
-    return apiRequest('/api/transactions');
+    return apiRequest<unknown[]>('/api/transactions').then(normalizeTransactions);
   },
   search(filters: {
     accountId?: string;
@@ -50,26 +82,44 @@ export const transactionsService = {
     status?: string;
     limit?: number;
   } = {}): Promise<Transaction[]> {
-    return apiRequest('/api/transactions', {
+    return apiRequest<unknown[]>('/api/transactions', {
       query: {
         account_id: filters.accountId,
         type: filters.type,
         status: filters.status,
         limit: filters.limit,
       },
-    });
+    }).then(normalizeTransactions);
   },
 };
 
 export const paymentsService = {
   list(): Promise<ScheduledPayment[]> {
-    return apiRequest('/api/payments');
+    return apiRequest<unknown[]>('/api/payments').then(normalizePayments);
   },
   create(input: CreateScheduledPaymentInput): Promise<ScheduledPayment> {
-    return apiRequest('/api/payments', {
+    return apiRequest<unknown>('/api/payments', {
       method: 'POST',
       body: input,
-    });
+      headers: { 'Idempotency-Key': createIdempotencyKey() },
+    }).then(normalizePayment);
+  },
+  cancel(paymentId: string): Promise<ScheduledPayment> {
+    return apiRequest<unknown>(`/api/payments/${paymentId}/cancel`, {
+      method: 'POST',
+    }).then(normalizePayment);
+  },
+  update(paymentId: string, input: UpdateScheduledPaymentInput): Promise<ScheduledPayment> {
+    return apiRequest<unknown>(`/api/payments/${paymentId}`, {
+      method: 'PATCH',
+      body: input,
+    }).then(normalizePayment);
+  },
+  retry(paymentId: string): Promise<ScheduledPayment> {
+    return apiRequest<unknown>(`/api/payments/${paymentId}/retry`, {
+      method: 'POST',
+      headers: { 'Idempotency-Key': createIdempotencyKey() },
+    }).then(normalizePayment);
   },
 };
 
@@ -98,6 +148,12 @@ export const payeesService = {
   list(): Promise<Payee[]> {
     return apiRequest('/api/payees');
   },
+  create(input: CreatePayeeInput): Promise<Payee> {
+    return apiRequest('/api/payees', {
+      method: 'POST',
+      body: input,
+    });
+  },
 };
 
 export const notificationsService = {
@@ -112,11 +168,19 @@ export const notificationsService = {
 };
 
 export const transfersService = {
-  submit(input: TransferRequest): Promise<TransferResult> {
-    return apiRequest('/api/transfers', {
+  submit(input: TransferRequest): Promise<TransferSubmissionResult> {
+    return apiRequest<unknown>('/api/transfers', {
       method: 'POST',
       body: input,
-    });
+    }).then(normalizeTransferSubmissionResult);
+  },
+  listPlans(): Promise<TransferPlan[]> {
+    return apiRequest<unknown[]>('/api/transfers/plans').then(normalizeTransferPlans);
+  },
+  cancelPlan(planId: string): Promise<TransferPlan> {
+    return apiRequest<unknown>(`/api/transfers/plans/${planId}/cancel`, {
+      method: 'POST',
+    }).then(normalizeTransferPlan);
   },
 };
 

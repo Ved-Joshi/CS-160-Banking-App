@@ -11,6 +11,7 @@ type ApiRequestOptions = {
   body?: unknown;
   auth?: boolean;
   query?: Record<string, string | number | undefined | null>;
+  headers?: Record<string, string>;
 };
 
 function normalizeErrorDetail(detail: unknown, fallback: string): string {
@@ -21,6 +22,16 @@ function normalizeErrorDetail(detail: unknown, fallback: string): string {
     return detail.map((item) => (typeof item === 'string' ? item : JSON.stringify(item))).join(', ');
   }
   if (detail && typeof detail === 'object') {
+    const message = 'message' in detail && typeof detail.message === 'string' ? detail.message : '';
+    const reasons = 'reasons' in detail && Array.isArray(detail.reasons)
+      ? detail.reasons.filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
+      : [];
+    if (message && reasons.length) {
+      return `${message}: ${reasons.join('; ')}`;
+    }
+    if (message) {
+      return message;
+    }
     return JSON.stringify(detail);
   }
   return fallback;
@@ -48,9 +59,10 @@ async function getAccessToken() {
 }
 
 export async function apiRequest<T>(path: string, options: ApiRequestOptions = {}): Promise<T> {
-  const { auth = true, body, method = body ? 'POST' : 'GET', query } = options;
+  const { auth = true, body, method = body ? 'POST' : 'GET', query, headers: customHeaders } = options;
   const headers: Record<string, string> = {
     Accept: 'application/json',
+    ...(customHeaders ?? {}),
   };
 
   if (auth) {

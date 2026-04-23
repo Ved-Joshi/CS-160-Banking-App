@@ -3,18 +3,21 @@ import { Link } from 'react-router-dom';
 import { Card, EmptyState, InlineAlert, PageHeader, StatusChip } from '../../components/ui';
 import { accountsService, depositsService, paymentsService, transactionsService } from '../../lib/bankingApi';
 import { formatCurrency, formatDate } from '../../lib/format';
+import { queryKeys } from '../../lib/queryKeys';
 import { useAuth } from '../auth/useAuth';
 
 export function DashboardPage() {
   const { user } = useAuth();
-  const { data: accounts = [] } = useQuery({ queryKey: ['accounts'], queryFn: accountsService.list });
-  const { data: transactions = [] } = useQuery({ queryKey: ['transactions'], queryFn: transactionsService.list });
-  const { data: payments = [] } = useQuery({ queryKey: ['payments'], queryFn: paymentsService.list });
-  const { data: deposits = [] } = useQuery({ queryKey: ['deposits'], queryFn: depositsService.list });
+  const { data: accounts = [] } = useQuery({ queryKey: queryKeys.accounts(), queryFn: accountsService.list });
+  const { data: transactions = [] } = useQuery({ queryKey: queryKeys.transactions(), queryFn: transactionsService.list });
+  const { data: payments = [] } = useQuery({ queryKey: queryKeys.payments(), queryFn: paymentsService.list });
+  const { data: deposits = [] } = useQuery({ queryKey: queryKeys.deposits(), queryFn: depositsService.list });
 
   const displayName = [user?.firstName, user?.lastName].filter(Boolean).join(' ') || user?.username || user?.email || accounts[0]?.nickname || 'Welcome';
   const totalAvailable = accounts.reduce((sum, account) => sum + account.balances.availableBalance, 0);
-  const recentTransactions = transactions.slice(0, 4);
+  const displayedAccounts = accounts.slice(0, 3);
+  const recentTransactions = transactions.slice(0, 5);
+  const upcomingPayments = payments.filter((payment) => payment.status === 'SCHEDULED' || payment.status === 'PROCESSING').slice(0, 5);
   const pendingDeposit = deposits.find((deposit) => deposit.status === 'PENDING_REVIEW');
 
   return (
@@ -52,8 +55,8 @@ export function DashboardPage() {
         </div>
       </div>
       <div className="grid-three">
-        {accounts.length ? (
-          accounts.map((account) => (
+        {displayedAccounts.length ? (
+          displayedAccounts.map((account) => (
             <Card key={account.id}>
               <p className="eyebrow">{account.type}</p>
               <h3>{account.nickname}</h3>
@@ -88,16 +91,16 @@ export function DashboardPage() {
         )}
       </div>
       <div className="dashboard-grid">
-        <Card>
-          <div className="section-heading">
-            <h3>Recent transactions</h3>
-            <Link className="text-link" to="/app/transactions">
-              See all
-            </Link>
-          </div>
-          <div className="list-stack">
-            {recentTransactions.length ? (
-              recentTransactions.map((transaction) => (
+        {recentTransactions.length ? (
+          <Card>
+            <div className="section-heading">
+              <h3>Recent transactions</h3>
+              <Link className="text-link" to="/app/transactions">
+                See all
+              </Link>
+            </div>
+            <div className="list-stack">
+              {recentTransactions.map((transaction) => (
                 <div className="summary-row" key={transaction.id}>
                   <div className="summary-row__primary">
                     <strong>{transaction.description}</strong>
@@ -108,25 +111,33 @@ export function DashboardPage() {
                     <StatusChip status={transaction.status} />
                   </div>
                 </div>
-              ))
-            ) : (
-              <EmptyState
-                title="No recent transactions"
-                description="Posted and pending account activity will show up here once your accounts start receiving transactions."
-              />
-            )}
+              ))}
+            </div>
+          </Card>
+        ) : (
+          <div>
+            <div className="section-heading">
+              <h3>Recent transactions</h3>
+              <Link className="text-link" to="/app/transactions">
+                See all
+              </Link>
+            </div>
+            <EmptyState
+              title="No recent transactions"
+              description="Posted and pending account activity will show up here once your accounts start receiving transactions."
+            />
           </div>
-        </Card>
-        <Card>
-          <div className="section-heading">
-            <h3>Upcoming bill payments</h3>
-            <Link className="text-link" to="/app/bill-pay">
-              Manage
-            </Link>
-          </div>
-          <div className="list-stack">
-            {payments.length ? (
-              payments.slice(0, 4).map((payment) => (
+        )}
+        {upcomingPayments.length ? (
+          <Card>
+            <div className="section-heading">
+              <h3>Upcoming bill payments</h3>
+              <Link className="text-link" to="/app/bill-pay">
+                Manage
+              </Link>
+            </div>
+            <div className="list-stack">
+              {upcomingPayments.map((payment) => (
                 <div className="summary-row" key={payment.id}>
                   <div className="summary-row__primary">
                     <strong>{payment.payeeName}</strong>
@@ -137,15 +148,23 @@ export function DashboardPage() {
                     <StatusChip status={payment.status} />
                   </div>
                 </div>
-              ))
-            ) : (
-              <EmptyState
-                title="No upcoming bill payments"
-                description="Scheduled payments will appear here after you add payees and create bill pay instructions."
-              />
-            )}
+              ))}
+            </div>
+          </Card>
+        ) : (
+          <div>
+            <div className="section-heading">
+              <h3>Upcoming bill payments</h3>
+              <Link className="text-link" to="/app/bill-pay">
+                Manage
+              </Link>
+            </div>
+            <EmptyState
+              title="No upcoming bill payments"
+              description="Scheduled payments will appear here after you add payees and create bill pay instructions."
+            />
           </div>
-        </Card>
+        )}
       </div>
     </div>
   );
