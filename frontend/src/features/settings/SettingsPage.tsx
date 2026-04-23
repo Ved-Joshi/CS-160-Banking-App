@@ -4,6 +4,11 @@ import { useEffect, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { z } from 'zod';
 import { Button, Card, Field, InlineAlert, PageHeader } from '../../components/ui';
+import {
+  readNotificationPreferences,
+  writeNotificationPreferences,
+  type NotificationPreferences,
+} from '../../lib/notificationPreferences';
 import { profileService } from '../../lib/bankingApi';
 import { formatDate } from '../../lib/format';
 import type { UpdateCustomerProfileInput } from '../../types/banking';
@@ -25,6 +30,9 @@ export function SettingsPage() {
   const { data: profile } = useQuery({ queryKey: ['profile'], queryFn: profileService.get });
   const [saveSuccess, setSaveSuccess] = useState<string | null>(null);
   const [isEditing, setIsEditing] = useState(false);
+  const [notificationPreferences, setNotificationPreferences] = useState<NotificationPreferences>(
+    () => readNotificationPreferences(),
+  );
   const form = useForm<UpdateCustomerProfileInput>({
     resolver: zodResolver(profileSchema),
     defaultValues: {
@@ -67,7 +75,7 @@ export function SettingsPage() {
   return (
     <div className="stack-xl">
       <PageHeader title="Settings" eyebrow="Profile" subtitle="Update your contact and address details." />
-      <div className="settings-profile-wrap">
+      <div className="settings-profile-wrap stack-lg">
         <Card>
           <h3>Profile</h3>
           {saveSuccess ? <InlineAlert title="Saved" tone="success">{saveSuccess}</InlineAlert> : null}
@@ -195,6 +203,40 @@ export function SettingsPage() {
               </div>
             </>
           ) : null}
+        </Card>
+        <Card className="stack-md">
+          <h3>Notification preferences</h3>
+          <p className="muted">Choose which alerts you see in-app. Preferences are saved on this device.</p>
+          <div className="settings-toggle-list">
+            {[
+              ['deposit', 'Deposits', 'Deposit review updates and decisions.'],
+              ['payment', 'Bill pay', 'Scheduled payment submissions, retries, and failures.'],
+              ['transfer', 'Transfers', 'Internal and external transfer activity.'],
+              ['security', 'Security', 'Account security and sign-in notices.'],
+              ['dailyDigest', 'Daily digest', 'A compact daily summary of activity.'],
+            ].map(([key, label, description]) => (
+              <label className="settings-toggle-row" key={key}>
+                <div className="settings-toggle-row__content">
+                  <strong>{label}</strong>
+                  <small className="muted">{description}</small>
+                </div>
+                <input
+                  className="settings-toggle-input"
+                  checked={notificationPreferences[key as keyof NotificationPreferences]}
+                  onChange={(event) => {
+                    const next = {
+                      ...notificationPreferences,
+                      [key]: event.target.checked,
+                    } as NotificationPreferences;
+                    setNotificationPreferences(next);
+                    writeNotificationPreferences(next);
+                  }}
+                  type="checkbox"
+                />
+                <span aria-hidden="true" className="settings-toggle-switch" />
+              </label>
+            ))}
+          </div>
         </Card>
       </div>
     </div>

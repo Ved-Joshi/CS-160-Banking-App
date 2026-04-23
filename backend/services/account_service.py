@@ -1,5 +1,6 @@
 from fastapi import HTTPException, status
 
+from utils.banking_numbers import generate_unique_account_identifiers
 from services.ledger_service import ensure_customer_ledger_account
 from utils.supabase import SupabaseUser, random_last4, supabase_client
 
@@ -14,15 +15,32 @@ async def create_account_for_user(
     account_type: str,
     nickname: str | None = None,
 ) -> dict:
+    is_default_internal_receive = False
+    if account_type == "checking":
+        existing_default = await supabase_client.select_rows(
+            "accounts",
+            filters={
+                "user_id": f"eq.{current_user.id}",
+                "account_type": "eq.checking",
+                "status": "eq.open",
+                "is_default_internal_receive": "eq.true",
+            },
+            limit=1,
+        )
+        is_default_internal_receive = len(existing_default) == 0
+    routing_number, account_number = await generate_unique_account_identifiers()
     payload = {
         "user_id": current_user.id,
         "nickname": nickname,
         "account_type": account_type,
-        "account_last4": random_last4(),
+        "account_last4": account_number[-4:],
+        "account_number": account_number,
+        "routing_number": routing_number,
         "status": "open",
         "available_balance_cents": 0,
         "current_balance_cents": 0,
         "close_eligible": True,
+        "is_default_internal_receive": is_default_internal_receive,
     }
 
     account = await supabase_client.insert_row("accounts", payload)

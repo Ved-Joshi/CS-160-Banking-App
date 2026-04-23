@@ -9,7 +9,8 @@ router = APIRouter(prefix="/api/admin", tags=["admin"])
 
 def map_account(row: dict) -> BankAccount:
     nickname = row.get("nickname") or "Account"
-    last4 = row.get("account_last4") or "----"
+    account_number = row.get("account_number")
+    last4 = row.get("account_last4") or (account_number[-4:] if isinstance(account_number, str) and len(account_number) >= 4 else "----")
     return BankAccount(
         id=row["id"],
         nickname=nickname,

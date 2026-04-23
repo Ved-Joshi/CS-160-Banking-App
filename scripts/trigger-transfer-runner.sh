@@ -4,7 +4,7 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ENV_FILE="$ROOT_DIR/backend/.env"
-RUNNER_URL="http://localhost:8000/internal/jobs/process-transfer-plans?limit=100"
+RUNNER_BASE="http://localhost:8000/internal/jobs"
 NOW() {
   date "+%Y-%m-%dT%H:%M:%S%z"
 }
@@ -20,5 +20,12 @@ if [[ -z "$SECRET" ]]; then
   exit 1
 fi
 
-RESPONSE="$(curl -sS -X POST "$RUNNER_URL" -H "X-Runner-Secret: $SECRET")"
-echo "[$(NOW)] $RESPONSE"
+LEGACY_RESPONSE="$(curl -sS -X POST "$RUNNER_BASE/process-transfer-plans?limit=100" -H "X-Runner-Secret: $SECRET")"
+MEMBER_RESPONSE="$(curl -sS -X POST "$RUNNER_BASE/process-member-transfer-plans?limit=100" -H "X-Runner-Secret: $SECRET")"
+EXTERNAL_RESPONSE="$(curl -sS -X POST "$RUNNER_BASE/process-external-transfers?limit=100" -H "X-Runner-Secret: $SECRET")"
+BILL_PAY_RESPONSE="$(curl -sS -X POST "$RUNNER_BASE/process-bill-payments?limit=100" -H "X-Runner-Secret: $SECRET")"
+
+echo "[$(NOW)] process-transfer-plans: $LEGACY_RESPONSE"
+echo "[$(NOW)] process-member-transfer-plans: $MEMBER_RESPONSE"
+echo "[$(NOW)] process-external-transfers: $EXTERNAL_RESPONSE"
+echo "[$(NOW)] process-bill-payments: $BILL_PAY_RESPONSE"

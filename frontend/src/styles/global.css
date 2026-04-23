@@ -767,6 +767,102 @@ small {
   gap: 0.55rem;
 }
 
+.notifications-list {
+  gap: 0.85rem;
+}
+
+.notification-card {
+  display: grid;
+  gap: 0.45rem;
+  padding: 1.25rem 1.5rem;
+}
+
+.notification-card__header {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  flex-wrap: wrap;
+}
+
+.notification-card__title {
+  margin: 0;
+  line-height: 1.2;
+}
+
+.notification-card__body {
+  margin: 0;
+  line-height: 1.35;
+}
+
+.notification-card__time {
+  margin: 0;
+}
+
+.notification-day-heading {
+  font-size: 0.95rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.notification-card__meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.8rem;
+  flex-wrap: wrap;
+}
+
+.notification-rollup-count {
+  font-weight: 700;
+}
+
+.notification-card__actions {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  flex-wrap: wrap;
+}
+
+.notification-action-link {
+  text-decoration: none;
+}
+
+.notification-priority-chip {
+  border-radius: 999px;
+  padding: 0.28rem 0.62rem;
+  font-size: 0.78rem;
+  font-weight: 700;
+  text-transform: capitalize;
+}
+
+.notification-priority-chip--high {
+  color: #9e1b1b;
+  background: rgba(199, 31, 45, 0.14);
+}
+
+.notification-priority-chip--medium {
+  color: #8a5a00;
+  background: rgba(255, 173, 51, 0.18);
+}
+
+.notification-priority-chip--low {
+  color: #31527e;
+  background: rgba(91, 118, 150, 0.16);
+}
+
+.notification-card--priority-high {
+  border-color: rgba(199, 31, 45, 0.4);
+}
+
+.notification-card--priority-medium {
+  border-color: rgba(255, 173, 51, 0.45);
+}
+
+.notification-card--priority-low {
+  border-color: rgba(212, 221, 232, 0.9);
+}
+
 .grid-two,
 .grid-three,
 .dashboard-grid {
@@ -786,6 +882,73 @@ small {
 .settings-profile-wrap {
   width: min(860px, 100%);
   margin: 0 auto;
+}
+
+.settings-toggle-list {
+  display: grid;
+  gap: 0.65rem;
+}
+
+.settings-toggle-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.8rem;
+  border: 1px solid rgba(212, 221, 232, 0.8);
+  border-radius: 14px;
+  padding: 0.7rem 0.8rem;
+  background: rgba(248, 251, 255, 0.7);
+}
+
+.settings-toggle-row__content {
+  display: grid;
+  gap: 0.22rem;
+}
+
+.settings-toggle-input {
+  position: absolute;
+  opacity: 0;
+  width: 1px;
+  height: 1px;
+  pointer-events: none;
+}
+
+.settings-toggle-switch {
+  position: relative;
+  flex: 0 0 auto;
+  width: 2.8rem;
+  height: 1.6rem;
+  border-radius: 999px;
+  border: 1px solid rgba(212, 221, 232, 0.95);
+  background: rgba(212, 221, 232, 0.7);
+  transition: background-color 160ms ease, border-color 160ms ease;
+}
+
+.settings-toggle-switch::after {
+  content: '';
+  position: absolute;
+  top: 0.12rem;
+  left: 0.12rem;
+  width: 1.2rem;
+  height: 1.2rem;
+  border-radius: 999px;
+  background: var(--white);
+  box-shadow: 0 3px 10px rgba(16, 35, 59, 0.22);
+  transition: transform 160ms ease;
+}
+
+.settings-toggle-input:checked + .settings-toggle-switch {
+  background: rgba(177, 17, 31, 0.24);
+  border-color: rgba(177, 17, 31, 0.55);
+}
+
+.settings-toggle-input:checked + .settings-toggle-switch::after {
+  transform: translateX(1.18rem);
+}
+
+.settings-toggle-input:focus-visible + .settings-toggle-switch {
+  outline: 2px solid rgba(91, 118, 150, 0.65);
+  outline-offset: 2px;
 }
 
 
@@ -1043,6 +1206,30 @@ small {
   background: rgba(31, 107, 71, 0.08);
 }
 
+.floating-toast .inline-alert {
+  background: #ffffff;
+  box-shadow: 0 14px 34px rgba(10, 20, 33, 0.22);
+}
+
+.floating-toast {
+  opacity: 1;
+  transform: translateY(0);
+  transition: opacity 420ms ease, transform 420ms ease;
+}
+
+.floating-toast--fade {
+  opacity: 0;
+  transform: translateY(8px);
+}
+
+.floating-toast .inline-alert--success {
+  background: #eaf7ef;
+}
+
+.floating-toast .inline-alert--warning {
+  background: #fff3e7;
+}
+
 .dialog-backdrop {
   position: fixed;
   inset: 0;
@@ -1168,6 +1355,91 @@ small {
 
 .product-card span:last-child {
   color: var(--muted);
+}
+
+.bank-picker-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr));
+  gap: 0.75rem;
+}
+
+.bank-picker-option {
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(245, 249, 253, 0.96));
+  color: var(--text);
+  padding: 0.7rem 0.8rem;
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  min-height: 3.35rem;
+  cursor: pointer;
+  transition: border-color 120ms ease, box-shadow 120ms ease, transform 120ms ease;
+  text-align: left;
+}
+
+.bank-picker-option:hover,
+.bank-picker-option:focus-visible {
+  border-color: rgba(49, 82, 126, 0.45);
+  box-shadow: 0 10px 20px rgba(16, 35, 59, 0.1);
+}
+
+.bank-picker-option--selected {
+  border-color: rgba(177, 17, 31, 0.42);
+  box-shadow: 0 10px 22px rgba(177, 17, 31, 0.14);
+  background: linear-gradient(180deg, rgba(255, 246, 247, 0.98), rgba(255, 255, 255, 0.98));
+}
+
+.bank-picker-option__check {
+  width: 1.25rem;
+  height: 1.25rem;
+  border-radius: 999px;
+  border: 1px solid rgba(49, 82, 126, 0.35);
+  display: grid;
+  place-items: center;
+  color: var(--red-700);
+  font-size: 0.82rem;
+  font-weight: 800;
+  flex: 0 0 auto;
+}
+
+.bank-picker-option__logo {
+  width: 3.35rem;
+  height: 1.9rem;
+  flex: 0 0 auto;
+  object-fit: contain;
+  object-position: left center;
+  border-radius: 6px;
+}
+
+.selected-bank-card {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+  border: 1px solid rgba(212, 221, 232, 0.9);
+  border-radius: 14px;
+  padding: 0.75rem 0.85rem;
+  background: linear-gradient(180deg, rgba(250, 252, 255, 0.98), rgba(244, 248, 252, 0.98));
+}
+
+.selected-bank-card--active {
+  border-color: rgba(177, 17, 31, 0.35);
+  box-shadow: 0 12px 24px rgba(177, 17, 31, 0.12);
+}
+
+.selected-bank-card__logo {
+  width: 3.1rem;
+  height: 1.85rem;
+  object-fit: contain;
+  object-position: left center;
+  flex: 0 0 auto;
+}
+
+.external-account-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.75rem;
+  align-items: end;
 }
 
 .account-open-summary {
@@ -1717,6 +1989,70 @@ small {
   gap: 0.7rem;
 }
 
+.billpay-calendar {
+  border: 1px solid rgba(212, 221, 232, 0.82);
+  border-radius: 16px;
+  padding: 0.9rem;
+  background: linear-gradient(180deg, rgba(251, 253, 255, 0.96), rgba(246, 250, 254, 0.92));
+  display: grid;
+  gap: 0.65rem;
+}
+
+.billpay-calendar__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.billpay-calendar__weekdays,
+.billpay-calendar__grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 0.35rem;
+}
+
+.billpay-calendar__weekdays span {
+  text-align: center;
+  font-size: 0.75rem;
+  color: var(--muted);
+  font-weight: 700;
+}
+
+.billpay-calendar__cell {
+  min-height: 2.25rem;
+  border: 1px solid rgba(212, 221, 232, 0.82);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.9);
+  color: var(--navy-900);
+  display: grid;
+  place-items: center;
+  gap: 0.05rem;
+  cursor: pointer;
+  padding: 0.2rem;
+}
+
+.billpay-calendar__cell small {
+  font-size: 0.68rem;
+  color: var(--muted);
+}
+
+.billpay-calendar__cell--blank {
+  border: 0;
+  background: transparent;
+  cursor: default;
+}
+
+.billpay-calendar__cell--has-payments {
+  border-color: rgba(177, 17, 31, 0.32);
+  background: rgba(255, 246, 247, 0.92);
+}
+
+.billpay-calendar__cell--selected {
+  border-color: rgba(177, 17, 31, 0.56);
+  box-shadow: 0 0 0 2px rgba(177, 17, 31, 0.14);
+}
+
 @media (max-width: 1080px) {
   .auth-layout,
   .app-shell,
@@ -2000,6 +2336,11 @@ small {
   .summary-row__secondary {
     justify-items: start;
     text-align: left;
+  }
+
+  .external-account-row {
+    grid-template-columns: 1fr;
+    align-items: stretch;
   }
 
   .atm-search-controls {

@@ -19,17 +19,17 @@ const accountTypeContent: Record<AccountType, { eyebrow: string; summary: string
   Checking: {
     eyebrow: 'Everyday banking',
     summary: 'Built for direct deposit, purchases, and routine money movement.',
-    detail: 'Checking accounts receive the standard routing number used in the current demo environment and appear immediately across transfers, bill pay, and deposits.',
+    detail: 'Checking accounts receive randomly generated routing and account numbers, then appear immediately across transfers, bill pay, and deposits.',
   },
   Savings: {
     eyebrow: 'Set money aside',
     summary: 'A simple savings product for short-term reserves and emergency funds.',
-    detail: 'Savings accounts also receive the demo routing number and can be used anywhere the dashboard offers account selection.',
+    detail: 'Savings accounts also receive unique routing and account numbers and can be used anywhere the dashboard offers account selection.',
   },
   Credit: {
     eyebrow: 'Borrowing line',
-    summary: 'Track revolving balance activity without showing a routing number.',
-    detail: 'Credit accounts appear in your account list right away and are available for activity views, but do not receive a routing number.',
+    summary: 'Track revolving balance activity with account-level details.',
+    detail: 'Credit accounts appear in your account list right away and are available for activity views, transfers, and payment routing flows.',
   },
 };
 

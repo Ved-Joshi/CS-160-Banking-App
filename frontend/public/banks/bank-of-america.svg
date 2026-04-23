@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64" role="img" aria-label="Bank of America">
+  <rect width="64" height="64" rx="14" fill="#FFFFFF"/>
+  <rect x="6" y="10" width="52" height="44" rx="10" fill="#F5F7FA" stroke="#D5DFEC"/>
+  <path d="M14 24h36" stroke="#C8102E" stroke-width="4"/>
+  <path d="M14 31h36" stroke="#0056A8" stroke-width="4"/>
+  <path d="M14 38h36" stroke="#C8102E" stroke-width="4"/>
+</svg>

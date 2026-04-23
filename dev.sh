@@ -64,6 +64,10 @@ if [[ -n "$RUNNER_SECRET" ]]; then
     while true; do
       curl -fsS -X POST "http://localhost:8000/internal/jobs/process-transfer-plans?limit=50" \
         -H "X-Runner-Secret: $RUNNER_SECRET" >/dev/null || true
+      curl -fsS -X POST "http://localhost:8000/internal/jobs/process-member-transfer-plans?limit=50" \
+        -H "X-Runner-Secret: $RUNNER_SECRET" >/dev/null || true
+      curl -fsS -X POST "http://localhost:8000/internal/jobs/process-external-transfers?limit=50" \
+        -H "X-Runner-Secret: $RUNNER_SECRET" >/dev/null || true
       curl -fsS -X POST "http://localhost:8000/internal/jobs/process-bill-payments?limit=50" \
         -H "X-Runner-Secret: $RUNNER_SECRET" >/dev/null || true
       sleep 60

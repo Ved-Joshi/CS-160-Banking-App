@@ -1,6 +1,6 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Controller, useForm } from 'react-hook-form';
 import { Link, useSearchParams } from 'react-router-dom';
 import { z } from 'zod';
@@ -11,6 +11,7 @@ import { queryKeys } from '../../lib/queryKeys';
 import type { ScheduledPayment, UpdateScheduledPaymentInput } from '../../types/banking';
 
 const MAX_PAYMENT_AMOUNT = 100000;
+const BILL_PAY_LIVE_REFRESH_MS = 10_000;
 
 const paymentSchema = z.object({
   payeeId: z.string().min(1),
@@ -30,6 +31,24 @@ const editPaymentSchema = z.object({
 const payeeSetupSchema = z.object({
   name: z.string().trim().min(1, 'Payee name is required.').max(80, 'Payee name is too long.'),
   category: z.enum(['Utilities', 'Internet', 'Phone', 'Insurance', 'Rent', 'Loan', 'Credit Card', 'Healthcare', 'Other']),
+  routingNumber: z.string().regex(/^\d{9}$/, 'Routing number must be 9 digits.'),
+  accountNumber: z.string().regex(/^\d{4,17}$/, 'Account number must be 4 to 17 digits.'),
+  confirmAccountNumber: z.string().regex(/^\d{4,17}$/, 'Confirm account number must be 4 to 17 digits.'),
+}).superRefine((value, ctx) => {
+  if (value.accountNumber !== value.confirmAccountNumber) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['confirmAccountNumber'],
+      message: 'Account number confirmation does not match.',
+    });
+  }
+  if (value.routingNumber === value.accountNumber) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['accountNumber'],
+      message: 'Account number cannot match routing number.',
+    });
+  }
 });
 
 const PAYEE_CATEGORY_OPTIONS = ['Utilities', 'Internet', 'Phone', 'Insurance', 'Rent', 'Loan', 'Credit Card', 'Healthcare', 'Other'] as const;
@@ -43,6 +62,10 @@ function formatAmountDigits(digits: string): string {
   const integerPart = cleaned.slice(0, -2).replace(/^0+(?=\d)/, '') || '0';
   const centsPart = cleaned.slice(-2);
   return `${integerPart}.${centsPart}`;
+}
+
+function digitsOnly(value: string, maxLength: number): string {
+  return value.replace(/\D/g, '').slice(0, maxLength);
 }
 
 function toAmountDigits(amount: number): string {
@@ -116,6 +139,101 @@ function formatRecurringNextRunLabel(deliverBy: string, timezone: string): strin
   return `${Math.abs(dayDiff)} days overdue`;
 }
 
+function monthLabel(date: Date): string {
+  return new Intl.DateTimeFormat('en-US', { month: 'long', year: 'numeric' }).format(date);
+}
+
+function startOfMonth(date: Date): Date {
+  return new Date(date.getFullYear(), date.getMonth(), 1);
+}
+
+function buildCalendarCells(monthDate: Date): Array<{ iso: string | null; dayNumber: number | null; inMonth: boolean }> {
+  const year = monthDate.getFullYear();
+  const month = monthDate.getMonth();
+  const firstDay = new Date(year, month, 1);
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const offset = firstDay.getDay();
+  const cells: Array<{ iso: string | null; dayNumber: number | null; inMonth: boolean }> = [];
+  for (let index = 0; index < 42; index += 1) {
+    const dayNumber = index - offset + 1;
+    if (dayNumber < 1 || dayNumber > daysInMonth) {
+      cells.push({ iso: null, dayNumber: null, inMonth: false });
+      continue;
+    }
+    const date = new Date(year, month, dayNumber);
+    cells.push({ iso: formatDateInputValue(date), dayNumber, inMonth: true });
+  }
+  return cells;
+}
+
+function advanceCadenceDate(value: string, cadence: ScheduledPayment['cadence']): string {
+  const parsed = parseDateInputValue(value);
+  if (!parsed) return value;
+  const baseDate = new Date(parsed.year, parsed.month - 1, parsed.day);
+  if (cadence === 'Daily') {
+    baseDate.setDate(baseDate.getDate() + 1);
+    return formatDateInputValue(baseDate);
+  }
+  if (cadence === 'Weekly') {
+    baseDate.setDate(baseDate.getDate() + 7);
+    return formatDateInputValue(baseDate);
+  }
+  if (cadence === 'Biweekly') {
+    baseDate.setDate(baseDate.getDate() + 14);
+    return formatDateInputValue(baseDate);
+  }
+  if (cadence === 'Monthly') {
+    const nextMonthYear = parsed.month === 12 ? parsed.year + 1 : parsed.year;
+    const nextMonth = parsed.month === 12 ? 1 : parsed.month + 1;
+    const lastDay = new Date(nextMonthYear, nextMonth, 0).getDate();
+    const clampedDay = Math.min(parsed.day, lastDay);
+    return formatDateInputValue(new Date(nextMonthYear, nextMonth - 1, clampedDay));
+  }
+  return value;
+}
+
+function enumeratePaymentOccurrencesForMonth(
+  payment: ScheduledPayment,
+  monthDate: Date,
+): string[] {
+  const monthStartIso = formatDateInputValue(new Date(monthDate.getFullYear(), monthDate.getMonth(), 1));
+  const monthEndIso = formatDateInputValue(new Date(monthDate.getFullYear(), monthDate.getMonth() + 1, 0));
+  const startIso = payment.deliverBy;
+  const endIso = payment.endDate;
+
+  if (!startIso || startIso > monthEndIso) return [];
+  if (endIso && endIso < monthStartIso) return [];
+
+  if (payment.cadence === 'Once') {
+    if (startIso < monthStartIso || startIso > monthEndIso) return [];
+    if (endIso && startIso > endIso) return [];
+    return [startIso];
+  }
+
+  let cursor = startIso;
+  let guard = 0;
+  while (cursor < monthStartIso && guard < 500) {
+    const next = advanceCadenceDate(cursor, payment.cadence);
+    if (next === cursor) break;
+    cursor = next;
+    guard += 1;
+  }
+
+  const occurrences: string[] = [];
+  while (cursor <= monthEndIso && guard < 900) {
+    if ((!endIso || cursor <= endIso) && cursor >= monthStartIso) {
+      occurrences.push(cursor);
+    }
+    const next = advanceCadenceDate(cursor, payment.cadence);
+    if (next === cursor) break;
+    cursor = next;
+    guard += 1;
+    if (endIso && cursor > endIso) break;
+  }
+
+  return occurrences;
+}
+
 function PaymentActionIcon({ icon }: { icon: 'retry' | 'edit' | 'delay' | 'delete' }) {
   if (icon === 'retry') {
     return (
@@ -151,8 +269,16 @@ export function BillPayPage() {
   const [searchParams] = useSearchParams();
   const preferredAccountId = searchParams.get('accountId') ?? '';
   const { data: profile } = useQuery({ queryKey: ['profile'], queryFn: profileService.get });
-  const { data: payees = [] } = useQuery({ queryKey: queryKeys.payees(), queryFn: payeesService.list });
-  const { data: payments = [] } = useQuery({ queryKey: queryKeys.payments(), queryFn: paymentsService.list });
+  const { data: payees = [] } = useQuery({
+    queryKey: queryKeys.payees(),
+    queryFn: payeesService.list,
+    refetchInterval: BILL_PAY_LIVE_REFRESH_MS,
+  });
+  const { data: payments = [] } = useQuery({
+    queryKey: queryKeys.payments(),
+    queryFn: paymentsService.list,
+    refetchInterval: BILL_PAY_LIVE_REFRESH_MS,
+  });
   const { data: accounts = [] } = useQuery({ queryKey: queryKeys.accounts(), queryFn: accountsService.list });
 
   const createPayeeMutation = useMutation({
@@ -253,6 +379,9 @@ export function BillPayPage() {
     defaultValues: {
       name: '',
       category: 'Utilities',
+      routingNumber: '',
+      accountNumber: '',
+      confirmAccountNumber: '',
     },
   });
 
@@ -263,7 +392,7 @@ export function BillPayPage() {
       accountId: '',
       amount: 0,
       cadence: 'Once',
-      deliverBy: new Date().toISOString().slice(0, 10),
+      deliverBy: formatDateInputValue(new Date()),
     },
   });
   const editPaymentForm = useForm<z.infer<typeof editPaymentSchema>>({
@@ -272,7 +401,7 @@ export function BillPayPage() {
       payeeId: '',
       amount: 0,
       cadence: 'Once',
-      deliverBy: new Date().toISOString().slice(0, 10),
+      deliverBy: formatDateInputValue(new Date()),
     },
   });
 
@@ -281,6 +410,11 @@ export function BillPayPage() {
   const canSchedule = hasAccounts && hasPayees;
   const userTimezone = profile?.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
   const todayDate = getTodayInTimezone(userTimezone);
+  const [calendarMonth, setCalendarMonth] = useState(() => {
+    const parsed = parseDateInputValue(formatDateInputValue(new Date()));
+    return parsed ? startOfMonth(new Date(parsed.year, parsed.month - 1, 1)) : startOfMonth(new Date());
+  });
+  const [selectedCalendarDate, setSelectedCalendarDate] = useState(todayDate);
   const amountDisplay = formatAmountDigits(amountDigits);
   const amountInputValue = `$${amountDisplay}`;
   const editAmountDisplay = formatAmountDigits(editAmountDigits);
@@ -290,6 +424,13 @@ export function BillPayPage() {
     if (paymentPendingRetry) return;
     setRetryDelayDate(addDaysToDateInput(todayDate, 1));
   }, [todayDate, paymentPendingRetry]);
+
+  useEffect(() => {
+    const deliverBy = paymentForm.getValues('deliverBy');
+    if (!deliverBy || deliverBy < todayDate) {
+      paymentForm.setValue('deliverBy', todayDate);
+    }
+  }, [paymentForm, todayDate]);
 
   useEffect(() => {
     if (!hasAccounts) return;
@@ -331,9 +472,33 @@ export function BillPayPage() {
 
   const canCancelPayment = (status: ScheduledPayment['status']) => status === 'SCHEDULED' || status === 'FAILED';
   const canRetryPayment = (status: ScheduledPayment['status']) => status === 'FAILED';
-  const canEditPayment = (payment: ScheduledPayment) => payment.cadence !== 'Once' && payment.status === 'SCHEDULED';
+  const canEditPayment = (payment: ScheduledPayment) => payment.status === 'SCHEDULED';
   const visiblePayments = payments.filter(
     (payment) => payment.status !== 'CANCELLED' && !(payment.cadence === 'Once' && payment.status === 'COMPLETED'),
+  );
+  const paymentOccurrencesById = useMemo(() => {
+    const byId = new Map<string, string[]>();
+    visiblePayments.forEach((payment) => {
+      byId.set(payment.id, enumeratePaymentOccurrencesForMonth(payment, calendarMonth));
+    });
+    return byId;
+  }, [calendarMonth, visiblePayments]);
+  const calendarPaymentCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    paymentOccurrencesById.forEach((occurrences) => {
+      occurrences.forEach((isoDay) => {
+        counts.set(isoDay, (counts.get(isoDay) ?? 0) + 1);
+      });
+    });
+    return counts;
+  }, [paymentOccurrencesById]);
+  const calendarCells = useMemo(() => buildCalendarCells(calendarMonth), [calendarMonth]);
+  const selectedDayPayments = useMemo(
+    () =>
+      visiblePayments
+        .filter((payment) => (paymentOccurrencesById.get(payment.id) ?? []).includes(selectedCalendarDate))
+        .sort((left, right) => left.payeeName.localeCompare(right.payeeName)),
+    [paymentOccurrencesById, selectedCalendarDate, visiblePayments],
   );
   const rows = visiblePayments.map((payment) => [
     payment.payeeName,
@@ -548,11 +713,96 @@ export function BillPayPage() {
           </form>
         </Card>
         <Card>
-          <h3>Payment controls</h3>
-          <p className="muted">Create payees inline, schedule one-time/recurring payments, and cancel pending payments from one place.</p>
-          <div className="stack-sm">
-            <span className="label-pill">Supports one-time and recurring schedules</span>
-            <span className="label-pill">Statuses: scheduled, processing, completed, failed, cancelled</span>
+          <div className="stack-lg">
+            <div className="stack-sm">
+              <p className="eyebrow">Payment calendar</p>
+              <h3>Upcoming schedule</h3>
+              <p className="muted">Pick a day to see which bill payments are set to run.</p>
+            </div>
+            <div className="billpay-calendar">
+              <div className="billpay-calendar__header">
+                <button
+                  className="button button--ghost pagination-button"
+                  onClick={() =>
+                    setCalendarMonth((current) => {
+                      const next = startOfMonth(new Date(current.getFullYear(), current.getMonth() - 1, 1));
+                      setSelectedCalendarDate(formatDateInputValue(next));
+                      return next;
+                    })}
+                  type="button"
+                >
+                  Prev
+                </button>
+                <strong>{monthLabel(calendarMonth)}</strong>
+                <button
+                  className="button button--ghost pagination-button"
+                  onClick={() =>
+                    setCalendarMonth((current) => {
+                      const next = startOfMonth(new Date(current.getFullYear(), current.getMonth() + 1, 1));
+                      setSelectedCalendarDate(formatDateInputValue(next));
+                      return next;
+                    })}
+                  type="button"
+                >
+                  Next
+                </button>
+              </div>
+              <div className="billpay-calendar__weekdays">
+                {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((weekday) => (
+                  <span key={weekday}>{weekday}</span>
+                ))}
+              </div>
+              <div className="billpay-calendar__grid">
+                {calendarCells.map((cell, index) => {
+                  if (!cell.inMonth || !cell.iso || !cell.dayNumber) {
+                    return <div className="billpay-calendar__cell billpay-calendar__cell--blank" key={`blank-${index}`} />;
+                  }
+                  const count = calendarPaymentCounts.get(cell.iso) ?? 0;
+                  const isSelected = cell.iso === selectedCalendarDate;
+                  return (
+                    <button
+                      className={`billpay-calendar__cell${isSelected ? ' billpay-calendar__cell--selected' : ''}${count ? ' billpay-calendar__cell--has-payments' : ''}`}
+                      key={cell.iso}
+                      onClick={() => setSelectedCalendarDate(cell.iso!)}
+                      type="button"
+                    >
+                      <span>{cell.dayNumber}</span>
+                      {count ? <small>{count}</small> : null}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+            <div className="stack-sm">
+              <div className="summary-row">
+                <div className="summary-row__primary">
+                  <strong>{formatDate(selectedCalendarDate)}</strong>
+                </div>
+                <div className="summary-row__secondary">
+                  <span>{selectedDayPayments.length} scheduled</span>
+                </div>
+              </div>
+              {selectedDayPayments.length ? (
+                <div className="stack-sm">
+                  {selectedDayPayments.slice(0, 4).map((payment) => (
+                    <div className="summary-row" key={payment.id}>
+                      <div className="summary-row__primary">
+                        <strong>{payment.payeeName}</strong>
+                        <span className="muted">{payment.cadence}</span>
+                      </div>
+                      <div className="summary-row__secondary">
+                        <span>{formatCurrency(payment.amount)}</span>
+                      </div>
+                    </div>
+                  ))}
+                  {selectedDayPayments.length > 4 ? (
+                    <p className="muted">+ {selectedDayPayments.length - 4} more scheduled payments</p>
+                  ) : null}
+                </div>
+              ) : (
+                <p className="muted">No payments scheduled for this day.</p>
+              )}
+            </div>
           </div>
         </Card>
       </div>
@@ -870,6 +1120,9 @@ export function BillPayPage() {
                 payeeForm.reset({
                   name: '',
                   category: values.category,
+                  routingNumber: '',
+                  accountNumber: '',
+                  confirmAccountNumber: '',
                 });
                 paymentForm.setValue('payeeId', created.id);
                 setIsPayeeDialogOpen(false);
@@ -905,6 +1158,36 @@ export function BillPayPage() {
                 </option>
               ))}
             </select>
+          </Field>
+          <Field label="Routing number" error={payeeForm.formState.errors.routingNumber?.message}>
+            <input
+              {...payeeForm.register('routingNumber', {
+                setValueAs: (value) => digitsOnly(String(value ?? ''), 9),
+              })}
+              inputMode="numeric"
+              maxLength={9}
+              placeholder="123456789"
+            />
+          </Field>
+          <Field label="Account number" error={payeeForm.formState.errors.accountNumber?.message}>
+            <input
+              {...payeeForm.register('accountNumber', {
+                setValueAs: (value) => digitsOnly(String(value ?? ''), 17),
+              })}
+              inputMode="numeric"
+              maxLength={17}
+              placeholder="Account number"
+            />
+          </Field>
+          <Field label="Confirm account number" error={payeeForm.formState.errors.confirmAccountNumber?.message}>
+            <input
+              {...payeeForm.register('confirmAccountNumber', {
+                setValueAs: (value) => digitsOnly(String(value ?? ''), 17),
+              })}
+              inputMode="numeric"
+              maxLength={17}
+              placeholder="Re-enter account number"
+            />
           </Field>
         </form>
       </Dialog>
