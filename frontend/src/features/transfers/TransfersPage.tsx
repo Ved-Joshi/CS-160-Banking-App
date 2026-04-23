@@ -28,6 +28,7 @@ type ReviewState =
   | { kind: 'EXTERNAL'; payload: { fromAccountId: string; externalAccountId: string; amount: number; memo?: string; scheduleMode: TransferScheduleMode; transferDate?: string; cadence?: TransferCadence; startDate?: string; runTime?: string; endDate?: string; timezone?: string }; externalAccount?: ExternalAccount };
 
 const CADENCE_OPTIONS: TransferCadence[] = ['Once', 'Daily', 'Weekly', 'Biweekly', 'Monthly'];
+const TRANSFER_LIVE_REFRESH_MS = 10_000;
 
 function formatAmountDigits(digits: string): string {
   const cleaned = digits.replace(/\D/g, '').slice(0, 12);
@@ -47,6 +48,14 @@ function getBrowserTimezone(): string {
   } catch {
     return 'UTC';
   }
+}
+
+function getLocalToday(): string {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, '0');
+  const day = String(now.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
 }
 
 function digitsOnly(value: string, maxLength: number): string {
@@ -167,7 +176,7 @@ export function TransfersPage() {
   const queryClient = useQueryClient();
   const [searchParams] = useSearchParams();
   const preferredFromAccountId = searchParams.get('fromAccountId') ?? '';
-  const today = new Date().toISOString().slice(0, 10);
+  const today = getLocalToday();
   const browserTimezone = getBrowserTimezone();
   const [mode, setMode] = useState<TransferMode>('SELF');
   const [review, setReview] = useState<ReviewState | null>(null);
@@ -221,10 +230,22 @@ export function TransfersPage() {
 
   const { data: accounts = [] } = useQuery({ queryKey: queryKeys.accounts(), queryFn: accountsService.list });
   const { data: profile } = useQuery({ queryKey: ['profile'], queryFn: profileService.get });
-  const { data: memberPlans = [] } = useQuery({ queryKey: queryKeys.memberTransferPlans(), queryFn: memberTransfersService.listPlans });
+  const { data: memberPlans = [] } = useQuery({
+    queryKey: queryKeys.memberTransferPlans(),
+    queryFn: memberTransfersService.listPlans,
+    refetchInterval: TRANSFER_LIVE_REFRESH_MS,
+  });
   const { data: externalAccounts = [] } = useQuery({ queryKey: queryKeys.externalAccounts(), queryFn: externalAccountsService.list });
-  const { data: externalPlans = [] } = useQuery({ queryKey: queryKeys.externalTransferPlans(), queryFn: externalTransfersService.listPlans });
-  const { data: externalTransfers = [] } = useQuery({ queryKey: queryKeys.externalTransfers(), queryFn: externalTransfersService.list });
+  const { data: externalPlans = [] } = useQuery({
+    queryKey: queryKeys.externalTransferPlans(),
+    queryFn: externalTransfersService.listPlans,
+    refetchInterval: TRANSFER_LIVE_REFRESH_MS,
+  });
+  const { data: externalTransfers = [] } = useQuery({
+    queryKey: queryKeys.externalTransfers(),
+    queryFn: externalTransfersService.list,
+    refetchInterval: TRANSFER_LIVE_REFRESH_MS,
+  });
 
   const checkingAccounts = useMemo(
     () => accounts.filter((account) => account.type === 'Checking' && account.status === 'Open'),
@@ -619,14 +640,21 @@ export function TransfersPage() {
                 <Field label="Memo">
                   <input aria-label="Member memo" onChange={(event) => setMemberForm((current) => ({ ...current, memo: event.target.value }))} value={memberForm.memo} />
                 </Field>
-                {memberForm.scheduleMode === 'NOW' ? (
-                  <Field label="Transfer date">
-                    <input aria-label="Member transfer date" onChange={(event) => setMemberForm((current) => ({ ...current, transferDate: event.target.value }))} type="date" value={memberForm.transferDate} />
-                  </Field>
-                ) : (
+                {memberForm.scheduleMode === 'SCHEDULED' ? (
                   <>
                     <Field label="Cadence">
-                      <select aria-label="Member cadence" onChange={(event) => setMemberForm((current) => ({ ...current, cadence: event.target.value as TransferCadence }))} value={memberForm.cadence}>
+                      <select
+                        aria-label="Member cadence"
+                        onChange={(event) => setMemberForm((current) => {
+                          const cadence = event.target.value as TransferCadence;
+                          return {
+                            ...current,
+                            cadence,
+                            endDate: cadence === 'Once' ? '' : current.endDate,
+                          };
+                        })}
+                        value={memberForm.cadence}
+                      >
                         {CADENCE_OPTIONS.map((cadence) => <option key={cadence} value={cadence}>{cadence}</option>)}
                       </select>
                     </Field>
@@ -636,11 +664,13 @@ export function TransfersPage() {
                     <Field label="Run time">
                       <input aria-label="Member run time" onChange={(event) => setMemberForm((current) => ({ ...current, runTime: event.target.value }))} type="time" value={memberForm.runTime} />
                     </Field>
-                    <Field label="End date (optional)">
-                      <input aria-label="Member end date" onChange={(event) => setMemberForm((current) => ({ ...current, endDate: event.target.value }))} type="date" value={memberForm.endDate} />
-                    </Field>
+                    {memberForm.cadence !== 'Once' ? (
+                      <Field label="End date (optional)">
+                        <input aria-label="Member end date" onChange={(event) => setMemberForm((current) => ({ ...current, endDate: event.target.value }))} type="date" value={memberForm.endDate} />
+                      </Field>
+                    ) : null}
                   </>
-                )}
+                ) : null}
                 <Button onClick={handleReviewOpen} type="button">
                   {memberForm.scheduleMode === 'SCHEDULED' ? 'Review scheduled member transfer' : 'Review member transfer'}
                 </Button>
@@ -722,14 +752,21 @@ export function TransfersPage() {
                 <Field label="Memo">
                   <input aria-label="External memo" onChange={(event) => setExternalForm((current) => ({ ...current, memo: event.target.value }))} value={externalForm.memo} />
                 </Field>
-                {externalForm.scheduleMode === 'NOW' ? (
-                  <Field label="Transfer date">
-                    <input aria-label="External transfer date" onChange={(event) => setExternalForm((current) => ({ ...current, transferDate: event.target.value }))} type="date" value={externalForm.transferDate} />
-                  </Field>
-                ) : (
+                {externalForm.scheduleMode === 'SCHEDULED' ? (
                   <>
                     <Field label="Cadence">
-                      <select aria-label="External cadence" onChange={(event) => setExternalForm((current) => ({ ...current, cadence: event.target.value as TransferCadence }))} value={externalForm.cadence}>
+                      <select
+                        aria-label="External cadence"
+                        onChange={(event) => setExternalForm((current) => {
+                          const cadence = event.target.value as TransferCadence;
+                          return {
+                            ...current,
+                            cadence,
+                            endDate: cadence === 'Once' ? '' : current.endDate,
+                          };
+                        })}
+                        value={externalForm.cadence}
+                      >
                         {CADENCE_OPTIONS.map((cadence) => <option key={cadence} value={cadence}>{cadence}</option>)}
                       </select>
                     </Field>
@@ -739,11 +776,13 @@ export function TransfersPage() {
                     <Field label="Run time">
                       <input aria-label="External run time" onChange={(event) => setExternalForm((current) => ({ ...current, runTime: event.target.value }))} type="time" value={externalForm.runTime} />
                     </Field>
-                    <Field label="End date (optional)">
-                      <input aria-label="External end date" onChange={(event) => setExternalForm((current) => ({ ...current, endDate: event.target.value }))} type="date" value={externalForm.endDate} />
-                    </Field>
+                    {externalForm.cadence !== 'Once' ? (
+                      <Field label="End date (optional)">
+                        <input aria-label="External end date" onChange={(event) => setExternalForm((current) => ({ ...current, endDate: event.target.value }))} type="date" value={externalForm.endDate} />
+                      </Field>
+                    ) : null}
                   </>
-                )}
+                ) : null}
                 <Button onClick={handleReviewOpen} type="button">
                   {externalForm.scheduleMode === 'SCHEDULED' ? 'Review scheduled external transfer' : 'Review external transfer'}
                 </Button>

@@ -124,13 +124,16 @@ def _parse_iso_date(value: str | None, *, field_name: str) -> date:
 def _parse_local_time(value: str | None, *, field_name: str) -> time:
     if not value:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"{field_name} is required.")
-    try:
-        return datetime.strptime(value, "%H:%M").time()
-    except ValueError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"{field_name} must be in HH:MM format.",
-        ) from exc
+    candidate = value.strip()
+    for fmt in ("%H:%M", "%H:%M:%S"):
+        try:
+            return datetime.strptime(candidate, fmt).time()
+        except ValueError:
+            continue
+    raise HTTPException(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        detail=f"{field_name} must be in HH:MM format.",
+    )
 
 
 def _advance_cadence(base_date: date, cadence: str) -> date:
@@ -151,6 +154,15 @@ def _advance_cadence(base_date: date, cadence: str) -> date:
         last_of_target = first_of_following - timedelta(days=1)
         return date(year, month, min(base_date.day, last_of_target.day))
     raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unsupported cadence.")
+
+
+def _roll_forward_to_today_or_later(base_date: date, cadence: str, today: date) -> date:
+    cursor = base_date
+    safety_counter = 0
+    while cursor < today and safety_counter < 400:
+        cursor = _advance_cadence(cursor, cadence)
+        safety_counter += 1
+    return cursor
 
 
 def _combine_local_to_utc(local_date: date, local_time: time, timezone_name: str) -> datetime:
@@ -496,6 +508,7 @@ async def process_due_member_transfer_plans(*, batch_size: int = 50) -> dict[str
     processed = 0
     succeeded = 0
     failed = 0
+    timezone_cache: dict[str, str] = {}
     for row in due_rows:
         claimed = await supabase_client.update_rows(
             "member_transfer_plans",
@@ -508,10 +521,14 @@ async def process_due_member_transfer_plans(*, batch_size: int = 50) -> dict[str
         plan = claimed[0]
         processed += 1
         cadence = plan["cadence"]
-        timezone_name = plan["timezone"]
+        timezone_name = timezone_cache.get(plan["user_id"])
+        if timezone_name is None:
+            timezone_name = (plan.get("timezone") or "UTC").strip() or "UTC"
+            timezone_cache[plan["user_id"]] = timezone_name
         run_time = _parse_local_time(plan.get("run_time"), field_name="runTime")
         next_run_at = datetime.fromisoformat(plan["next_run_at"].replace("Z", "+00:00"))
         local_run_date = next_run_at.astimezone(ZoneInfo(timezone_name)).date()
+        local_today = now_utc.astimezone(ZoneInfo(timezone_name)).date()
         end_date = _parse_iso_date(plan["end_date"], field_name="endDate") if plan.get("end_date") else None
         last_failure_reason = None
 
@@ -550,19 +567,52 @@ async def process_due_member_transfer_plans(*, batch_size: int = 50) -> dict[str
             )
 
         if cadence == "once":
+            if last_failure_reason:
+                retry_date = local_run_date if local_run_date >= local_today else local_today
+                await supabase_client.update_rows(
+                    "member_transfer_plans",
+                    {
+                        "status": "scheduled",
+                        "last_run_at": now_utc.isoformat(),
+                        "next_run_at": _combine_local_to_utc(retry_date, run_time, timezone_name).isoformat(),
+                        "last_failure_reason": last_failure_reason,
+                    },
+                    filters={"id": f"eq.{plan['id']}"},
+                )
+                continue
             await supabase_client.update_rows(
                 "member_transfer_plans",
                 {
-                    "status": "completed" if not last_failure_reason else "scheduled",
+                    "status": "completed",
                     "last_run_at": now_utc.isoformat(),
-                    "next_run_at": None if not last_failure_reason else plan["next_run_at"],
+                    "next_run_at": None,
+                    "last_failure_reason": None,
+                },
+                filters={"id": f"eq.{plan['id']}"},
+            )
+            continue
+
+        if last_failure_reason:
+            if local_run_date == local_today:
+                retry_date = local_run_date
+            elif local_run_date < local_today:
+                retry_date = _roll_forward_to_today_or_later(local_run_date, cadence, local_today)
+            else:
+                retry_date = local_run_date
+            await supabase_client.update_rows(
+                "member_transfer_plans",
+                {
+                    "status": "scheduled",
+                    "last_run_at": now_utc.isoformat(),
+                    "next_run_at": _combine_local_to_utc(retry_date, run_time, timezone_name).isoformat(),
                     "last_failure_reason": last_failure_reason,
                 },
                 filters={"id": f"eq.{plan['id']}"},
             )
             continue
 
-        following_date = _advance_cadence(local_run_date, cadence)
+        success_base_date = local_run_date if local_run_date >= local_today else local_today
+        following_date = _advance_cadence(success_base_date, cadence)
         if end_date and following_date > end_date:
             await supabase_client.update_rows(
                 "member_transfer_plans",
@@ -570,7 +620,7 @@ async def process_due_member_transfer_plans(*, batch_size: int = 50) -> dict[str
                     "status": "completed",
                     "last_run_at": now_utc.isoformat(),
                     "next_run_at": None,
-                    "last_failure_reason": last_failure_reason,
+                    "last_failure_reason": None,
                 },
                 filters={"id": f"eq.{plan['id']}"},
             )
@@ -583,7 +633,7 @@ async def process_due_member_transfer_plans(*, batch_size: int = 50) -> dict[str
                 "status": "scheduled",
                 "last_run_at": now_utc.isoformat(),
                 "next_run_at": following_run_at.isoformat(),
-                "last_failure_reason": last_failure_reason,
+                "last_failure_reason": None,
             },
             filters={"id": f"eq.{plan['id']}"},
         )
@@ -813,6 +863,7 @@ async def process_due_external_transfers(*, batch_size: int = 50) -> dict[str, i
     scheduled_failed = 0
     settled = 0
     failed = 0
+    timezone_cache: dict[str, str] = {}
 
     for row in due_plan_rows:
         claimed = await supabase_client.update_rows(
@@ -824,10 +875,14 @@ async def process_due_external_transfers(*, batch_size: int = 50) -> dict[str, i
             continue
         plan = claimed[0]
         scheduled_processed += 1
-        timezone_name = plan["timezone"]
+        timezone_name = timezone_cache.get(plan["user_id"])
+        if timezone_name is None:
+            timezone_name = (plan.get("timezone") or "UTC").strip() or "UTC"
+            timezone_cache[plan["user_id"]] = timezone_name
         run_time = _parse_local_time(plan.get("run_time"), field_name="runTime")
         next_run_at = datetime.fromisoformat(plan["next_run_at"].replace("Z", "+00:00"))
         local_run_date = next_run_at.astimezone(ZoneInfo(timezone_name)).date()
+        local_today = now_utc.astimezone(ZoneInfo(timezone_name)).date()
         end_date = _parse_iso_date(plan["end_date"], field_name="endDate") if plan.get("end_date") else None
         cadence = plan["cadence"]
         last_failure_reason = None
@@ -852,19 +907,52 @@ async def process_due_external_transfers(*, batch_size: int = 50) -> dict[str, i
             last_failure_reason = str(exc.detail)
 
         if cadence == "once":
+            if last_failure_reason:
+                retry_date = local_run_date if local_run_date >= local_today else local_today
+                await supabase_client.update_rows(
+                    "external_transfer_plans",
+                    {
+                        "status": "scheduled",
+                        "last_run_at": now_utc.isoformat(),
+                        "next_run_at": _combine_local_to_utc(retry_date, run_time, timezone_name).isoformat(),
+                        "last_failure_reason": last_failure_reason,
+                    },
+                    filters={"id": f"eq.{plan['id']}"},
+                )
+                continue
             await supabase_client.update_rows(
                 "external_transfer_plans",
                 {
-                    "status": "completed" if not last_failure_reason else "scheduled",
+                    "status": "completed",
                     "last_run_at": now_utc.isoformat(),
-                    "next_run_at": None if not last_failure_reason else plan["next_run_at"],
+                    "next_run_at": None,
+                    "last_failure_reason": None,
+                },
+                filters={"id": f"eq.{plan['id']}"},
+            )
+            continue
+
+        if last_failure_reason:
+            if local_run_date == local_today:
+                retry_date = local_run_date
+            elif local_run_date < local_today:
+                retry_date = _roll_forward_to_today_or_later(local_run_date, cadence, local_today)
+            else:
+                retry_date = local_run_date
+            await supabase_client.update_rows(
+                "external_transfer_plans",
+                {
+                    "status": "scheduled",
+                    "last_run_at": now_utc.isoformat(),
+                    "next_run_at": _combine_local_to_utc(retry_date, run_time, timezone_name).isoformat(),
                     "last_failure_reason": last_failure_reason,
                 },
                 filters={"id": f"eq.{plan['id']}"},
             )
             continue
 
-        following_date = _advance_cadence(local_run_date, cadence)
+        success_base_date = local_run_date if local_run_date >= local_today else local_today
+        following_date = _advance_cadence(success_base_date, cadence)
         if end_date and following_date > end_date:
             await supabase_client.update_rows(
                 "external_transfer_plans",
@@ -872,7 +960,7 @@ async def process_due_external_transfers(*, batch_size: int = 50) -> dict[str, i
                     "status": "completed",
                     "last_run_at": now_utc.isoformat(),
                     "next_run_at": None,
-                    "last_failure_reason": last_failure_reason,
+                    "last_failure_reason": None,
                 },
                 filters={"id": f"eq.{plan['id']}"},
             )
@@ -885,7 +973,7 @@ async def process_due_external_transfers(*, batch_size: int = 50) -> dict[str, i
                 "status": "scheduled",
                 "last_run_at": now_utc.isoformat(),
                 "next_run_at": following_run_at.isoformat(),
-                "last_failure_reason": last_failure_reason,
+                "last_failure_reason": None,
             },
             filters={"id": f"eq.{plan['id']}"},
         )
