@@ -1,12 +1,49 @@
 import { useQuery } from '@tanstack/react-query';
 import { useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { Card, DataTable, EmptyState, Field, PageHeader, StatusChip } from '../../components/ui';
+import { Card, DataTable, EmptyState, Field, PageHeader } from '../../components/ui';
 import { accountsService, transactionsService } from '../../lib/bankingApi';
-import { formatCurrency, formatDate, formatDateTime, formatTime, titleCase } from '../../lib/format';
+import { formatCurrency, formatDate, formatDateTime, formatTime } from '../../lib/format';
 import { queryKeys } from '../../lib/queryKeys';
+import type { Transaction } from '../../types/banking';
 
 const TRANSACTIONS_PER_PAGE = 20;
+
+function channelForTransaction(transaction: Transaction): string {
+  const description = transaction.description.toLowerCase();
+  if (transaction.type === 'Bill Pay') return 'Bill Pay';
+  if (transaction.type === 'ATM') return 'ATM';
+  if (transaction.type === 'Deposit') return 'Deposit';
+  if (transaction.type === 'Interest') return 'Interest';
+  if (description.includes('external transfer')) return 'External transfer';
+  if (description.includes('member transfer')) return 'Member transfer';
+  if (description.includes('internal transfer')) return 'Internal transfer';
+  return transaction.type;
+}
+
+function counterpartyForTransaction(transaction: Transaction, accountNameById: Map<string, string>): string {
+  const description = transaction.description.trim();
+  const channel = channelForTransaction(transaction);
+  if (channel === 'Internal transfer') {
+    return 'Your other account';
+  }
+  if (channel === 'Member transfer') {
+    return 'SJ State Bank member';
+  }
+  if (channel === 'External transfer') {
+    return 'External bank account';
+  }
+  if (channel === 'Bill Pay') {
+    return description || 'Payee';
+  }
+  if (channel === 'ATM') {
+    return 'ATM network';
+  }
+  if (channel === 'Deposit') {
+    return description || 'Deposit source';
+  }
+  return accountNameById.get(transaction.accountId) ?? '—';
+}
 
 function csvEscape(value: string): string {
   const needsQuoting = /[",\n\r]/.test(value);
@@ -32,20 +69,36 @@ export function TransactionsPage() {
   const [accountIdOverride, setAccountIdOverride] = useState('');
   const accountId = accountIdOverride || derivedAccountId;
   const [type, setType] = useState('all');
-  const [status, setStatus] = useState('all');
+  const [searchQuery, setSearchQuery] = useState('');
   const [page, setPage] = useState(1);
-  const hasActiveFilters = accountId !== 'all' || type !== 'all' || status !== 'all';
+  const hasActiveFilters = accountId !== 'all' || type !== 'all' || Boolean(searchQuery.trim());
+
+  const accountNameById = useMemo(() => new Map(accounts.map((account) => [account.id, account.nickname])), [accounts]);
+
+  const transactionsWithMetadata = useMemo(
+    () =>
+      transactions.map((transaction) => ({
+        ...transaction,
+        channel: channelForTransaction(transaction),
+        counterparty: counterpartyForTransaction(transaction, accountNameById),
+      })),
+    [accountNameById, transactions],
+  );
 
   const filtered = useMemo(
     () =>
-      transactions.filter((transaction) => {
+      transactionsWithMetadata.filter((transaction) => {
+        const normalizedSearch = searchQuery.trim().toLowerCase();
+        const matchesSearch = !normalizedSearch
+          || transaction.description.toLowerCase().includes(normalizedSearch)
+          || transaction.counterparty.toLowerCase().includes(normalizedSearch);
         return (
           (accountId === 'all' || transaction.accountId === accountId) &&
           (type === 'all' || transaction.type === type) &&
-          (status === 'all' || transaction.status === status)
+          matchesSearch
         );
       }),
-    [accountId, status, transactions, type],
+    [accountId, searchQuery, transactionsWithMetadata, type],
   );
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / TRANSACTIONS_PER_PAGE));
@@ -61,20 +114,19 @@ export function TransactionsPage() {
     formatDate(transaction.postedAt),
     formatTime(transaction.postedAt),
     transaction.description,
-    transaction.type,
-    <StatusChip key={`${transaction.id}-status`} status={transaction.status} />,
+    transaction.counterparty,
+    transaction.channel,
     `${transaction.direction === 'credit' ? '+' : '-'}${formatCurrency(transaction.amount)}`,
   ]);
 
   const handleExportCsv = () => {
     if (!filtered.length || typeof window === 'undefined' || typeof document === 'undefined') return;
 
-    const accountNameById = new Map(accounts.map((account) => [account.id, account.nickname]));
     const headers = [
       'posted_at',
       'description',
+      'counterparty',
       'type',
-      'status',
       'direction',
       'amount_usd',
       'account_name',
@@ -83,8 +135,8 @@ export function TransactionsPage() {
       return [
         formatDateTime(transaction.postedAt),
         transaction.description,
-        transaction.type,
-        titleCase(transaction.status),
+        transaction.counterparty,
+        transaction.channel,
         transaction.direction,
         transaction.amount.toFixed(2),
         accountNameById.get(transaction.accountId) ?? '',
@@ -159,27 +211,22 @@ export function TransactionsPage() {
               <option value="ATM">ATM</option>
             </select>
           </Field>
-          <Field label="Status">
-            <select
-              disabled={!accounts.length}
-              value={status}
+          <Field label="Search memo or description">
+            <input
+              placeholder="Search transactions..."
+              value={searchQuery}
               onChange={(event) => {
-                setStatus(event.target.value);
+                setSearchQuery(event.target.value);
                 setPage(1);
               }}
-            >
-              <option value="all">All statuses</option>
-              <option value="COMPLETED">Completed</option>
-              <option value="PENDING">Pending</option>
-              <option value="FAILED">Failed</option>
-            </select>
+            />
           </Field>
         </div>
       </Card>
       <Card>
         {filtered.length ? (
           <div className="stack-md">
-            <DataTable headers={['Date', 'Time', 'Description', 'Type', 'Status', 'Amount']} rows={rows} />
+            <DataTable headers={['Date', 'Time', 'Description', 'Counterparty', 'Type', 'Amount']} rows={rows} />
             <div className="transactions-pagination">
               <p className="muted">
                 Showing {(currentPage - 1) * TRANSACTIONS_PER_PAGE + 1}-{Math.min(currentPage * TRANSACTIONS_PER_PAGE, filtered.length)} of {filtered.length}
