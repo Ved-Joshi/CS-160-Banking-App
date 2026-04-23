@@ -28,7 +28,7 @@ type ReviewState =
   | { kind: 'EXTERNAL'; payload: { fromAccountId: string; externalAccountId: string; amount: number; memo?: string; scheduleMode: TransferScheduleMode; transferDate?: string; cadence?: TransferCadence; startDate?: string; runTime?: string; endDate?: string; timezone?: string }; externalAccount?: ExternalAccount };
 type ScheduledTransferRow = {
   id: string;
-  kind: 'MEMBER' | 'EXTERNAL';
+  kind: 'MEMBER' | 'EXTERNAL' | 'EXTERNAL_PENDING';
   title: string;
   amount: number;
   memo?: string;
@@ -42,6 +42,13 @@ type ScheduledTransferRow = {
   status: string;
   summary: string;
   cancelLabel: string;
+};
+type TransferTimelineEvent = {
+  id: string;
+  title: string;
+  detail: string;
+  status: string;
+  happenedAt: string;
 };
 
 const CADENCE_OPTIONS: TransferCadence[] = ['Once', 'Daily', 'Weekly', 'Biweekly', 'Monthly'];
@@ -286,6 +293,7 @@ export function TransfersPage() {
   const externalTimezone = externalForm.timezone || profile?.timezone || browserTimezone;
   const memberActivePlans = memberPlans.filter((plan) => plan.status === 'SCHEDULED' || plan.status === 'PROCESSING');
   const externalActivePlans = externalPlans.filter((plan) => plan.status === 'SCHEDULED' || plan.status === 'PROCESSING');
+  const pendingExternalRuns = externalTransfers.filter((transfer) => transfer.status === 'PROCESSING');
   const scheduledTransfers = useMemo<ScheduledTransferRow[]>(
     () => [
       ...memberActivePlans.map((plan) => ({
@@ -322,12 +330,59 @@ export function TransfersPage() {
         status: plan.status,
         cancelLabel: `Cancel ${plan.externalAccountLabel} transfer?`,
       })),
+      ...pendingExternalRuns.map((transfer) => ({
+        id: transfer.id,
+        kind: 'EXTERNAL_PENDING' as const,
+        title: transfer.externalAccountLabel,
+        amount: transfer.amount,
+        memo: transfer.memo,
+        cadence: 'Once' as const,
+        startDate: transfer.transferDate,
+        runTime: '00:00',
+        timezone: browserTimezone,
+        endDate: undefined,
+        nextRunAt: transfer.settleAfter || transfer.submittedAt,
+        lastFailureReason: transfer.failureReason,
+        summary: `Pending settlement • Submitted ${formatDate(transfer.submittedAt)}`,
+        status: transfer.status,
+        cancelLabel: '',
+      })),
     ],
-    [memberActivePlans, externalActivePlans],
+    [browserTimezone, externalActivePlans, memberActivePlans, pendingExternalRuns],
   );
   const canRetryPlan = (plan: ScheduledTransferRow) => plan.status === 'FAILED';
   const canCancelPlan = (plan: ScheduledTransferRow) => plan.status === 'SCHEDULED' || plan.status === 'FAILED';
   const canEditPlan = (plan: ScheduledTransferRow) => plan.status === 'SCHEDULED';
+  const timelineEvents = useMemo<TransferTimelineEvent[]>(
+    () => [
+      ...externalTransfers
+        .filter((transfer) => transfer.status !== 'PROCESSING')
+        .map((transfer) => ({
+        id: `external-run-${transfer.id}`,
+        title: transfer.externalAccountLabel,
+        detail: `${formatCurrency(transfer.amount)} • External transfer run`,
+        status: transfer.status,
+        happenedAt: transfer.completedAt || transfer.processedAt || transfer.submittedAt,
+      })),
+      ...memberPlans.map((plan) => ({
+        id: `member-plan-${plan.id}`,
+        title: plan.recipientDisplayName,
+        detail: `${formatCurrency(plan.amount)} • ${plan.cadence}`,
+        status: plan.status,
+        happenedAt: plan.nextRunAt || plan.updatedAt || plan.createdAt,
+      })),
+      ...externalPlans.map((plan) => ({
+        id: `external-plan-${plan.id}`,
+        title: plan.externalAccountLabel,
+        detail: `${formatCurrency(plan.amount)} • ${plan.cadence}`,
+        status: plan.status,
+        happenedAt: plan.nextRunAt || plan.updatedAt || plan.createdAt,
+      })),
+    ]
+      .sort((left, right) => new Date(right.happenedAt).getTime() - new Date(left.happenedAt).getTime())
+      .slice(0, 5),
+    [externalPlans, externalTransfers, memberPlans],
+  );
   const scheduledRows = scheduledTransfers.map((plan) => [
     plan.title,
     (
@@ -366,7 +421,10 @@ export function TransfersPage() {
         <button
           aria-label={`Delete ${plan.title} transfer`}
           className="payment-action-icon payment-action-icon--delete"
-          onClick={() => setPlanPendingCancel({ kind: plan.kind, id: plan.id, label: plan.cancelLabel })}
+          onClick={() => {
+            if (plan.kind === 'EXTERNAL_PENDING') return;
+            setPlanPendingCancel({ kind: plan.kind, id: plan.id, label: plan.cancelLabel });
+          }}
           title="Delete transfer"
           type="button"
         >
@@ -988,20 +1046,36 @@ export function TransfersPage() {
         <Card>
           <div className="stack-lg">
             <div className="stack-sm">
-              <p className="eyebrow">External transfers</p>
-              <h3>In-flight external transfers</h3>
+              <p className="eyebrow">Transfer timeline</p>
+              <h3>Recent activity</h3>
+              <p className="muted">Latest transfer runs and schedule updates across member and external transfers.</p>
             </div>
-            {externalTransfers.length ? externalTransfers.map((transfer) => (
-              <div className="summary-row" key={transfer.id}>
-                <div className="summary-row__primary">
-                  <strong>{transfer.externalAccountLabel}</strong>
-                  <span>{formatCurrency(transfer.amount)} • Submitted {formatDate(transfer.submittedAt)}</span>
-                </div>
-                <div className="summary-row__meta">
-                  <StatusChip status={transfer.status} />
-                </div>
+            {timelineEvents.length ? (
+              <div className="timeline">
+                {timelineEvents.map((event) => {
+                  const statusNormalized = event.status.toUpperCase();
+                  const timelineClass = statusNormalized === 'COMPLETED'
+                    ? 'timeline__item timeline__item--complete'
+                    : statusNormalized === 'FAILED' || statusNormalized === 'CANCELLED'
+                      ? 'timeline__item timeline__item--current'
+                      : 'timeline__item';
+                  return (
+                    <div className={timelineClass} key={event.id}>
+                      <div className="summary-row">
+                        <div className="summary-row__primary">
+                          <strong>{event.title}</strong>
+                          <span className="muted">{event.detail}</span>
+                          <small className="muted">{formatDate(event.happenedAt)}</small>
+                        </div>
+                        <div className="summary-row__secondary">
+                          <StatusChip status={event.status} />
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
-            )) : <p className="muted">No in-flight external transfers.</p>}
+            ) : <p className="muted">No transfer timeline events yet.</p>}
           </div>
         </Card>
       </div>

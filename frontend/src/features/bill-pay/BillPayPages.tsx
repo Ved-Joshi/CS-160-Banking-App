@@ -1,6 +1,6 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Controller, useForm } from 'react-hook-form';
 import { Link, useSearchParams } from 'react-router-dom';
 import { z } from 'zod';
@@ -137,6 +137,33 @@ function formatRecurringNextRunLabel(deliverBy: string, timezone: string): strin
   if (dayDiff > 1) return `Next run in ${dayDiff} days`;
   if (dayDiff === -1) return 'Overdue by 1 day';
   return `${Math.abs(dayDiff)} days overdue`;
+}
+
+function monthLabel(date: Date): string {
+  return new Intl.DateTimeFormat('en-US', { month: 'long', year: 'numeric' }).format(date);
+}
+
+function startOfMonth(date: Date): Date {
+  return new Date(date.getFullYear(), date.getMonth(), 1);
+}
+
+function buildCalendarCells(monthDate: Date): Array<{ iso: string | null; dayNumber: number | null; inMonth: boolean }> {
+  const year = monthDate.getFullYear();
+  const month = monthDate.getMonth();
+  const firstDay = new Date(year, month, 1);
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const offset = firstDay.getDay();
+  const cells: Array<{ iso: string | null; dayNumber: number | null; inMonth: boolean }> = [];
+  for (let index = 0; index < 42; index += 1) {
+    const dayNumber = index - offset + 1;
+    if (dayNumber < 1 || dayNumber > daysInMonth) {
+      cells.push({ iso: null, dayNumber: null, inMonth: false });
+      continue;
+    }
+    const date = new Date(year, month, dayNumber);
+    cells.push({ iso: formatDateInputValue(date), dayNumber, inMonth: true });
+  }
+  return cells;
 }
 
 function PaymentActionIcon({ icon }: { icon: 'retry' | 'edit' | 'delay' | 'delete' }) {
@@ -315,6 +342,11 @@ export function BillPayPage() {
   const canSchedule = hasAccounts && hasPayees;
   const userTimezone = profile?.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
   const todayDate = getTodayInTimezone(userTimezone);
+  const [calendarMonth, setCalendarMonth] = useState(() => {
+    const parsed = parseDateInputValue(formatDateInputValue(new Date()));
+    return parsed ? startOfMonth(new Date(parsed.year, parsed.month - 1, 1)) : startOfMonth(new Date());
+  });
+  const [selectedCalendarDate, setSelectedCalendarDate] = useState(todayDate);
   const amountDisplay = formatAmountDigits(amountDigits);
   const amountInputValue = `$${amountDisplay}`;
   const editAmountDisplay = formatAmountDigits(editAmountDigits);
@@ -375,6 +407,21 @@ export function BillPayPage() {
   const canEditPayment = (payment: ScheduledPayment) => payment.status === 'SCHEDULED';
   const visiblePayments = payments.filter(
     (payment) => payment.status !== 'CANCELLED' && !(payment.cadence === 'Once' && payment.status === 'COMPLETED'),
+  );
+  const calendarPaymentCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    visiblePayments.forEach((payment) => {
+      counts.set(payment.deliverBy, (counts.get(payment.deliverBy) ?? 0) + 1);
+    });
+    return counts;
+  }, [visiblePayments]);
+  const calendarCells = useMemo(() => buildCalendarCells(calendarMonth), [calendarMonth]);
+  const selectedDayPayments = useMemo(
+    () =>
+      visiblePayments
+        .filter((payment) => payment.deliverBy === selectedCalendarDate)
+        .sort((left, right) => left.payeeName.localeCompare(right.payeeName)),
+    [selectedCalendarDate, visiblePayments],
   );
   const rows = visiblePayments.map((payment) => [
     payment.payeeName,
@@ -589,11 +636,86 @@ export function BillPayPage() {
           </form>
         </Card>
         <Card>
-          <h3>Payment controls</h3>
-          <p className="muted">Create payees inline, schedule one-time/recurring payments, and cancel pending payments from one place.</p>
-          <div className="stack-sm">
-            <span className="label-pill">Supports one-time and recurring schedules</span>
-            <span className="label-pill">Statuses: scheduled, processing, completed, failed, cancelled</span>
+          <div className="stack-lg">
+            <div className="stack-sm">
+              <p className="eyebrow">Payment calendar</p>
+              <h3>Upcoming schedule</h3>
+              <p className="muted">Pick a day to see which bill payments are set to run.</p>
+            </div>
+            <div className="billpay-calendar">
+              <div className="billpay-calendar__header">
+                <button
+                  className="button button--ghost pagination-button"
+                  onClick={() => setCalendarMonth((current) => startOfMonth(new Date(current.getFullYear(), current.getMonth() - 1, 1)))}
+                  type="button"
+                >
+                  Prev
+                </button>
+                <strong>{monthLabel(calendarMonth)}</strong>
+                <button
+                  className="button button--ghost pagination-button"
+                  onClick={() => setCalendarMonth((current) => startOfMonth(new Date(current.getFullYear(), current.getMonth() + 1, 1)))}
+                  type="button"
+                >
+                  Next
+                </button>
+              </div>
+              <div className="billpay-calendar__weekdays">
+                {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((weekday) => (
+                  <span key={weekday}>{weekday}</span>
+                ))}
+              </div>
+              <div className="billpay-calendar__grid">
+                {calendarCells.map((cell, index) => {
+                  if (!cell.inMonth || !cell.iso || !cell.dayNumber) {
+                    return <div className="billpay-calendar__cell billpay-calendar__cell--blank" key={`blank-${index}`} />;
+                  }
+                  const count = calendarPaymentCounts.get(cell.iso) ?? 0;
+                  const isSelected = cell.iso === selectedCalendarDate;
+                  return (
+                    <button
+                      className={`billpay-calendar__cell${isSelected ? ' billpay-calendar__cell--selected' : ''}${count ? ' billpay-calendar__cell--has-payments' : ''}`}
+                      key={cell.iso}
+                      onClick={() => setSelectedCalendarDate(cell.iso!)}
+                      type="button"
+                    >
+                      <span>{cell.dayNumber}</span>
+                      {count ? <small>{count}</small> : null}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+            <div className="stack-sm">
+              <div className="summary-row">
+                <div className="summary-row__primary">
+                  <strong>{formatDate(selectedCalendarDate)}</strong>
+                </div>
+                <div className="summary-row__secondary">
+                  <span>{selectedDayPayments.length} scheduled</span>
+                </div>
+              </div>
+              {selectedDayPayments.length ? (
+                <div className="stack-sm">
+                  {selectedDayPayments.slice(0, 4).map((payment) => (
+                    <div className="summary-row" key={payment.id}>
+                      <div className="summary-row__primary">
+                        <strong>{payment.payeeName}</strong>
+                        <span className="muted">{payment.cadence}</span>
+                      </div>
+                      <div className="summary-row__secondary">
+                        <span>{formatCurrency(payment.amount)}</span>
+                      </div>
+                    </div>
+                  ))}
+                  {selectedDayPayments.length > 4 ? (
+                    <p className="muted">+ {selectedDayPayments.length - 4} more scheduled payments</p>
+                  ) : null}
+                </div>
+              ) : (
+                <p className="muted">No payments scheduled for this day.</p>
+              )}
+            </div>
           </div>
         </Card>
       </div>
