@@ -14,12 +14,16 @@ const mocks = vi.hoisted(() => ({
   memberSubmit: vi.fn(),
   memberListPlans: vi.fn(),
   memberCancelPlan: vi.fn(),
+  memberUpdatePlan: vi.fn(),
+  memberRetryPlan: vi.fn(),
   externalListAccounts: vi.fn(),
   externalCreateAccount: vi.fn(),
   externalSubmit: vi.fn(),
   externalListPlans: vi.fn(),
   externalListTransfers: vi.fn(),
   externalCancelPlan: vi.fn(),
+  externalUpdatePlan: vi.fn(),
+  externalRetryPlan: vi.fn(),
 }));
 
 vi.mock('../../lib/bankingApi', () => ({
@@ -37,6 +41,8 @@ vi.mock('../../lib/bankingApi', () => ({
     submit: mocks.memberSubmit,
     listPlans: mocks.memberListPlans,
     cancelPlan: mocks.memberCancelPlan,
+    updatePlan: mocks.memberUpdatePlan,
+    retryPlan: mocks.memberRetryPlan,
   },
   externalAccountsService: {
     list: mocks.externalListAccounts,
@@ -47,6 +53,8 @@ vi.mock('../../lib/bankingApi', () => ({
     listPlans: mocks.externalListPlans,
     list: mocks.externalListTransfers,
     cancelPlan: mocks.externalCancelPlan,
+    updatePlan: mocks.externalUpdatePlan,
+    retryPlan: mocks.externalRetryPlan,
   },
 }));
 
@@ -193,7 +201,7 @@ describe('TransfersPage', () => {
     renderPage();
 
     await userEvent.click(screen.getByRole('button', { name: 'External bank' }));
-    await userEvent.click(screen.getByRole('button', { name: 'Choose bank' }));
+    await userEvent.click(screen.getByRole('button', { name: /Choose bank|Link new bank/ }));
     await userEvent.click(screen.getByRole('radio', { name: /Wells Fargo/ }));
     fireEvent.change(screen.getByLabelText('External routing number'), { target: { value: '121000248' } });
     fireEvent.change(screen.getByLabelText('External account number'), { target: { value: '000123456789' } });
@@ -216,7 +224,7 @@ describe('TransfersPage', () => {
     renderPage();
 
     await userEvent.click(screen.getByRole('button', { name: 'External bank' }));
-    await userEvent.click(screen.getByRole('button', { name: 'Choose bank' }));
+    await userEvent.click(screen.getByRole('button', { name: /Choose bank|Link new bank/ }));
     await userEvent.type(screen.getByLabelText('External routing number'), '1');
     await userEvent.type(screen.getByLabelText('External account number'), '000123456789');
     await userEvent.type(screen.getByLabelText('External confirm account number'), '000123456789');

@@ -1048,6 +1048,17 @@ small {
   box-shadow: 0 14px 34px rgba(10, 20, 33, 0.22);
 }
 
+.floating-toast {
+  opacity: 1;
+  transform: translateY(0);
+  transition: opacity 420ms ease, transform 420ms ease;
+}
+
+.floating-toast--fade {
+  opacity: 0;
+  transform: translateY(8px);
+}
+
 .floating-toast .inline-alert--success {
   background: #eaf7ef;
 }
@@ -1259,6 +1270,13 @@ small {
   object-fit: contain;
   object-position: left center;
   flex: 0 0 auto;
+}
+
+.external-account-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.75rem;
+  align-items: end;
 }
 
 .account-open-summary {
@@ -2091,6 +2109,11 @@ small {
   .summary-row__secondary {
     justify-items: start;
     text-align: left;
+  }
+
+  .external-account-row {
+    grid-template-columns: 1fr;
+    align-items: stretch;
   }
 
   .atm-search-controls {

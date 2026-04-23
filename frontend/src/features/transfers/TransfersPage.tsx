@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { type Dispatch, type SetStateAction, useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { Button, Card, Dialog, EmptyState, Field, InlineAlert, PageHeader, StatusChip } from '../../components/ui';
+import { Button, Card, DataTable, Dialog, EmptyState, Field, InlineAlert, PageHeader, StatusChip } from '../../components/ui';
 import {
   accountsService,
   externalAccountsService,
@@ -10,7 +10,7 @@ import {
   profileService,
   transfersService,
 } from '../../lib/bankingApi';
-import { formatCurrency, formatDate } from '../../lib/format';
+import { formatCurrency, formatDate, formatDateTimeInTimezone } from '../../lib/format';
 import { queryKeys } from '../../lib/queryKeys';
 import type {
   ExternalAccount,
@@ -26,9 +26,27 @@ type ReviewState =
   | { kind: 'SELF'; payload: { fromAccountId: string; toAccountId: string; amount: number; memo?: string; transferDate: string } }
   | { kind: 'MEMBER'; payload: { fromAccountId: string; recipientEmail: string; amount: number; memo?: string; scheduleMode: TransferScheduleMode; transferDate?: string; cadence?: TransferCadence; startDate?: string; runTime?: string; endDate?: string; timezone?: string }; recipient: MemberTransferRecipient }
   | { kind: 'EXTERNAL'; payload: { fromAccountId: string; externalAccountId: string; amount: number; memo?: string; scheduleMode: TransferScheduleMode; transferDate?: string; cadence?: TransferCadence; startDate?: string; runTime?: string; endDate?: string; timezone?: string }; externalAccount?: ExternalAccount };
+type ScheduledTransferRow = {
+  id: string;
+  kind: 'MEMBER' | 'EXTERNAL';
+  title: string;
+  amount: number;
+  memo?: string;
+  cadence: TransferCadence;
+  startDate: string;
+  runTime: string;
+  timezone: string;
+  endDate?: string;
+  nextRunAt?: string;
+  lastFailureReason?: string;
+  status: string;
+  summary: string;
+  cancelLabel: string;
+};
 
 const CADENCE_OPTIONS: TransferCadence[] = ['Once', 'Daily', 'Weekly', 'Biweekly', 'Monthly'];
 const TRANSFER_LIVE_REFRESH_MS = 10_000;
+const SCHEDULE_MIN_LEAD_MS = 60_000;
 const COMMON_BANKS: CommonBank[] = [
   { id: 'chase', name: 'Chase', logoSrc: '/banks/chase.png' },
   { id: 'bank_of_america', name: 'Bank of America', logoSrc: '/banks/bank-of-america.png' },
@@ -129,18 +147,35 @@ function AmountInput({
   );
 }
 
-function scheduleSummary(plan: { cadence: string; nextRunAt?: string; lastFailureReason?: string }) {
+function PaymentActionIcon({ icon }: { icon: 'retry' | 'edit' | 'delete' }) {
+  if (icon === 'retry') {
+    return (
+      <svg aria-hidden="true" className="payment-action-icon__svg" viewBox="0 0 24 24">
+        <path d="M20 6V2l-2.6 2.6A9 9 0 1 0 21 12h-2a7 7 0 1 1-2.2-5L14 10h6Z" />
+      </svg>
+    );
+  }
+  if (icon === 'edit') {
+    return (
+      <svg aria-hidden="true" className="payment-action-icon__svg" viewBox="0 0 24 24">
+        <path d="m4 15.5 9.8-9.8 3.5 3.5-9.8 9.8L4 20l1.1-4.5ZM18.7 7.3l-2-2a1 1 0 0 1 0-1.4l1.2-1.2a1 1 0 0 1 1.4 0l2 2a1 1 0 0 1 0 1.4l-1.2 1.2a1 1 0 0 1-1.4 0Z" />
+      </svg>
+    );
+  }
+  return (
+    <svg aria-hidden="true" className="payment-action-icon__svg" viewBox="0 0 24 24">
+      <path d="M9 3h6l1 2h4v2h-1v13a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V7H4V5h4l1-2Zm-2 4v13h10V7H7Zm3 3h2v8h-2v-8Zm4 0h2v8h-2v-8Z" />
+    </svg>
+  );
+}
+
+function scheduleSummary(plan: { cadence: string; nextRunAt?: string; lastFailureReason?: string; timezone: string }) {
   if (!plan.nextRunAt) return plan.lastFailureReason || 'No next run scheduled.';
-  return `${plan.cadence} • Next run ${formatDate(plan.nextRunAt)}`;
+  return `${plan.cadence} • Next run ${formatDateTimeInTimezone(plan.nextRunAt, plan.timezone)}`;
 }
 
 function sanitizeDigits(value: string): string {
   return value.replace(/\D/g, '');
-}
-
-function findCommonBankByName(bankName: string): CommonBank | undefined {
-  const normalized = bankName.trim().toLowerCase();
-  return COMMON_BANKS.find((bank) => bank.name.toLowerCase() === normalized);
 }
 
 export function TransfersPage() {
@@ -153,8 +188,11 @@ export function TransfersPage() {
   const [review, setReview] = useState<ReviewState | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const [successMessageFading, setSuccessMessageFading] = useState(false);
   const [memberRecipient, setMemberRecipient] = useState<MemberTransferRecipient | null>(null);
   const [planPendingCancel, setPlanPendingCancel] = useState<{ kind: 'MEMBER' | 'EXTERNAL'; id: string; label: string } | null>(null);
+  const [planPendingRetry, setPlanPendingRetry] = useState<ScheduledTransferRow | null>(null);
+  const [planPendingEdit, setPlanPendingEdit] = useState<ScheduledTransferRow | null>(null);
   const [isExternalAccountDialogOpen, setIsExternalAccountDialogOpen] = useState(false);
   const [selfAmountDigits, setSelfAmountDigits] = useState('');
   const [memberAmountDigits, setMemberAmountDigits] = useState('');
@@ -165,6 +203,14 @@ export function TransfersPage() {
     routingNumber: '',
     accountNumber: '',
     confirmAccountNumber: '',
+  });
+  const [editPlanAmountDigits, setEditPlanAmountDigits] = useState('');
+  const [editPlanForm, setEditPlanForm] = useState({
+    memo: '',
+    cadence: 'Once' as TransferCadence,
+    startDate: today,
+    runTime: '09:00',
+    endDate: '',
   });
 
   const [selfForm, setSelfForm] = useState({
@@ -236,18 +282,25 @@ export function TransfersPage() {
   const externalFromAccountId = externalForm.fromAccountId || firstCheckingAccountId;
   const selectedExternalAccountId = externalForm.externalAccountId || externalAccounts[0]?.id || '';
   const selectedExternalAccount = externalAccounts.find((account) => account.id === selectedExternalAccountId);
-  const selectedLinkedBank = selectedExternalAccount ? findCommonBankByName(selectedExternalAccount.bankName) : undefined;
   const selectedBankForLink = COMMON_BANKS.find((bank) => bank.id === externalLinkForm.bankId);
   const externalTimezone = externalForm.timezone || profile?.timezone || browserTimezone;
   const memberActivePlans = memberPlans.filter((plan) => plan.status === 'SCHEDULED' || plan.status === 'PROCESSING');
   const externalActivePlans = externalPlans.filter((plan) => plan.status === 'SCHEDULED' || plan.status === 'PROCESSING');
-  const scheduledTransfers = useMemo(
+  const scheduledTransfers = useMemo<ScheduledTransferRow[]>(
     () => [
       ...memberActivePlans.map((plan) => ({
         id: plan.id,
         kind: 'MEMBER' as const,
         title: plan.recipientDisplayName,
         amount: plan.amount,
+        memo: plan.memo,
+        cadence: plan.cadence,
+        startDate: plan.startDate,
+        runTime: plan.runTime,
+        timezone: plan.timezone,
+        endDate: plan.endDate,
+        nextRunAt: plan.nextRunAt,
+        lastFailureReason: plan.lastFailureReason,
         summary: scheduleSummary(plan),
         status: plan.status,
         cancelLabel: `Cancel ${plan.recipientDisplayName} transfer?`,
@@ -257,6 +310,14 @@ export function TransfersPage() {
         kind: 'EXTERNAL' as const,
         title: plan.externalAccountLabel,
         amount: plan.amount,
+        memo: plan.memo,
+        cadence: plan.cadence,
+        startDate: plan.startDate,
+        runTime: plan.runTime,
+        timezone: plan.timezone,
+        endDate: plan.endDate,
+        nextRunAt: plan.nextRunAt,
+        lastFailureReason: plan.lastFailureReason,
         summary: scheduleSummary(plan),
         status: plan.status,
         cancelLabel: `Cancel ${plan.externalAccountLabel} transfer?`,
@@ -264,6 +325,57 @@ export function TransfersPage() {
     ],
     [memberActivePlans, externalActivePlans],
   );
+  const canRetryPlan = (plan: ScheduledTransferRow) => plan.status === 'FAILED';
+  const canCancelPlan = (plan: ScheduledTransferRow) => plan.status === 'SCHEDULED' || plan.status === 'FAILED';
+  const canEditPlan = (plan: ScheduledTransferRow) => plan.status === 'SCHEDULED';
+  const scheduledRows = scheduledTransfers.map((plan) => [
+    plan.title,
+    (
+      <div className="payment-deliver-by" key={`${plan.kind}-${plan.id}-run-time`}>
+        <span>{formatDateTimeInTimezone(plan.nextRunAt ?? `${plan.startDate}T${plan.runTime}:00`, plan.timezone)}</span>
+        {plan.lastFailureReason ? <small className="muted">Last failure: {plan.lastFailureReason}</small> : null}
+      </div>
+    ),
+    plan.cadence,
+    <StatusChip key={`${plan.kind}-${plan.id}-status`} status={plan.status} />,
+    formatCurrency(plan.amount),
+    <div className="payment-actions" key={`${plan.kind}-${plan.id}-actions`}>
+      {canRetryPlan(plan) ? (
+        <button
+          aria-label={`Retry ${plan.title} transfer`}
+          className="payment-action-icon payment-action-icon--retry"
+          onClick={() => setPlanPendingRetry(plan)}
+          title="Retry now"
+          type="button"
+        >
+          <PaymentActionIcon icon="retry" />
+        </button>
+      ) : null}
+      {canEditPlan(plan) ? (
+        <button
+          aria-label={`Edit ${plan.title} transfer`}
+          className="payment-action-icon"
+          onClick={() => openEditPlanDialog(plan)}
+          title="Edit transfer"
+          type="button"
+        >
+          <PaymentActionIcon icon="edit" />
+        </button>
+      ) : null}
+      {canCancelPlan(plan) ? (
+        <button
+          aria-label={`Delete ${plan.title} transfer`}
+          className="payment-action-icon payment-action-icon--delete"
+          onClick={() => setPlanPendingCancel({ kind: plan.kind, id: plan.id, label: plan.cancelLabel })}
+          title="Delete transfer"
+          type="button"
+        >
+          <PaymentActionIcon icon="delete" />
+        </button>
+      ) : null}
+      {!canRetryPlan(plan) && !canEditPlan(plan) && !canCancelPlan(plan) ? <span className="muted">—</span> : null}
+    </div>,
+  ]);
 
   const invalidateTransferQueries = async () => {
     await Promise.all([
@@ -277,11 +389,28 @@ export function TransfersPage() {
     ]);
   };
 
+  const showSuccessMessage = (message: string) => {
+    setSuccessMessageFading(false);
+    setSuccessMessage(message);
+  };
+
+  const openEditPlanDialog = (plan: ScheduledTransferRow) => {
+    setEditPlanAmountDigits(String(Math.round(plan.amount * 100)));
+    setEditPlanForm({
+      memo: plan.memo ?? '',
+      cadence: plan.cadence,
+      startDate: plan.startDate,
+      runTime: plan.runTime,
+      endDate: plan.endDate ?? '',
+    });
+    setPlanPendingEdit(plan);
+  };
+
   const selfSubmitMutation = useMutation({
     mutationFn: transfersService.submit,
     onSuccess: async () => {
       await invalidateTransferQueries();
-      setSuccessMessage('Transfer submitted');
+      showSuccessMessage('Transfer submitted');
       setErrorMessage(null);
       setReview(null);
       setSelfAmountDigits('');
@@ -309,7 +438,7 @@ export function TransfersPage() {
     mutationFn: memberTransfersService.submit,
     onSuccess: async (result) => {
       await invalidateTransferQueries();
-      setSuccessMessage(result.mode === 'SCHEDULED' ? 'Scheduled member transfer created' : 'Member transfer submitted');
+      showSuccessMessage(result.mode === 'SCHEDULED' ? 'Scheduled member transfer created' : 'Member transfer submitted');
       setErrorMessage(null);
       setReview(null);
       setMemberAmountDigits('');
@@ -336,7 +465,7 @@ export function TransfersPage() {
         accountNumber: '',
         confirmAccountNumber: '',
       });
-      setSuccessMessage('External account linked');
+      showSuccessMessage('External account linked');
       setErrorMessage(null);
       setIsExternalAccountDialogOpen(false);
     },
@@ -377,7 +506,7 @@ export function TransfersPage() {
     mutationFn: externalTransfersService.submit,
     onSuccess: async (result) => {
       await invalidateTransferQueries();
-      setSuccessMessage(result.mode === 'SCHEDULED' ? 'Scheduled external transfer created' : 'External transfer submitted');
+      showSuccessMessage(result.mode === 'SCHEDULED' ? 'Scheduled external transfer created' : 'External transfer submitted');
       setErrorMessage(null);
       setReview(null);
       setExternalAmountDigits('');
@@ -394,7 +523,7 @@ export function TransfersPage() {
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: queryKeys.memberTransferPlans() });
       setPlanPendingCancel(null);
-      setSuccessMessage('Scheduled member transfer cancelled');
+      showSuccessMessage('Scheduled member transfer cancelled');
       setErrorMessage(null);
     },
   });
@@ -404,8 +533,71 @@ export function TransfersPage() {
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: queryKeys.externalTransferPlans() });
       setPlanPendingCancel(null);
-      setSuccessMessage('Scheduled external transfer cancelled');
+      showSuccessMessage('Scheduled external transfer cancelled');
       setErrorMessage(null);
+    },
+  });
+
+  const retryMemberPlanMutation = useMutation({
+    mutationFn: memberTransfersService.retryPlan,
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: queryKeys.memberTransferPlans() });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.transactions() });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.accounts() });
+      setPlanPendingRetry(null);
+      showSuccessMessage('Scheduled member transfer retried');
+      setErrorMessage(null);
+    },
+    onError: (error: Error) => {
+      setErrorMessage(error.message);
+      setSuccessMessage(null);
+    },
+  });
+
+  const retryExternalPlanMutation = useMutation({
+    mutationFn: externalTransfersService.retryPlan,
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: queryKeys.externalTransferPlans() });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.externalTransfers() });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.transactions() });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.accounts() });
+      setPlanPendingRetry(null);
+      showSuccessMessage('Scheduled external transfer retried');
+      setErrorMessage(null);
+    },
+    onError: (error: Error) => {
+      setErrorMessage(error.message);
+      setSuccessMessage(null);
+    },
+  });
+
+  const updateMemberPlanMutation = useMutation({
+    mutationFn: ({ planId, payload }: { planId: string; payload: Parameters<typeof memberTransfersService.updatePlan>[1] }) =>
+      memberTransfersService.updatePlan(planId, payload),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: queryKeys.memberTransferPlans() });
+      setPlanPendingEdit(null);
+      showSuccessMessage('Scheduled member transfer updated');
+      setErrorMessage(null);
+    },
+    onError: (error: Error) => {
+      setErrorMessage(error.message);
+      setSuccessMessage(null);
+    },
+  });
+
+  const updateExternalPlanMutation = useMutation({
+    mutationFn: ({ planId, payload }: { planId: string; payload: Parameters<typeof externalTransfersService.updatePlan>[1] }) =>
+      externalTransfersService.updatePlan(planId, payload),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: queryKeys.externalTransferPlans() });
+      setPlanPendingEdit(null);
+      showSuccessMessage('Scheduled external transfer updated');
+      setErrorMessage(null);
+    },
+    onError: (error: Error) => {
+      setErrorMessage(error.message);
+      setSuccessMessage(null);
     },
   });
 
@@ -414,8 +606,8 @@ export function TransfersPage() {
     if (!startDate || !runTime) throw new Error('Start date and run time are required.');
     const now = new Date();
     const scheduled = new Date(`${startDate}T${runTime}:00`);
-    if (Number.isNaN(scheduled.getTime()) || scheduled < now) {
-      throw new Error('Scheduled transfers must be in the future.');
+    if (Number.isNaN(scheduled.getTime()) || scheduled.getTime() <= now.getTime() + SCHEDULE_MIN_LEAD_MS) {
+      throw new Error('Scheduled transfers must be at least 1 minute in the future.');
     }
     if (endDate && endDate < startDate) {
       throw new Error('End date must be on or after start date.');
@@ -530,10 +722,17 @@ export function TransfersPage() {
 
   useEffect(() => {
     if (!successMessage) return;
+    const fadeTimeout = window.setTimeout(() => {
+      setSuccessMessageFading(true);
+    }, 4200);
     const timeout = window.setTimeout(() => {
       setSuccessMessage(null);
-    }, 10_000);
-    return () => window.clearTimeout(timeout);
+      setSuccessMessageFading(false);
+    }, 5000);
+    return () => {
+      window.clearTimeout(fadeTimeout);
+      window.clearTimeout(timeout);
+    };
   }, [successMessage]);
 
   return (
@@ -547,7 +746,7 @@ export function TransfersPage() {
       {successMessage ? (
         <div
           aria-live="polite"
-          className="floating-toast"
+          className={`floating-toast${successMessageFading ? ' floating-toast--fade' : ''}`}
           style={{
             position: 'fixed',
             right: 16,
@@ -696,28 +895,38 @@ export function TransfersPage() {
                     ))}
                   </select>
                 </Field>
-                <Button onClick={() => setIsExternalAccountDialogOpen(true)} type="button" variant="secondary">
-                  Choose bank
-                </Button>
-                {selectedExternalAccountId ? (
-                  <div className="stack-sm">
-                    <strong>Linked external account</strong>
-                    <div className="selected-bank-card">
-                      {selectedLinkedBank ? (
-                        <img
-                          alt={`${selectedExternalAccount?.bankName ?? 'External bank'} logo`}
-                          className="selected-bank-card__logo"
-                          src={selectedLinkedBank.logoSrc}
-                        />
-                      ) : null}
-                      <span className="muted">
-                        {selectedExternalAccount?.bankName ?? 'External bank'} ({selectedExternalAccount?.maskedAccountNumber ?? '...----'})
-                      </span>
-                    </div>
-                  </div>
+                <div className="external-account-row">
+                  <Field label="Destination external account">
+                    <select
+                      aria-label="Linked external account"
+                      onChange={(event) => {
+                        if (event.target.value === '__none') return;
+                        setExternalForm((current) => ({ ...current, externalAccountId: event.target.value }));
+                      }}
+                      value={selectedExternalAccountId || '__none'}
+                    >
+                      {externalAccounts.length ? (
+                        externalAccounts.map((account) => (
+                          <option key={account.id} value={account.id}>
+                            {account.bankName} ({account.maskedAccountNumber})
+                          </option>
+                        ))
+                      ) : (
+                        <option value="__none">No linked external accounts</option>
+                      )}
+                    </select>
+                  </Field>
+                  <Button onClick={() => setIsExternalAccountDialogOpen(true)} type="button" variant="secondary">
+                    {externalAccounts.length ? 'Link new bank' : 'Choose bank'}
+                  </Button>
+                </div>
+                {selectedExternalAccount ? (
+                  <p className="muted">
+                    Sending to {selectedExternalAccount.bankName} ({selectedExternalAccount.maskedAccountNumber}).
+                  </p>
                 ) : (
                   <InlineAlert title="Link a bank account first" tone="warning">
-                    Use `Choose bank` to pick a bank and add account details before submitting an external transfer.
+                    Choose a bank and add account details before submitting an external transfer.
                   </InlineAlert>
                 )}
                 <Field label="Transfer mode">
@@ -797,32 +1006,17 @@ export function TransfersPage() {
         </Card>
       </div>
 
-      <Card>
-        <div className="stack-lg">
-          <div className="stack-sm">
-            <p className="eyebrow">Scheduled transfers</p>
-            <h3>Upcoming runs</h3>
-          </div>
-          {scheduledTransfers.length ? scheduledTransfers.map((plan) => (
-            <div className="summary-row" key={`${plan.kind}-${plan.id}`}>
-              <div className="summary-row__primary">
-                <strong>{plan.title}</strong>
-                <span>{formatCurrency(plan.amount)} • {plan.summary}</span>
-              </div>
-              <div className="summary-row__meta">
-                <StatusChip status={plan.status} />
-                <Button
-                  onClick={() => setPlanPendingCancel({ kind: plan.kind, id: plan.id, label: plan.cancelLabel })}
-                  type="button"
-                  variant="secondary"
-                >
-                  Cancel
-                </Button>
-              </div>
-            </div>
-          )) : <p className="muted">No scheduled transfers.</p>}
-        </div>
-      </Card>
+      {scheduledRows.length ? (
+        <Card>
+          <h3>Scheduled transfers</h3>
+          <DataTable headers={['Transfer', 'Scheduled for', 'Cadence', 'Status', 'Amount', 'Actions']} rows={scheduledRows} />
+        </Card>
+      ) : (
+        <EmptyState
+          title="No scheduled transfers"
+          description="Scheduled transfers will appear here after you create one."
+        />
+      )}
 
       <Dialog
         actions={(
@@ -1005,7 +1199,7 @@ export function TransfersPage() {
               <p><strong>Transfer date:</strong> {review.payload.transferDate}</p>
             ) : null}
             {review.kind !== 'SELF' && review.payload.scheduleMode === 'SCHEDULED' ? (
-              <p><strong>Schedule:</strong> {review.payload.cadence} starting {review.payload.startDate} at {review.payload.runTime} ({review.payload.timezone})</p>
+              <p><strong>Schedule:</strong> {review.payload.cadence} starting {review.payload.startDate} at {review.payload.runTime}</p>
             ) : null}
           </div>
         ) : null}
@@ -1036,6 +1230,124 @@ export function TransfersPage() {
         open={Boolean(planPendingCancel)}
         title={planPendingCancel?.label ?? 'Cancel transfer?'}
       />
+
+      <Dialog
+        actions={(
+          <>
+            <Button onClick={() => setPlanPendingRetry(null)} type="button" variant="secondary">
+              Back
+            </Button>
+            <Button
+              disabled={retryMemberPlanMutation.isPending || retryExternalPlanMutation.isPending || !planPendingRetry}
+              onClick={() => {
+                if (!planPendingRetry) return;
+                if (planPendingRetry.kind === 'MEMBER') {
+                  retryMemberPlanMutation.mutate(planPendingRetry.id);
+                  return;
+                }
+                retryExternalPlanMutation.mutate(planPendingRetry.id);
+              }}
+              type="button"
+            >
+              {(retryMemberPlanMutation.isPending || retryExternalPlanMutation.isPending) ? 'Retrying...' : 'Retry now'}
+            </Button>
+          </>
+        )}
+        description="This retries the scheduled transfer now and refreshes balances/activity."
+        onClose={() => setPlanPendingRetry(null)}
+        open={Boolean(planPendingRetry)}
+        title={planPendingRetry ? `Retry ${planPendingRetry.title}?` : 'Retry transfer?'}
+      />
+
+      <Dialog
+        actions={(
+          <>
+            <Button
+              onClick={() => setPlanPendingEdit(null)}
+              type="button"
+              variant="secondary"
+            >
+              Cancel
+            </Button>
+            <Button
+              disabled={updateMemberPlanMutation.isPending || updateExternalPlanMutation.isPending || !planPendingEdit}
+              onClick={async () => {
+                if (!planPendingEdit) return;
+                validateSchedule('SCHEDULED', editPlanForm.startDate, editPlanForm.runTime, editPlanForm.endDate, planPendingEdit.timezone);
+                const payload = {
+                  amount: Number(formatAmountDigits(editPlanAmountDigits)),
+                  memo: editPlanForm.memo || undefined,
+                  cadence: editPlanForm.cadence,
+                  startDate: editPlanForm.startDate,
+                  runTime: editPlanForm.runTime,
+                  endDate: editPlanForm.cadence === 'Once' ? undefined : (editPlanForm.endDate || undefined),
+                  timezone: planPendingEdit.timezone,
+                };
+                if (planPendingEdit.kind === 'MEMBER') {
+                  await updateMemberPlanMutation.mutateAsync({ planId: planPendingEdit.id, payload });
+                  return;
+                }
+                await updateExternalPlanMutation.mutateAsync({ planId: planPendingEdit.id, payload });
+              }}
+              type="button"
+            >
+              {(updateMemberPlanMutation.isPending || updateExternalPlanMutation.isPending) ? 'Saving...' : 'Save changes'}
+            </Button>
+          </>
+        )}
+        description="Update the scheduled transfer details."
+        onClose={() => setPlanPendingEdit(null)}
+        open={Boolean(planPendingEdit)}
+        title={planPendingEdit ? `Edit ${planPendingEdit.title}` : 'Edit scheduled transfer'}
+      >
+        <form className="stack-md" onSubmit={(event) => event.preventDefault()}>
+          <Field label="Amount">
+            <AmountInput onChange={setEditPlanAmountDigits} value={editPlanAmountDigits} />
+          </Field>
+          <Field label="Memo">
+            <input
+              aria-label="Edit transfer memo"
+              onChange={(event) => setEditPlanForm((current) => ({ ...current, memo: event.target.value }))}
+              value={editPlanForm.memo}
+            />
+          </Field>
+          <Field label="Cadence">
+            <select
+              aria-label="Edit transfer cadence"
+              onChange={(event) => setEditPlanForm((current) => ({ ...current, cadence: event.target.value as TransferCadence }))}
+              value={editPlanForm.cadence}
+            >
+              {CADENCE_OPTIONS.map((cadence) => <option key={cadence} value={cadence}>{cadence}</option>)}
+            </select>
+          </Field>
+          <Field label="Start date">
+            <input
+              aria-label="Edit transfer start date"
+              onChange={(event) => setEditPlanForm((current) => ({ ...current, startDate: event.target.value }))}
+              type="date"
+              value={editPlanForm.startDate}
+            />
+          </Field>
+          <Field label="Run time">
+            <input
+              aria-label="Edit transfer run time"
+              onChange={(event) => setEditPlanForm((current) => ({ ...current, runTime: event.target.value }))}
+              type="time"
+              value={editPlanForm.runTime}
+            />
+          </Field>
+          {editPlanForm.cadence !== 'Once' ? (
+            <Field label="End date (optional)">
+              <input
+                aria-label="Edit transfer end date"
+                onChange={(event) => setEditPlanForm((current) => ({ ...current, endDate: event.target.value }))}
+                type="date"
+                value={editPlanForm.endDate}
+              />
+            </Field>
+          ) : null}
+        </form>
+      </Dialog>
     </div>
   );
 }

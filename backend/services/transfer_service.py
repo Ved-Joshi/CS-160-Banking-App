@@ -23,6 +23,7 @@ from utils.supabase import SupabaseUser, amount_to_cents, supabase_client
 
 STALE_PROCESSING_TIMEOUT_MINUTES = 10
 EXTERNAL_SETTLEMENT_DELAY_SECONDS = 15
+SCHEDULE_MIN_LEAD_SECONDS = 60
 
 
 def _validate_email(value: str) -> str:
@@ -196,10 +197,11 @@ async def _validate_schedule_payload(
 
     local_now = datetime.now(ZoneInfo(timezone_name))
     scheduled_dt = datetime.combine(start_date, run_time, tzinfo=ZoneInfo(timezone_name))
-    if scheduled_dt < local_now:
+    min_allowed = local_now + timedelta(seconds=SCHEDULE_MIN_LEAD_SECONDS)
+    if scheduled_dt <= min_allowed:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Scheduled transfers must be in the future.",
+            detail="Scheduled transfers must be at least 1 minute in the future.",
         )
 
     return (
@@ -449,6 +451,125 @@ async def cancel_member_transfer_plan_for_user(user_id: str, plan_id: str) -> di
         if plan["id"] == rows[0]["id"]:
             return plan
     return rows[0]
+
+
+async def update_member_transfer_plan_for_user(user_id: str, plan_id: str, payload: dict) -> dict:
+    rows = await supabase_client.select_rows(
+        "member_transfer_plans",
+        filters={"id": f"eq.{plan_id}", "user_id": f"eq.{user_id}"},
+        limit=1,
+    )
+    if not rows:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Scheduled member transfer not found.")
+    plan = rows[0]
+    if plan.get("status") != "scheduled":
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Only scheduled transfers can be edited.")
+
+    cadence = _normalize_cadence(payload.get("cadence") or plan.get("cadence"))
+    timezone_name = (payload.get("timezone") or plan.get("timezone") or "UTC").strip() or "UTC"
+    start_date = _parse_iso_date(payload.get("startDate") or plan.get("start_date"), field_name="startDate")
+    run_time = _parse_local_time(payload.get("runTime") or plan.get("run_time"), field_name="runTime")
+    end_date_value = payload.get("endDate")
+    end_date = _parse_iso_date(end_date_value, field_name="endDate") if end_date_value else (
+        _parse_iso_date(plan.get("end_date"), field_name="endDate") if plan.get("end_date") else None
+    )
+    if end_date and end_date < start_date:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="End date must be on or after start date.")
+
+    next_run_at = _combine_local_to_utc(start_date, run_time, timezone_name)
+    min_allowed_utc = datetime.now(timezone.utc) + timedelta(seconds=SCHEDULE_MIN_LEAD_SECONDS)
+    if next_run_at <= min_allowed_utc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Scheduled transfers must be at least 1 minute in the future.",
+        )
+
+    amount = payload.get("amount")
+    amount_cents = amount_to_cents(amount) if amount is not None else int(plan.get("amount_cents", 0))
+    if amount_cents <= 0:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Transfer amount must be greater than zero.")
+
+    updated_rows = await supabase_client.update_rows(
+        "member_transfer_plans",
+        {
+            "amount_cents": amount_cents,
+            "memo": payload.get("memo") if payload.get("memo") is not None else plan.get("memo"),
+            "cadence": cadence,
+            "start_date": start_date.isoformat(),
+            "run_time": run_time.strftime("%H:%M"),
+            "end_date": end_date.isoformat() if end_date else None,
+            "timezone": timezone_name,
+            "next_run_at": next_run_at.isoformat(),
+            "last_failure_reason": None,
+        },
+        filters={"id": f"eq.{plan_id}", "user_id": f"eq.{user_id}", "status": "eq.scheduled"},
+    )
+    if not updated_rows:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Unable to update scheduled member transfer.")
+    plans = await list_member_transfer_plans_for_user(user_id)
+    for item in plans:
+        if item["id"] == updated_rows[0]["id"]:
+            return item
+    return updated_rows[0]
+
+
+async def retry_member_transfer_plan_for_user(user_id: str, plan_id: str) -> dict:
+    rows = await supabase_client.select_rows(
+        "member_transfer_plans",
+        filters={"id": f"eq.{plan_id}", "user_id": f"eq.{user_id}"},
+        limit=1,
+    )
+    if not rows:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Scheduled member transfer not found.")
+    plan = rows[0]
+    if plan.get("status") != "scheduled":
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Only scheduled transfers can be retried.")
+
+    timezone_name = (plan.get("timezone") or "UTC").strip() or "UTC"
+    run_time = _parse_local_time(plan.get("run_time"), field_name="runTime")
+    local_today = datetime.now(ZoneInfo(timezone_name)).date()
+    cadence = plan["cadence"]
+    failure_reason = None
+
+    try:
+        await supabase_client.rpc(
+            "submit_member_transfer",
+            {
+                "p_user_id": plan["user_id"],
+                "p_from_account_id": plan["from_account_id"],
+                "p_recipient_user_id": plan["recipient_user_id"],
+                "p_amount_cents": plan["amount_cents"],
+                "p_transfer_date": local_today.isoformat(),
+                "p_memo": plan.get("memo"),
+                "p_member_transfer_plan_id": plan["id"],
+            },
+        )
+    except HTTPException as exc:
+        failure_reason = str(exc.detail)
+
+    if cadence == "once":
+        status_value = "completed" if not failure_reason else "scheduled"
+        next_run_at = None if not failure_reason else _combine_local_to_utc(local_today, run_time, timezone_name).isoformat()
+    else:
+        next_date = _advance_cadence(local_today, cadence) if not failure_reason else local_today
+        status_value = "scheduled"
+        next_run_at = _combine_local_to_utc(next_date, run_time, timezone_name).isoformat()
+
+    await supabase_client.update_rows(
+        "member_transfer_plans",
+        {
+            "status": status_value,
+            "next_run_at": next_run_at,
+            "last_run_at": datetime.now(timezone.utc).isoformat(),
+            "last_failure_reason": failure_reason,
+        },
+        filters={"id": f"eq.{plan_id}", "user_id": f"eq.{user_id}"},
+    )
+    plans = await list_member_transfer_plans_for_user(user_id)
+    for item in plans:
+        if item["id"] == plan_id:
+            return item
+    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Scheduled member transfer not found.")
 
 
 async def process_due_member_transfer_plans(*, batch_size: int = 50) -> dict[str, int]:
@@ -881,6 +1002,127 @@ async def cancel_external_transfer_plan_for_user(user_id: str, plan_id: str) -> 
         if plan["id"] == rows[0]["id"]:
             return plan
     return rows[0]
+
+
+async def update_external_transfer_plan_for_user(user_id: str, plan_id: str, payload: dict) -> dict:
+    rows = await supabase_client.select_rows(
+        "external_transfer_plans",
+        filters={"id": f"eq.{plan_id}", "user_id": f"eq.{user_id}"},
+        limit=1,
+    )
+    if not rows:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Scheduled external transfer not found.")
+    plan = rows[0]
+    if plan.get("status") != "scheduled":
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Only scheduled transfers can be edited.")
+
+    cadence = _normalize_cadence(payload.get("cadence") or plan.get("cadence"))
+    timezone_name = (payload.get("timezone") or plan.get("timezone") or "UTC").strip() or "UTC"
+    start_date = _parse_iso_date(payload.get("startDate") or plan.get("start_date"), field_name="startDate")
+    run_time = _parse_local_time(payload.get("runTime") or plan.get("run_time"), field_name="runTime")
+    end_date_value = payload.get("endDate")
+    end_date = _parse_iso_date(end_date_value, field_name="endDate") if end_date_value else (
+        _parse_iso_date(plan.get("end_date"), field_name="endDate") if plan.get("end_date") else None
+    )
+    if end_date and end_date < start_date:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="End date must be on or after start date.")
+
+    next_run_at = _combine_local_to_utc(start_date, run_time, timezone_name)
+    min_allowed_utc = datetime.now(timezone.utc) + timedelta(seconds=SCHEDULE_MIN_LEAD_SECONDS)
+    if next_run_at <= min_allowed_utc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Scheduled transfers must be at least 1 minute in the future.",
+        )
+
+    amount = payload.get("amount")
+    amount_cents = amount_to_cents(amount) if amount is not None else int(plan.get("amount_cents", 0))
+    if amount_cents <= 0:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Transfer amount must be greater than zero.")
+
+    updated_rows = await supabase_client.update_rows(
+        "external_transfer_plans",
+        {
+            "amount_cents": amount_cents,
+            "memo": payload.get("memo") if payload.get("memo") is not None else plan.get("memo"),
+            "cadence": cadence,
+            "start_date": start_date.isoformat(),
+            "run_time": run_time.strftime("%H:%M"),
+            "end_date": end_date.isoformat() if end_date else None,
+            "timezone": timezone_name,
+            "next_run_at": next_run_at.isoformat(),
+            "last_failure_reason": None,
+        },
+        filters={"id": f"eq.{plan_id}", "user_id": f"eq.{user_id}", "status": "eq.scheduled"},
+    )
+    if not updated_rows:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Unable to update scheduled external transfer.")
+    plans = await list_external_transfer_plans_for_user(user_id)
+    for item in plans:
+        if item["id"] == updated_rows[0]["id"]:
+            return item
+    return updated_rows[0]
+
+
+async def retry_external_transfer_plan_for_user(user_id: str, plan_id: str) -> dict:
+    rows = await supabase_client.select_rows(
+        "external_transfer_plans",
+        filters={"id": f"eq.{plan_id}", "user_id": f"eq.{user_id}"},
+        limit=1,
+    )
+    if not rows:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Scheduled external transfer not found.")
+    plan = rows[0]
+    if plan.get("status") != "scheduled":
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Only scheduled transfers can be retried.")
+
+    timezone_name = (plan.get("timezone") or "UTC").strip() or "UTC"
+    run_time = _parse_local_time(plan.get("run_time"), field_name="runTime")
+    local_today = datetime.now(ZoneInfo(timezone_name)).date()
+    cadence = plan["cadence"]
+    failure_reason = None
+
+    try:
+        settle_after = datetime.now(timezone.utc) + timedelta(seconds=EXTERNAL_SETTLEMENT_DELAY_SECONDS)
+        await supabase_client.rpc(
+            "submit_external_outbound_transfer",
+            {
+                "p_user_id": plan["user_id"],
+                "p_from_account_id": plan["from_account_id"],
+                "p_external_account_id": plan["external_account_id"],
+                "p_amount_cents": plan["amount_cents"],
+                "p_transfer_date": local_today.isoformat(),
+                "p_memo": plan.get("memo"),
+                "p_external_transfer_plan_id": plan["id"],
+                "p_settle_after": settle_after.isoformat(),
+            },
+        )
+    except HTTPException as exc:
+        failure_reason = str(exc.detail)
+
+    if cadence == "once":
+        status_value = "completed" if not failure_reason else "scheduled"
+        next_run_at = None if not failure_reason else _combine_local_to_utc(local_today, run_time, timezone_name).isoformat()
+    else:
+        next_date = _advance_cadence(local_today, cadence) if not failure_reason else local_today
+        status_value = "scheduled"
+        next_run_at = _combine_local_to_utc(next_date, run_time, timezone_name).isoformat()
+
+    await supabase_client.update_rows(
+        "external_transfer_plans",
+        {
+            "status": status_value,
+            "next_run_at": next_run_at,
+            "last_run_at": datetime.now(timezone.utc).isoformat(),
+            "last_failure_reason": failure_reason,
+        },
+        filters={"id": f"eq.{plan_id}", "user_id": f"eq.{user_id}"},
+    )
+    plans = await list_external_transfer_plans_for_user(user_id)
+    for item in plans:
+        if item["id"] == plan_id:
+            return item
+    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Scheduled external transfer not found.")
 
 
 async def list_external_transfers_for_user(user_id: str) -> list[dict]:

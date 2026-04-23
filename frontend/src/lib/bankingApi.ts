@@ -15,6 +15,7 @@ import type {
   ExternalTransferPlan,
   ExternalTransferRequest,
   ExternalTransferSubmissionResult,
+  UpdateExternalTransferPlanInput,
   CreateScheduledPaymentInput,
   UpdateScheduledPaymentInput,
   CustomerProfile,
@@ -24,6 +25,7 @@ import type {
   MemberTransferRecipient,
   MemberTransferRequest,
   MemberTransferSubmissionResult,
+  UpdateMemberTransferPlanInput,
   NotificationItem,
   Payee,
   ScheduledPayment,
@@ -217,6 +219,17 @@ export const memberTransfersService = {
       method: 'POST',
     }).then((input) => normalizeMemberTransferPlans([input])[0]!);
   },
+  updatePlan(planId: string, input: UpdateMemberTransferPlanInput): Promise<MemberTransferPlan> {
+    return apiRequest<unknown>(`/api/member-transfers/plans/${planId}`, {
+      method: 'PATCH',
+      body: input,
+    }).then((payload) => normalizeMemberTransferPlans([payload])[0]!);
+  },
+  retryPlan(planId: string): Promise<MemberTransferPlan> {
+    return apiRequest<unknown>(`/api/member-transfers/plans/${planId}/retry`, {
+      method: 'POST',
+    }).then((payload) => normalizeMemberTransferPlans([payload])[0]!);
+  },
 };
 
 export const externalAccountsService = {
@@ -259,6 +272,17 @@ export const externalTransfersService = {
     return apiRequest<unknown>(`/api/external-transfers/plans/${planId}/cancel`, {
       method: 'POST',
     }).then((input) => normalizeExternalTransferPlans([input])[0]!);
+  },
+  updatePlan(planId: string, input: UpdateExternalTransferPlanInput): Promise<ExternalTransferPlan> {
+    return apiRequest<unknown>(`/api/external-transfers/plans/${planId}`, {
+      method: 'PATCH',
+      body: input,
+    }).then((payload) => normalizeExternalTransferPlans([payload])[0]!);
+  },
+  retryPlan(planId: string): Promise<ExternalTransferPlan> {
+    return apiRequest<unknown>(`/api/external-transfers/plans/${planId}/retry`, {
+      method: 'POST',
+    }).then((payload) => normalizeExternalTransferPlans([payload])[0]!);
   },
 };
 

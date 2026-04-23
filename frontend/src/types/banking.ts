@@ -217,6 +217,16 @@ export interface MemberTransferSubmissionResult {
   plan?: MemberTransferPlan;
 }
 
+export interface UpdateMemberTransferPlanInput {
+  amount?: number;
+  memo?: string;
+  cadence?: TransferCadence;
+  startDate?: string;
+  runTime?: string;
+  endDate?: string;
+  timezone?: string;
+}
+
 export interface ExternalAccount {
   id: string;
   bankName: string;
@@ -304,6 +314,16 @@ export interface ExternalTransferSubmissionResult {
   mode: TransferScheduleMode;
   transfer?: ExternalTransfer;
   plan?: ExternalTransferPlan;
+}
+
+export interface UpdateExternalTransferPlanInput {
+  amount?: number;
+  memo?: string;
+  cadence?: TransferCadence;
+  startDate?: string;
+  runTime?: string;
+  endDate?: string;
+  timezone?: string;
 }
 
 export interface Payee {

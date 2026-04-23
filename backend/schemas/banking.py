@@ -243,6 +243,16 @@ class CreateMemberTransferIn(BaseModel):
     timezone: Optional[str] = None
 
 
+class UpdateMemberTransferPlanIn(BaseModel):
+    amount: Optional[float] = Field(default=None, gt=0)
+    memo: Optional[str] = Field(default=None, max_length=80)
+    cadence: Optional[TransferCadence] = None
+    startDate: Optional[str] = None
+    runTime: Optional[str] = None
+    endDate: Optional[str] = None
+    timezone: Optional[str] = None
+
+
 class MemberTransfer(BaseModel):
     id: str
     fromAccountId: str
@@ -324,6 +334,16 @@ class CreateExternalTransferIn(BaseModel):
     memo: Optional[str] = Field(default=None, max_length=80)
     scheduleMode: TransferScheduleMode = "NOW"
     transferDate: Optional[str] = None
+    cadence: Optional[TransferCadence] = None
+    startDate: Optional[str] = None
+    runTime: Optional[str] = None
+    endDate: Optional[str] = None
+    timezone: Optional[str] = None
+
+
+class UpdateExternalTransferPlanIn(BaseModel):
+    amount: Optional[float] = Field(default=None, gt=0)
+    memo: Optional[str] = Field(default=None, max_length=80)
     cadence: Optional[TransferCadence] = None
     startDate: Optional[str] = None
     runTime: Optional[str] = None

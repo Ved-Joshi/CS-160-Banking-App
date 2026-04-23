@@ -372,7 +372,7 @@ export function BillPayPage() {
 
   const canCancelPayment = (status: ScheduledPayment['status']) => status === 'SCHEDULED' || status === 'FAILED';
   const canRetryPayment = (status: ScheduledPayment['status']) => status === 'FAILED';
-  const canEditPayment = (payment: ScheduledPayment) => payment.cadence !== 'Once' && payment.status === 'SCHEDULED';
+  const canEditPayment = (payment: ScheduledPayment) => payment.status === 'SCHEDULED';
   const visiblePayments = payments.filter(
     (payment) => payment.status !== 'CANCELLED' && !(payment.cadence === 'Once' && payment.status === 'COMPLETED'),
   );

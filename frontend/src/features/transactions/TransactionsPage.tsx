@@ -3,7 +3,7 @@ import { useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { Card, DataTable, EmptyState, Field, PageHeader, StatusChip } from '../../components/ui';
 import { accountsService, transactionsService } from '../../lib/bankingApi';
-import { formatCurrency, formatDate, formatDateTime, titleCase } from '../../lib/format';
+import { formatCurrency, formatDate, formatDateTime, formatTime, titleCase } from '../../lib/format';
 import { queryKeys } from '../../lib/queryKeys';
 
 const TRANSACTIONS_PER_PAGE = 20;
@@ -59,6 +59,7 @@ export function TransactionsPage() {
 
   const rows = pagedTransactions.map((transaction) => [
     formatDate(transaction.postedAt),
+    formatTime(transaction.postedAt),
     transaction.description,
     transaction.type,
     <StatusChip key={`${transaction.id}-status`} status={transaction.status} />,
@@ -178,7 +179,7 @@ export function TransactionsPage() {
       <Card>
         {filtered.length ? (
           <div className="stack-md">
-            <DataTable headers={['Date', 'Description', 'Type', 'Status', 'Amount']} rows={rows} />
+            <DataTable headers={['Date', 'Time', 'Description', 'Type', 'Status', 'Amount']} rows={rows} />
             <div className="transactions-pagination">
               <p className="muted">
                 Showing {(currentPage - 1) * TRANSACTIONS_PER_PAGE + 1}-{Math.min(currentPage * TRANSACTIONS_PER_PAGE, filtered.length)} of {filtered.length}

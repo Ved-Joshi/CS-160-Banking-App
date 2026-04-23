@@ -20,6 +20,8 @@ from schemas.banking import (
     CreateExternalAccountIn,
     CreateExternalTransferIn,
     CreateMemberTransferIn,
+    UpdateExternalTransferPlanIn,
+    UpdateMemberTransferPlanIn,
     CreateScheduledPaymentIn,
     CreateTransferIn,
     CustomerProfile,
@@ -77,7 +79,11 @@ from services.transfer_service import (
     list_external_transfer_plans_for_user,
     list_external_transfers_for_user,
     list_member_transfer_plans_for_user,
+    retry_external_transfer_plan_for_user,
+    retry_member_transfer_plan_for_user,
     resolve_member_recipient_for_user,
+    update_external_transfer_plan_for_user,
+    update_member_transfer_plan_for_user,
 )
 
 router = APIRouter(prefix="/api", tags=["banking"])
@@ -953,6 +959,29 @@ async def cancel_member_transfer_plan(
     return map_member_transfer_plan(row)
 
 
+@router.patch("/member-transfers/plans/{plan_id}", response_model=MemberTransferPlan)
+async def update_member_transfer_plan(
+    plan_id: str,
+    payload: UpdateMemberTransferPlanIn,
+    current_user: SupabaseUser = Depends(get_current_user),
+) -> MemberTransferPlan:
+    row = await update_member_transfer_plan_for_user(
+        current_user.id,
+        plan_id,
+        payload.model_dump(exclude_unset=True),
+    )
+    return map_member_transfer_plan(row)
+
+
+@router.post("/member-transfers/plans/{plan_id}/retry", response_model=MemberTransferPlan)
+async def retry_member_transfer_plan(
+    plan_id: str,
+    current_user: SupabaseUser = Depends(get_current_user),
+) -> MemberTransferPlan:
+    row = await retry_member_transfer_plan_for_user(current_user.id, plan_id)
+    return map_member_transfer_plan(row)
+
+
 @router.get("/external-accounts", response_model=list[ExternalAccount])
 async def list_external_accounts(
     current_user: SupabaseUser = Depends(get_current_user),
@@ -1032,6 +1061,29 @@ async def cancel_external_transfer_plan(
     current_user: SupabaseUser = Depends(get_current_user),
 ) -> ExternalTransferPlan:
     row = await cancel_external_transfer_plan_for_user(current_user.id, plan_id)
+    return map_external_transfer_plan(row)
+
+
+@router.patch("/external-transfers/plans/{plan_id}", response_model=ExternalTransferPlan)
+async def update_external_transfer_plan(
+    plan_id: str,
+    payload: UpdateExternalTransferPlanIn,
+    current_user: SupabaseUser = Depends(get_current_user),
+) -> ExternalTransferPlan:
+    row = await update_external_transfer_plan_for_user(
+        current_user.id,
+        plan_id,
+        payload.model_dump(exclude_unset=True),
+    )
+    return map_external_transfer_plan(row)
+
+
+@router.post("/external-transfers/plans/{plan_id}/retry", response_model=ExternalTransferPlan)
+async def retry_external_transfer_plan(
+    plan_id: str,
+    current_user: SupabaseUser = Depends(get_current_user),
+) -> ExternalTransferPlan:
+    row = await retry_external_transfer_plan_for_user(current_user.id, plan_id)
     return map_external_transfer_plan(row)
 
 
