@@ -166,6 +166,74 @@ function buildCalendarCells(monthDate: Date): Array<{ iso: string | null; dayNum
   return cells;
 }
 
+function advanceCadenceDate(value: string, cadence: ScheduledPayment['cadence']): string {
+  const parsed = parseDateInputValue(value);
+  if (!parsed) return value;
+  const baseDate = new Date(parsed.year, parsed.month - 1, parsed.day);
+  if (cadence === 'Daily') {
+    baseDate.setDate(baseDate.getDate() + 1);
+    return formatDateInputValue(baseDate);
+  }
+  if (cadence === 'Weekly') {
+    baseDate.setDate(baseDate.getDate() + 7);
+    return formatDateInputValue(baseDate);
+  }
+  if (cadence === 'Biweekly') {
+    baseDate.setDate(baseDate.getDate() + 14);
+    return formatDateInputValue(baseDate);
+  }
+  if (cadence === 'Monthly') {
+    const nextMonthYear = parsed.month === 12 ? parsed.year + 1 : parsed.year;
+    const nextMonth = parsed.month === 12 ? 1 : parsed.month + 1;
+    const lastDay = new Date(nextMonthYear, nextMonth, 0).getDate();
+    const clampedDay = Math.min(parsed.day, lastDay);
+    return formatDateInputValue(new Date(nextMonthYear, nextMonth - 1, clampedDay));
+  }
+  return value;
+}
+
+function enumeratePaymentOccurrencesForMonth(
+  payment: ScheduledPayment,
+  monthDate: Date,
+): string[] {
+  const monthStartIso = formatDateInputValue(new Date(monthDate.getFullYear(), monthDate.getMonth(), 1));
+  const monthEndIso = formatDateInputValue(new Date(monthDate.getFullYear(), monthDate.getMonth() + 1, 0));
+  const startIso = payment.deliverBy;
+  const endIso = payment.endDate;
+
+  if (!startIso || startIso > monthEndIso) return [];
+  if (endIso && endIso < monthStartIso) return [];
+
+  if (payment.cadence === 'Once') {
+    if (startIso < monthStartIso || startIso > monthEndIso) return [];
+    if (endIso && startIso > endIso) return [];
+    return [startIso];
+  }
+
+  let cursor = startIso;
+  let guard = 0;
+  while (cursor < monthStartIso && guard < 500) {
+    const next = advanceCadenceDate(cursor, payment.cadence);
+    if (next === cursor) break;
+    cursor = next;
+    guard += 1;
+  }
+
+  const occurrences: string[] = [];
+  while (cursor <= monthEndIso && guard < 900) {
+    if ((!endIso || cursor <= endIso) && cursor >= monthStartIso) {
+      occurrences.push(cursor);
+    }
+    const next = advanceCadenceDate(cursor, payment.cadence);
+    if (next === cursor) break;
+    cursor = next;
+    guard += 1;
+    if (endIso && cursor > endIso) break;
+  }
+
+  return occurrences;
+}
+
 function PaymentActionIcon({ icon }: { icon: 'retry' | 'edit' | 'delay' | 'delete' }) {
   if (icon === 'retry') {
     return (
@@ -408,20 +476,29 @@ export function BillPayPage() {
   const visiblePayments = payments.filter(
     (payment) => payment.status !== 'CANCELLED' && !(payment.cadence === 'Once' && payment.status === 'COMPLETED'),
   );
+  const paymentOccurrencesById = useMemo(() => {
+    const byId = new Map<string, string[]>();
+    visiblePayments.forEach((payment) => {
+      byId.set(payment.id, enumeratePaymentOccurrencesForMonth(payment, calendarMonth));
+    });
+    return byId;
+  }, [calendarMonth, visiblePayments]);
   const calendarPaymentCounts = useMemo(() => {
     const counts = new Map<string, number>();
-    visiblePayments.forEach((payment) => {
-      counts.set(payment.deliverBy, (counts.get(payment.deliverBy) ?? 0) + 1);
+    paymentOccurrencesById.forEach((occurrences) => {
+      occurrences.forEach((isoDay) => {
+        counts.set(isoDay, (counts.get(isoDay) ?? 0) + 1);
+      });
     });
     return counts;
-  }, [visiblePayments]);
+  }, [paymentOccurrencesById]);
   const calendarCells = useMemo(() => buildCalendarCells(calendarMonth), [calendarMonth]);
   const selectedDayPayments = useMemo(
     () =>
       visiblePayments
-        .filter((payment) => payment.deliverBy === selectedCalendarDate)
+        .filter((payment) => (paymentOccurrencesById.get(payment.id) ?? []).includes(selectedCalendarDate))
         .sort((left, right) => left.payeeName.localeCompare(right.payeeName)),
-    [selectedCalendarDate, visiblePayments],
+    [paymentOccurrencesById, selectedCalendarDate, visiblePayments],
   );
   const rows = visiblePayments.map((payment) => [
     payment.payeeName,
@@ -646,7 +723,12 @@ export function BillPayPage() {
               <div className="billpay-calendar__header">
                 <button
                   className="button button--ghost pagination-button"
-                  onClick={() => setCalendarMonth((current) => startOfMonth(new Date(current.getFullYear(), current.getMonth() - 1, 1)))}
+                  onClick={() =>
+                    setCalendarMonth((current) => {
+                      const next = startOfMonth(new Date(current.getFullYear(), current.getMonth() - 1, 1));
+                      setSelectedCalendarDate(formatDateInputValue(next));
+                      return next;
+                    })}
                   type="button"
                 >
                   Prev
@@ -654,7 +736,12 @@ export function BillPayPage() {
                 <strong>{monthLabel(calendarMonth)}</strong>
                 <button
                   className="button button--ghost pagination-button"
-                  onClick={() => setCalendarMonth((current) => startOfMonth(new Date(current.getFullYear(), current.getMonth() + 1, 1)))}
+                  onClick={() =>
+                    setCalendarMonth((current) => {
+                      const next = startOfMonth(new Date(current.getFullYear(), current.getMonth() + 1, 1));
+                      setSelectedCalendarDate(formatDateInputValue(next));
+                      return next;
+                    })}
                   type="button"
                 >
                   Next

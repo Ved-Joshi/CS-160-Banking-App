@@ -349,6 +349,7 @@ export interface ScheduledPayment {
   amount: number;
   cadence: 'Once' | 'Daily' | 'Weekly' | 'Biweekly' | 'Monthly';
   deliverBy: string;
+  endDate?: string;
   status: PaymentStatus;
   failureReason?: string;
 }

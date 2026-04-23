@@ -175,6 +175,7 @@ export function normalizePayment(input: unknown): ScheduledPayment {
     amount: asNumber(amount, 0),
     cadence: normalizePaymentCadence(row.cadence),
     deliverBy: asString(row.deliverBy) || asString(row.deliver_by) || asString(row.created_at),
+    endDate: asString(row.endDate) || asString(row.end_date) || undefined,
     status: normalizePaymentStatus(row.status),
     failureReason: asString(row.failureReason) || asString(row.failure_reason) || undefined,
   };
