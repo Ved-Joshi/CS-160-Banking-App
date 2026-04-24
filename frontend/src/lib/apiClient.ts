@@ -11,6 +11,7 @@ type ApiRequestOptions = {
   body?: unknown;
   auth?: boolean;
   query?: Record<string, string | number | undefined | null>;
+  headers?: Record<string, string>;
 };
 
 function normalizeErrorDetail(detail: unknown, fallback: string): string {
@@ -58,9 +59,10 @@ async function getAccessToken() {
 }
 
 export async function apiRequest<T>(path: string, options: ApiRequestOptions = {}): Promise<T> {
-  const { auth = true, body, method = body ? 'POST' : 'GET', query } = options;
+  const { auth = true, body, method = body ? 'POST' : 'GET', query, headers: customHeaders } = options;
   const headers: Record<string, string> = {
     Accept: 'application/json',
+    ...(customHeaders ?? {}),
   };
 
   if (auth) {

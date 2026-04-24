@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64" role="img" aria-label="Wells Fargo">
+  <rect width="64" height="64" rx="14" fill="#D71920"/>
+  <rect x="8" y="10" width="48" height="44" rx="8" fill="#F4BD00"/>
+  <text x="32" y="37" font-size="16" text-anchor="middle" fill="#B31B1B" font-family="Arial, sans-serif" font-weight="700">WF</text>
+</svg>

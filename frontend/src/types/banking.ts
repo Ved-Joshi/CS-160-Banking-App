@@ -8,8 +8,13 @@ export type TransactionType =
   | 'Interest';
 export type TransactionStatus = 'PENDING' | 'COMPLETED' | 'FAILED';
 export type DepositStatus = 'PENDING_REVIEW' | 'APPROVED' | 'DECLINED';
+export type DepositType = 'cash' | 'check';
 export type PaymentStatus = 'SCHEDULED' | 'PROCESSING' | 'COMPLETED' | 'FAILED' | 'CANCELLED';
 export type TransferStatus = 'PENDING' | 'COMPLETED' | 'FAILED';
+export type TransferScheduleMode = 'NOW' | 'SCHEDULED';
+export type TransferCadence = 'Once' | 'Daily' | 'Weekly' | 'Biweekly' | 'Monthly';
+export type TransferPlanStatus = 'SCHEDULED' | 'PROCESSING' | 'COMPLETED' | 'CANCELLED';
+export type ExternalTransferStatus = 'PROCESSING' | 'COMPLETED' | 'FAILED' | 'CANCELLED';
 export type NotificationType = 'deposit' | 'payment' | 'transfer' | 'security';
 
 export interface User {
@@ -31,7 +36,25 @@ export interface CustomerProfile {
   email: string;
   phone: string;
   address: string;
+  streetAddress: string;
+  apartmentUnit?: string | null;
+  city: string;
+  state: string;
+  zipCode: string;
   memberSince: string;
+  timezone: string;
+}
+
+export interface UpdateCustomerProfileInput {
+  firstName: string;
+  middleName?: string;
+  lastName: string;
+  phone: string;
+  streetAddress: string;
+  apartmentUnit?: string;
+  city: string;
+  state: string;
+  zipCode: string;
 }
 
 export interface RegistrationInput {
@@ -75,6 +98,7 @@ export interface BankAccount {
   /** User-facing reasons that currently block account closure. */
   closeReasons: string[];
   balances: BalanceSummary;
+  isDefaultInternalReceive?: boolean;
 }
 
 export interface CreateBankAccountInput {
@@ -107,11 +131,215 @@ export interface TransferResult {
   submittedAt: string;
 }
 
+export interface TransferPlan {
+  id: string;
+  fromAccountId: string;
+  toAccountId: string;
+  amount: number;
+  memo?: string;
+  cadence: TransferCadence;
+  startDate: string;
+  runTime: string;
+  timezone: string;
+  endDate?: string;
+  nextRunAt?: string;
+  lastRunAt?: string;
+  lastFailureReason?: string;
+  status: TransferPlanStatus;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface TransferSubmissionResult {
+  mode: TransferScheduleMode;
+  transfer?: TransferResult;
+  plan?: TransferPlan;
+}
+
+export interface MemberTransferRecipient {
+  userId: string;
+  displayName: string;
+  email: string;
+  defaultCheckingAccountMasked: string;
+}
+
+export interface MemberTransferRequest {
+  fromAccountId: string;
+  recipientEmail: string;
+  amount: number;
+  memo?: string;
+  scheduleMode: TransferScheduleMode;
+  transferDate?: string;
+  cadence?: TransferCadence;
+  startDate?: string;
+  runTime?: string;
+  endDate?: string;
+  timezone?: string;
+}
+
+export interface MemberTransfer {
+  id: string;
+  fromAccountId: string;
+  recipientUserId: string;
+  recipientDisplayName: string;
+  amount: number;
+  memo?: string;
+  transferDate: string;
+  status: TransferStatus;
+  submittedAt: string;
+  completedAt?: string;
+  failureReason?: string;
+}
+
+export interface MemberTransferPlan {
+  id: string;
+  fromAccountId: string;
+  recipientUserId: string;
+  recipientEmail: string;
+  recipientDisplayName: string;
+  amount: number;
+  memo?: string;
+  cadence: TransferCadence;
+  startDate: string;
+  runTime: string;
+  timezone: string;
+  endDate?: string;
+  nextRunAt?: string;
+  lastRunAt?: string;
+  lastFailureReason?: string;
+  status: TransferPlanStatus;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface MemberTransferSubmissionResult {
+  mode: TransferScheduleMode;
+  transfer?: MemberTransfer;
+  plan?: MemberTransferPlan;
+}
+
+export interface UpdateMemberTransferPlanInput {
+  amount?: number;
+  memo?: string;
+  cadence?: TransferCadence;
+  startDate?: string;
+  runTime?: string;
+  endDate?: string;
+  timezone?: string;
+}
+
+export interface ExternalAccount {
+  id: string;
+  bankName: string;
+  nickname: string;
+  accountType: 'Checking' | 'Savings';
+  maskedAccountNumber: string;
+  routingNumber: string;
+  verificationStatus: 'PENDING' | 'VERIFIED' | 'FAILED';
+  provider?: string;
+  providerAccountId?: string;
+  isActive: boolean;
+  createdAt: string;
+}
+
+export interface CreateExternalAccountInput {
+  bankName: string;
+  nickname: string;
+  accountType: 'Checking' | 'Savings';
+  routingNumber: string;
+  accountNumber: string;
+  confirmAccountNumber: string;
+}
+
+export interface ExternalLinkSession {
+  clientSecret: string;
+  sessionId: string;
+  publishableKey: string;
+}
+
+export interface CompleteExternalLinkInput {
+  accountId: string;
+}
+
+export interface ExternalTransferRequest {
+  fromAccountId: string;
+  externalAccountId: string;
+  amount: number;
+  memo?: string;
+  scheduleMode: TransferScheduleMode;
+  transferDate?: string;
+  cadence?: TransferCadence;
+  startDate?: string;
+  runTime?: string;
+  endDate?: string;
+  timezone?: string;
+}
+
+export interface ExternalTransfer {
+  id: string;
+  fromAccountId: string;
+  externalAccountId: string;
+  externalAccountLabel: string;
+  amount: number;
+  memo?: string;
+  transferDate: string;
+  status: ExternalTransferStatus;
+  submittedAt: string;
+  processedAt?: string;
+  completedAt?: string;
+  settleAfter?: string;
+  failureReason?: string;
+}
+
+export interface ExternalTransferPlan {
+  id: string;
+  fromAccountId: string;
+  externalAccountId: string;
+  externalAccountLabel: string;
+  amount: number;
+  memo?: string;
+  cadence: TransferCadence;
+  startDate: string;
+  runTime: string;
+  timezone: string;
+  endDate?: string;
+  nextRunAt?: string;
+  lastRunAt?: string;
+  lastFailureReason?: string;
+  status: TransferPlanStatus;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ExternalTransferSubmissionResult {
+  mode: TransferScheduleMode;
+  transfer?: ExternalTransfer;
+  plan?: ExternalTransferPlan;
+}
+
+export interface UpdateExternalTransferPlanInput {
+  amount?: number;
+  memo?: string;
+  cadence?: TransferCadence;
+  startDate?: string;
+  runTime?: string;
+  endDate?: string;
+  timezone?: string;
+}
+
 export interface Payee {
   id: string;
   name: string;
   category: string;
   accountMask: string;
+}
+
+export interface CreatePayeeInput {
+  name: string;
+  category: string;
+  routingNumber: string;
+  accountNumber: string;
+  confirmAccountNumber: string;
 }
 
 export interface ScheduledPayment {
@@ -120,17 +348,26 @@ export interface ScheduledPayment {
   payeeName: string;
   accountId: string;
   amount: number;
-  cadence: 'Once' | 'Monthly' | 'Biweekly';
+  cadence: 'Once' | 'Daily' | 'Weekly' | 'Biweekly' | 'Monthly';
   deliverBy: string;
+  endDate?: string;
   status: PaymentStatus;
+  failureReason?: string;
 }
 
 export interface CreateScheduledPaymentInput {
   payeeId: string;
   accountId: string;
   amount: number;
-  cadence: 'Once' | 'Weekly' | 'Biweekly' | 'Monthly';
+  cadence: 'Once' | 'Daily' | 'Weekly' | 'Biweekly' | 'Monthly';
   deliverBy: string;
+}
+
+export interface UpdateScheduledPaymentInput {
+  payeeId?: string;
+  amount?: number;
+  cadence?: 'Once' | 'Daily' | 'Weekly' | 'Biweekly' | 'Monthly';
+  deliverBy?: string;
 }
 
 export interface DepositImage {
@@ -143,6 +380,7 @@ export interface Deposit {
   id: string;
   accountId: string;
   amount: number;
+  depositType: DepositType;
   submittedAt: string;
   status: DepositStatus;
   note?: string;
@@ -172,8 +410,7 @@ export interface CreateDepositUploadUrlsInput {
 export interface CreateDepositInput {
   accountId: string;
   amount: number;
-  frontImagePath: string;
-  backImagePath: string;
+  depositType: DepositType;
 }
 
 export interface AtmLocation {

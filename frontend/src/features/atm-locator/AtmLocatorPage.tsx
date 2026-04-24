@@ -12,68 +12,93 @@ type SearchTarget =
 
 type LocationState = 'idle' | 'requesting' | 'ready' | 'denied' | 'error' | 'unsupported';
 type MapState = 'idle' | 'loading' | 'ready' | 'error';
+const EMPTY_ATMS: NonNullable<Awaited<ReturnType<typeof atmService.search>>['atms']> = [];
+const ATM_BASE_RADIUS_MILES = 25;
+const ATM_BASE_LIMIT = 50;
+const ATM_DISPLAY_LIMIT = 20;
 
-function buildSearchInput(target: SearchTarget, radiusMiles: number, openNow: boolean): AtmSearchInput | null {
+function buildLocationInput(target: SearchTarget): AtmSearchInput | null {
   if (!target) return null;
   if (target.mode === 'coords') {
     return {
       lat: target.lat,
       lng: target.lng,
-      radiusMiles,
-      openNow,
     };
   }
   return {
     query: target.query,
-    radiusMiles,
-    openNow,
   };
+}
+
+function isSafeDirectionsUrl(value: string): boolean {
+  try {
+    const parsed = new URL(value);
+    return parsed.protocol === 'http:' || parsed.protocol === 'https:';
+  } catch {
+    return false;
+  }
+}
+
+function getFeatureClassName(feature: string): string {
+  const normalized = feature.trim().toLowerCase();
+  if (normalized === 'open now' || normalized === 'open') {
+    return 'status-chip status-chip--open';
+  }
+  if (normalized === 'closed') {
+    return 'status-chip status-chip--failed';
+  }
+  return 'atm-feature';
 }
 
 export function AtmLocatorPage() {
   const [searchText, setSearchText] = useState('');
   const [radiusMiles, setRadiusMiles] = useState(10);
   const [openNow, setOpenNow] = useState(false);
-  const [locationState, setLocationState] = useState<LocationState>('idle');
+  const [locationState, setLocationState] = useState<LocationState>(() =>
+    typeof navigator !== 'undefined' && navigator.geolocation ? 'requesting' : 'unsupported',
+  );
   const [target, setTarget] = useState<SearchTarget>(null);
   const [selectedAtmId, setSelectedAtmId] = useState<string | null>(null);
-  const [mapState, setMapState] = useState<MapState>(isGoogleMapsConfigured() ? 'idle' : 'error');
+  const [mapState, setMapState] = useState<MapState>(isGoogleMapsConfigured() ? 'loading' : 'error');
   const mapCanvasRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<google.maps.Map | null>(null);
   const markersRef = useRef<Array<{ id: string; marker: google.maps.Marker; listener: google.maps.MapsEventListener }>>([]);
   const cardRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const lastScrolledAtmIdRef = useRef<string | null>(null);
 
-  const searchInput = useMemo(() => buildSearchInput(target, radiusMiles, openNow), [openNow, radiusMiles, target]);
+  const locationInput = useMemo(() => buildLocationInput(target), [target]);
 
   const searchQuery = useQuery({
-    queryKey: ['atm-search', searchInput],
-    queryFn: () => atmService.search(searchInput!),
-    enabled: Boolean(searchInput),
+    queryKey: ['atm-search', locationInput],
+    queryFn: () =>
+      atmService.search({
+        ...locationInput!,
+        radiusMiles: ATM_BASE_RADIUS_MILES,
+        openNow: false,
+        limit: ATM_BASE_LIMIT,
+      }),
+    enabled: Boolean(locationInput),
     staleTime: 10 * 60 * 1000,
   });
 
-  const atms = searchQuery.data?.atms ?? [];
+  const atms = useMemo(() => {
+    const baseAtms = searchQuery.data?.atms ?? EMPTY_ATMS;
+    const filtered = baseAtms.filter((atm) => {
+      if (atm.distanceMiles > radiusMiles) return false;
+      if (openNow && atm.openNow === false) return false;
+      return true;
+    });
+    return filtered.slice(0, ATM_DISPLAY_LIMIT);
+  }, [openNow, radiusMiles, searchQuery.data?.atms]);
   const center = searchQuery.data?.center;
-  const selectedAtm = atms.find((atm) => atm.id === selectedAtmId) ?? atms[0] ?? null;
+  const activeAtmId = selectedAtmId && atms.some((atm) => atm.id === selectedAtmId) ? selectedAtmId : atms[0]?.id ?? null;
+  const selectedAtm = atms.find((atm) => atm.id === activeAtmId) ?? null;
 
   useEffect(() => {
-    if (!atms.length) {
-      setSelectedAtmId(null);
-      return;
-    }
-    if (!selectedAtmId || !atms.some((atm) => atm.id === selectedAtmId)) {
-      setSelectedAtmId(atms[0].id);
-    }
-  }, [atms, selectedAtmId]);
-
-  useEffect(() => {
-    if (!isGoogleMapsConfigured()) {
-      setMapState('error');
+    if (mapState !== 'loading') {
       return;
     }
     let cancelled = false;
-    setMapState('loading');
     void loadGoogleMaps()
       .then(() => {
         if (!cancelled) {
@@ -88,7 +113,7 @@ export function AtmLocatorPage() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [mapState]);
 
   useEffect(() => {
     if (mapState !== 'ready' || !mapCanvasRef.current || !center || !window.google?.maps) {
@@ -161,31 +186,29 @@ export function AtmLocatorPage() {
   }, [selectedAtm]);
 
   useEffect(() => {
-    if (!selectedAtmId) {
+    if (!activeAtmId) {
       lastScrolledAtmIdRef.current = null;
       return;
     }
     if (lastScrolledAtmIdRef.current === null) {
-      lastScrolledAtmIdRef.current = selectedAtmId;
+      lastScrolledAtmIdRef.current = activeAtmId;
       return;
     }
-    if (lastScrolledAtmIdRef.current === selectedAtmId) {
+    if (lastScrolledAtmIdRef.current === activeAtmId) {
       return;
     }
-    cardRefs.current[selectedAtmId]?.scrollIntoView({
+    cardRefs.current[activeAtmId]?.scrollIntoView({
       behavior: 'smooth',
       block: 'nearest',
     });
-    lastScrolledAtmIdRef.current = selectedAtmId;
-  }, [selectedAtmId]);
+    lastScrolledAtmIdRef.current = activeAtmId;
+  }, [activeAtmId]);
 
   useEffect(() => {
     if (!navigator.geolocation) {
-      setLocationState('unsupported');
       return;
     }
 
-    setLocationState('requesting');
     navigator.geolocation.getCurrentPosition(
       (position) => {
         setLocationState('ready');
@@ -197,7 +220,6 @@ export function AtmLocatorPage() {
         });
       },
       (error) => {
-        setTarget(null);
         if (error.code === error.PERMISSION_DENIED) {
           setLocationState('denied');
           return;
@@ -221,7 +243,6 @@ export function AtmLocatorPage() {
 
   const handleUseMyLocation = () => {
     if (!navigator.geolocation) {
-      setLocationState('unsupported');
       return;
     }
     setLocationState('requesting');
@@ -335,9 +356,10 @@ export function AtmLocatorPage() {
                 />
               ) : (
                 <div className="list-stack">
-                  {atms.map((atm, index) => (
+                  {atms.map((atm, index) => {
+                    return (
                     <div
-                      className={atm.id === selectedAtmId ? 'atm-card atm-card--selected' : 'atm-card'}
+                      className={atm.id === activeAtmId ? 'atm-card atm-card--selected' : 'atm-card'}
                       key={atm.id}
                       ref={(element) => {
                         cardRefs.current[atm.id] = element;
@@ -360,7 +382,7 @@ export function AtmLocatorPage() {
                         {atm.features.length ? (
                           <div className="atm-card__features">
                             {atm.features.map((feature) => (
-                              <span className="atm-feature" key={`${atm.id}-${feature}`}>
+                              <span className={getFeatureClassName(feature)} key={`${atm.id}-${feature}`}>
                                 {feature}
                               </span>
                             ))}
@@ -378,14 +400,17 @@ export function AtmLocatorPage() {
                           variant="secondary"
                           onClick={(event) => {
                             event.stopPropagation();
+                            if (!isSafeDirectionsUrl(atm.directionsUrl)) return;
                             window.open(atm.directionsUrl, '_blank', 'noopener,noreferrer');
                           }}
+                          disabled={!isSafeDirectionsUrl(atm.directionsUrl)}
                         >
                           Directions
                         </Button>
                       </div>
                     </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
             </div>

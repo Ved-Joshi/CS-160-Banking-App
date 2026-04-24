@@ -23,6 +23,12 @@ fi
 
 BACKEND_PID=""
 FRONTEND_PID=""
+SCHEDULER_PID=""
+
+RUNNER_SECRET="${TRANSFER_RUNNER_SECRET:-}"
+if [[ -z "$RUNNER_SECRET" ]] && [[ -f "$BACKEND_DIR/.env" ]]; then
+  RUNNER_SECRET="$(sed -n 's/^TRANSFER_RUNNER_SECRET=\(.*\)$/\1/p' "$BACKEND_DIR/.env" | tail -n 1 | tr -d '"' | tr -d "'" )"
+fi
 
 cleanup() {
   if [[ -n "$BACKEND_PID" ]] && kill -0 "$BACKEND_PID" >/dev/null 2>&1; then
@@ -30,6 +36,9 @@ cleanup() {
   fi
   if [[ -n "$FRONTEND_PID" ]] && kill -0 "$FRONTEND_PID" >/dev/null 2>&1; then
     kill "$FRONTEND_PID" >/dev/null 2>&1 || true
+  fi
+  if [[ -n "$SCHEDULER_PID" ]] && kill -0 "$SCHEDULER_PID" >/dev/null 2>&1; then
+    kill "$SCHEDULER_PID" >/dev/null 2>&1 || true
   fi
 }
 
@@ -49,9 +58,32 @@ echo "Starting frontend on http://localhost:5173"
 ) &
 FRONTEND_PID=$!
 
+if [[ -n "$RUNNER_SECRET" ]]; then
+  echo "Starting internal scheduler runner loop (60s interval)"
+  (
+    while true; do
+      curl -fsS -X POST "http://localhost:8000/internal/jobs/process-transfer-plans?limit=50" \
+        -H "X-Runner-Secret: $RUNNER_SECRET" >/dev/null || true
+      curl -fsS -X POST "http://localhost:8000/internal/jobs/process-member-transfer-plans?limit=50" \
+        -H "X-Runner-Secret: $RUNNER_SECRET" >/dev/null || true
+      curl -fsS -X POST "http://localhost:8000/internal/jobs/process-external-transfers?limit=50" \
+        -H "X-Runner-Secret: $RUNNER_SECRET" >/dev/null || true
+      curl -fsS -X POST "http://localhost:8000/internal/jobs/process-bill-payments?limit=50" \
+        -H "X-Runner-Secret: $RUNNER_SECRET" >/dev/null || true
+      sleep 60
+    done
+  ) &
+  SCHEDULER_PID=$!
+else
+  echo "Skipping scheduler runner loop: TRANSFER_RUNNER_SECRET is not set."
+fi
+
 echo
 echo "Backend PID: $BACKEND_PID"
 echo "Frontend PID: $FRONTEND_PID"
+if [[ -n "$SCHEDULER_PID" ]]; then
+  echo "Scheduler PID: $SCHEDULER_PID"
+fi
 echo "Press Ctrl+C to stop both servers."
 echo
 
@@ -62,6 +94,10 @@ while true; do
   fi
   if ! kill -0 "$FRONTEND_PID" >/dev/null 2>&1; then
     echo "Frontend process exited."
+    exit 1
+  fi
+  if [[ -n "$SCHEDULER_PID" ]] && ! kill -0 "$SCHEDULER_PID" >/dev/null 2>&1; then
+    echo "Scheduler process exited."
     exit 1
   fi
   sleep 1

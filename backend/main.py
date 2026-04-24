@@ -6,6 +6,7 @@ from routers.banking_read import router as banking_read_router
 from routers.admin import router as admin_router
 from routers.me_admin import router as me_admin_router
 from routers import accounts
+from routers.internal_jobs import router as internal_jobs_router
 
 
 app = FastAPI(
@@ -53,6 +54,7 @@ app.include_router(banking_read_router)
 app.include_router(admin_router)
 app.include_router(me_admin_router)
 app.include_router(accounts.router)
+app.include_router(internal_jobs_router)
 
 
 @app.get("/health")

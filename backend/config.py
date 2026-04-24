@@ -34,6 +34,16 @@ class Settings(BaseSettings):
     # Google Maps / Places configuration for ATM locator
     GOOGLE_MAPS_API_KEY: Optional[str] = None
 
+    # Internal scheduler auth for processing due transfer plans
+    TRANSFER_RUNNER_SECRET: Optional[str] = None
+
+    # External account linking provider: stripe_sandbox | local
+    EXTERNAL_ACCOUNT_PROVIDER: str = "stripe_sandbox"
+
+    # Stripe sandbox linking configuration (Financial Connections)
+    STRIPE_SECRET_KEY: Optional[str] = None
+    STRIPE_PUBLISHABLE_KEY: Optional[str] = None
+
 settings = Settings()
 
 if not settings.DEBUG and settings.JWT_SECRET == "change-me":

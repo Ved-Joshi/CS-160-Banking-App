@@ -7,6 +7,7 @@ import { z } from 'zod';
 import { Button, Card, Dialog, EmptyState, Field, InlineAlert, PageHeader, StatusChip } from '../../components/ui';
 import { accountsService, transactionsService } from '../../lib/bankingApi';
 import { formatCurrency, formatDate } from '../../lib/format';
+import { queryKeys } from '../../lib/queryKeys';
 import type { AccountType, BankAccount } from '../../types/banking';
 
 const createAccountSchema = z.object({
@@ -18,17 +19,17 @@ const accountTypeContent: Record<AccountType, { eyebrow: string; summary: string
   Checking: {
     eyebrow: 'Everyday banking',
     summary: 'Built for direct deposit, purchases, and routine money movement.',
-    detail: 'Checking accounts receive the standard routing number used in the current demo environment and appear immediately across transfers, bill pay, and deposits.',
+    detail: 'Checking accounts receive randomly generated routing and account numbers, then appear immediately across transfers, bill pay, and deposits.',
   },
   Savings: {
     eyebrow: 'Set money aside',
     summary: 'A simple savings product for short-term reserves and emergency funds.',
-    detail: 'Savings accounts also receive the demo routing number and can be used anywhere the dashboard offers account selection.',
+    detail: 'Savings accounts also receive unique routing and account numbers and can be used anywhere the dashboard offers account selection.',
   },
   Credit: {
     eyebrow: 'Borrowing line',
-    summary: 'Track revolving balance activity without showing a routing number.',
-    detail: 'Credit accounts appear in your account list right away and are available for activity views, but do not receive a routing number.',
+    summary: 'Track revolving balance activity with account-level details.',
+    detail: 'Credit accounts appear in your account list right away and are available for activity views, transfers, and payment routing flows.',
   },
 };
 
@@ -97,7 +98,7 @@ export function AccountsPage() {
     data: accounts = [],
     error: accountsError,
     isLoading: accountsLoading,
-  } = useQuery({ queryKey: ['accounts'], queryFn: accountsService.list });
+  } = useQuery({ queryKey: queryKeys.accounts(), queryFn: accountsService.list });
 
   useEffect(() => {
     if (!navigationState) return;
@@ -242,7 +243,7 @@ export function AccountsPage() {
                   <p className="eyebrow">{account.type}</p>
                   <h3>{account.nickname}</h3>
                 </div>
-                <p className="muted">{account.maskedNumber}</p>
+                <p className="muted">{account.maskedNumber || '••••'}</p>
                 <dl className="stat-list">
                   <div>
                     <dt>Available</dt>
@@ -300,7 +301,7 @@ export function OpenAccountPage() {
   const createAccount = useMutation({
     mutationFn: accountsService.create,
     onSuccess: async (created) => {
-      await queryClient.invalidateQueries({ queryKey: ['accounts'] });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.accounts() });
       navigate('/app/accounts', {
         state: {
           createdAccountId: created.id,
@@ -421,14 +422,14 @@ export function AccountDetailPage() {
     data: account,
     isLoading: accountLoading,
     refetch: refetchAccount,
-  } = useQuery({ queryKey: ['accounts', accountId], queryFn: () => accountsService.get(accountId) });
-  const { data: transactions = [] } = useQuery({ queryKey: ['transactions'], queryFn: transactionsService.list });
+  } = useQuery({ queryKey: queryKeys.account(accountId), queryFn: () => accountsService.get(accountId) });
+  const { data: transactions = [] } = useQuery({ queryKey: queryKeys.transactions(), queryFn: transactionsService.list });
   const closeAccount = useMutation({
     mutationFn: accountsService.close,
     onSuccess: async () => {
       if (!account) return;
-      await queryClient.invalidateQueries({ queryKey: ['accounts'] });
-      queryClient.removeQueries({ queryKey: ['accounts', accountId] });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.accounts() });
+      queryClient.removeQueries({ queryKey: queryKeys.account(accountId) });
       navigate('/app/accounts', {
         state: {
           closedAccountName: account.nickname,
@@ -467,7 +468,7 @@ export function AccountDetailPage() {
       <PageHeader
         title={account.nickname}
         eyebrow={`${account.type} account`}
-        subtitle={`${account.maskedNumber} • Routing ${account.routingNumber}`}
+        subtitle={`${account.maskedNumber || '••••'} • Routing ${account.routingNumber || 'N/A'}`}
         actions={(
           <div className="account-detail-header-actions">
             <Link className="button button--secondary" to="/app/accounts">Back to accounts</Link>
@@ -508,11 +509,11 @@ export function AccountDetailPage() {
             </div>
             <div>
               <span>Account number</span>
-              <strong>{account.maskedNumber}</strong>
+              <strong>{account.maskedNumber || '••••'}</strong>
             </div>
             <div>
               <span>Routing</span>
-              <strong>{account.routingNumber}</strong>
+              <strong>{account.routingNumber || 'N/A'}</strong>
             </div>
           </div>
         </div>
@@ -535,20 +536,25 @@ export function AccountDetailPage() {
           <div className="activity-feed">
             {accountTransactions.map((transaction) => (
               <div className="activity-item" key={transaction.id}>
-                <div className="activity-item__icon" aria-hidden="true">
+                <div
+                  aria-hidden="true"
+                  className={transaction.direction === 'credit' ? 'activity-item__icon activity-item__icon--credit' : 'activity-item__icon activity-item__icon--debit'}
+                >
                   {transaction.direction === 'credit' ? '+' : '−'}
                 </div>
                 <div className="activity-item__content">
                   <div className="activity-item__primary">
                     <strong>{transaction.description}</strong>
-                    <span>{transaction.type}</span>
+                    <span>
+                      {transaction.type} • {transaction.direction === 'credit' ? 'Money in' : 'Money out'}
+                    </span>
                   </div>
                   <div className="activity-item__secondary">
                     <span>{formatDate(transaction.postedAt)}</span>
                     <StatusChip status={transaction.status} />
                   </div>
                 </div>
-                <div className={transaction.direction === 'credit' ? 'activity-item__amount activity-item__amount--credit' : 'activity-item__amount'}>
+                <div className={transaction.direction === 'credit' ? 'activity-item__amount activity-item__amount--credit' : 'activity-item__amount activity-item__amount--debit'}>
                   {transaction.direction === 'credit' ? '+' : '-'}{formatCurrency(transaction.amount)}
                 </div>
               </div>
@@ -584,7 +590,7 @@ export function AccountDetailPage() {
             <Button
               disabled={closeAccount.isPending || !account.canClose}
               onClick={() => {
-                void closeAccount.mutateAsync(account.id);
+                closeAccount.mutate(account.id);
               }}
               type="button"
               variant="destructive"
@@ -608,13 +614,13 @@ export function AccountDetailPage() {
         <div className="stack-sm">
           {!account.canClose ? (
             <InlineAlert title="Account not eligible for closure" tone="warning">
-              {account.closeReasons[0] ?? 'This account still has blocking activity.'}
+              {account.closeReasons.length ? account.closeReasons.join(' ') : 'This account still has blocking activity.'}
             </InlineAlert>
           ) : null}
           <div className="summary-row">
             <div className="summary-row__primary">
               <strong>{account.nickname}</strong>
-              <span className="muted">{account.type} • {account.maskedNumber}</span>
+              <span className="muted">{account.type} • {account.maskedNumber || '••••'}</span>
             </div>
           </div>
           <div className="summary-row">

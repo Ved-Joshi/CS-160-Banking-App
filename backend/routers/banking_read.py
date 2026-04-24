@@ -1,9 +1,8 @@
+from datetime import date, datetime, timezone
 from pathlib import PurePosixPath
-from datetime import datetime, timezone
-import logging
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Header, Query, status
 
 from dependencies.auth import get_current_user
 from schemas.banking import (
@@ -14,6 +13,14 @@ from schemas.banking import (
     CreateBankAccountIn,
     CreateDepositIn,
     CreateDepositUploadUrlsIn,
+    CreatePayeeIn,
+    CreateExternalLinkSessionOut,
+    CompleteExternalLinkIn,
+    CreateExternalAccountIn,
+    CreateExternalTransferIn,
+    CreateMemberTransferIn,
+    UpdateExternalTransferPlanIn,
+    UpdateMemberTransferPlanIn,
     CreateScheduledPaymentIn,
     CreateTransferIn,
     CustomerProfile,
@@ -21,19 +28,64 @@ from schemas.banking import (
     DepositImage,
     DepositImages,
     DepositUploadUrls,
+    ExternalAccount,
+    ExternalTransfer,
+    ExternalTransferPlan,
+    ExternalTransferSubmissionResult,
+    MemberTransfer,
+    MemberTransferPlan,
+    MemberTransferRecipient,
+    MemberTransferSubmissionResult,
     NotificationItem,
     Payee,
     ScheduledPayment,
     SignedUploadTarget,
     Transaction,
     TransferResult,
+    UpdateCustomerProfileIn,
+    UpdateScheduledPaymentIn,
 )
 from utils.google_maps import SearchCenter, geocode_query, search_chase_atms
-from utils.supabase import SupabaseUser, amount_to_cents, cents_to_amount, random_last4, supabase_client
-from services.transfer_service import create_transfer_for_user
+from utils.banking_numbers import (
+    generate_unique_account_identifiers,
+    validate_account_number,
+    validate_routing_number,
+)
+from utils.supabase import SupabaseUser, amount_to_cents, cents_to_amount, supabase_client
+from services.payment_service import (
+    attempt_payment_run,
+    build_payment_update_payload,
+    execute_payment_for_user,
+    finalize_idempotency_key,
+    get_idempotency_replay,
+    get_user_timezone_name,
+    local_today_for_timezone,
+    next_run_at_for_date,
+    parse_deliver_by_with_timezone,
+    reserve_idempotency_key,
+    validate_payment_amount_or_raise,
+)
+from services.transfer_service import (
+    cancel_external_transfer_plan_for_user,
+    cancel_member_transfer_plan_for_user,
+    complete_external_link_for_user,
+    create_external_link_session_for_user,
+    create_external_account_for_user,
+    create_external_transfer_for_user,
+    create_member_transfer_for_user,
+    create_transfer_for_user,
+    list_external_accounts_for_user,
+    list_external_transfer_plans_for_user,
+    list_external_transfers_for_user,
+    list_member_transfer_plans_for_user,
+    retry_external_transfer_plan_for_user,
+    retry_member_transfer_plan_for_user,
+    resolve_member_recipient_for_user,
+    update_external_transfer_plan_for_user,
+    update_member_transfer_plan_for_user,
+)
 
 router = APIRouter(prefix="/api", tags=["banking"])
-logger = logging.getLogger(__name__)
 
 
 def map_account_type(value: str) -> str:
@@ -98,6 +150,7 @@ def normalize_transaction_status_filter(value: str | None) -> str | None:
 def map_payment_cadence(value: str) -> str:
     return {
         "once": "Once",
+        "daily": "Daily",
         "weekly": "Weekly",
         "biweekly": "Biweekly",
         "monthly": "Monthly",
@@ -117,6 +170,7 @@ def map_payment_status(value: str) -> str:
 def normalize_payment_cadence(value: str) -> str:
     return {
         "Once": "once",
+        "Daily": "daily",
         "Weekly": "weekly",
         "Biweekly": "biweekly",
         "Monthly": "monthly",
@@ -148,6 +202,47 @@ def map_transfer_status(value: str) -> str:
         "failed": "FAILED",
         "cancelled": "FAILED",
     }.get(value, "PENDING")
+
+
+def map_schedule_mode(value: str | None) -> str:
+    return "SCHEDULED" if (value or "").upper() == "SCHEDULED" else "NOW"
+
+
+def map_transfer_cadence(value: str) -> str:
+    return {
+        "daily": "Daily",
+        "weekly": "Weekly",
+        "biweekly": "Biweekly",
+        "monthly": "Monthly",
+        "once": "Once",
+    }.get(value, "Once")
+
+
+def map_plan_status(value: str) -> str:
+    return {
+        "processing": "PROCESSING",
+        "completed": "COMPLETED",
+        "cancelled": "CANCELLED",
+    }.get(value, "SCHEDULED")
+
+
+def map_external_transfer_status(value: str) -> str:
+    return {
+        "completed": "COMPLETED",
+        "failed": "FAILED",
+        "cancelled": "CANCELLED",
+    }.get(value, "PROCESSING")
+
+
+def map_external_account_type(value: str) -> str:
+    return "Savings" if value == "savings" else "Checking"
+
+
+def map_external_verification_status(value: str) -> str:
+    return {
+        "pending": "PENDING",
+        "failed": "FAILED",
+    }.get(value, "VERIFIED")
 
 
 def build_close_reasons(
@@ -246,6 +341,7 @@ def map_account(
             "availableBalance": cents_to_amount(row.get("available_balance_cents")),
             "currentBalance": cents_to_amount(row.get("current_balance_cents")),
         },
+        isDefaultInternalReceive=bool(row.get("is_default_internal_receive")),
     )
 
 
@@ -264,12 +360,118 @@ def map_transaction(row: dict) -> Transaction:
     )
 
 
+def map_member_transfer_recipient(row: dict) -> MemberTransferRecipient:
+    return MemberTransferRecipient(
+        userId=row["userId"],
+        displayName=row["displayName"],
+        email=row["email"],
+        defaultCheckingAccountMasked=row["defaultCheckingAccountMasked"],
+    )
+
+
+def map_member_transfer(row: dict) -> MemberTransfer:
+    return MemberTransfer(
+        id=row["id"],
+        fromAccountId=row["from_account_id"],
+        recipientUserId=row["recipient_user_id"],
+        recipientDisplayName=row.get("recipient_display_name") or "Member",
+        amount=cents_to_amount(row.get("amount_cents")),
+        memo=row.get("memo"),
+        transferDate=row.get("transfer_date") or "",
+        status=map_transfer_status(row.get("status", "pending")),
+        submittedAt=row.get("submitted_at") or row.get("created_at") or "",
+        completedAt=row.get("completed_at"),
+        failureReason=row.get("failure_reason"),
+    )
+
+
+def map_member_transfer_plan(row: dict) -> MemberTransferPlan:
+    return MemberTransferPlan(
+        id=row["id"],
+        fromAccountId=row["from_account_id"],
+        recipientUserId=row["recipient_user_id"],
+        recipientEmail=row.get("recipient_handle") or "",
+        recipientDisplayName=row.get("recipient_display_name") or "Member",
+        amount=cents_to_amount(row.get("amount_cents")),
+        memo=row.get("memo"),
+        cadence=map_transfer_cadence(row.get("cadence", "once")),
+        startDate=row.get("start_date") or "",
+        runTime=(row.get("run_time") or "")[:5],
+        timezone=row.get("timezone") or "UTC",
+        endDate=row.get("end_date"),
+        nextRunAt=row.get("next_run_at"),
+        lastRunAt=row.get("last_run_at"),
+        lastFailureReason=row.get("last_failure_reason"),
+        status=map_plan_status(row.get("status", "scheduled")),
+        createdAt=row.get("created_at") or "",
+        updatedAt=row.get("updated_at") or "",
+    )
+
+
+def map_external_account(row: dict) -> ExternalAccount:
+    return ExternalAccount(
+        id=row["id"],
+        bankName=row.get("bank_name") or "External bank",
+        nickname=row.get("nickname") or "External account",
+        accountType=map_external_account_type(row.get("account_type", "checking")),
+        maskedAccountNumber=row.get("masked_account_number") or "...----",
+        routingNumber=row.get("routing_number") or "",
+        verificationStatus=map_external_verification_status(row.get("verification_status", "verified")),
+        provider=row.get("provider"),
+        providerAccountId=row.get("provider_account_id"),
+        isActive=bool(row.get("is_active", True)),
+        createdAt=row.get("created_at") or "",
+    )
+
+
+def map_external_transfer(row: dict) -> ExternalTransfer:
+    return ExternalTransfer(
+        id=row["id"],
+        fromAccountId=row["from_account_id"],
+        externalAccountId=row["external_account_id"],
+        externalAccountLabel=row.get("external_account_label") or "External bank",
+        amount=cents_to_amount(row.get("amount_cents")),
+        memo=row.get("memo"),
+        transferDate=row.get("transfer_date") or "",
+        status=map_external_transfer_status(row.get("status", "processing")),
+        submittedAt=row.get("submitted_at") or row.get("created_at") or "",
+        processedAt=row.get("processed_at"),
+        completedAt=row.get("completed_at"),
+        settleAfter=row.get("settle_after"),
+        failureReason=row.get("failure_reason"),
+    )
+
+
+def map_external_transfer_plan(row: dict) -> ExternalTransferPlan:
+    return ExternalTransferPlan(
+        id=row["id"],
+        fromAccountId=row["from_account_id"],
+        externalAccountId=row["external_account_id"],
+        externalAccountLabel=row.get("external_account_label") or "External bank",
+        amount=cents_to_amount(row.get("amount_cents")),
+        memo=row.get("memo"),
+        cadence=map_transfer_cadence(row.get("cadence", "once")),
+        startDate=row.get("start_date") or "",
+        runTime=(row.get("run_time") or "")[:5],
+        timezone=row.get("timezone") or "UTC",
+        endDate=row.get("end_date"),
+        nextRunAt=row.get("next_run_at"),
+        lastRunAt=row.get("last_run_at"),
+        lastFailureReason=row.get("last_failure_reason"),
+        status=map_plan_status(row.get("status", "scheduled")),
+        createdAt=row.get("created_at") or "",
+        updatedAt=row.get("updated_at") or "",
+    )
+
+
 def map_payee(row: dict) -> Payee:
+    account_number = row.get("account_number")
+    account_last4 = row.get("account_last4") or (account_number[-4:] if isinstance(account_number, str) and len(account_number) >= 4 else None)
     return Payee(
         id=row["id"],
         name=row.get("name") or "Unnamed payee",
         category=row.get("category") or "Other",
-        accountMask=f"...{row.get('account_last4') or '----'}",
+        accountMask=f"...{account_last4 or '----'}",
     )
 
 
@@ -284,6 +486,7 @@ def map_payment(row: dict) -> ScheduledPayment:
         cadence=map_payment_cadence(row.get("cadence", "once")),
         deliverBy=row.get("deliver_by") or row.get("created_at") or "",
         status=map_payment_status(row.get("status", "scheduled")),
+        failureReason=row.get("failure_reason"),
     )
 
 
@@ -304,6 +507,7 @@ def map_deposit(row: dict) -> Deposit:
         id=row["id"],
         accountId=row["account_id"],
         amount=cents_to_amount(row.get("amount_cents")),
+        depositType=row.get("deposit_type") or "check",
         submittedAt=submitted_at,
         status=map_deposit_status(row.get("status", "submitted")),
         note=row.get("note"),
@@ -349,6 +553,57 @@ def format_address(profile: dict) -> str:
     street = ", ".join(part for part in [profile.get("street_address"), profile.get("apartment_unit")] if part)
     locality = ", ".join(part for part in [profile.get("city"), profile.get("state"), profile.get("zip_code")] if part)
     return ", ".join(part for part in [street, locality] if part) or "—"
+
+
+def normalize_phone_e164(value: str) -> str:
+    digits = "".join(char for char in value if char.isdigit())
+    if len(digits) == 11 and digits.startswith("1"):
+        digits = digits[1:]
+    if len(digits) != 10:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Phone number must contain exactly 10 digits.",
+        )
+    return f"+1{digits}"
+
+
+def normalize_zip_code(value: str) -> str:
+    digits = "".join(char for char in value if char.isdigit())
+    if len(digits) == 5:
+        return digits
+    if len(digits) == 9:
+        return f"{digits[:5]}-{digits[5:]}"
+    raise HTTPException(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        detail="ZIP code must contain 5 or 9 digits.",
+    )
+
+
+def map_customer_profile(profile: dict, current_user: SupabaseUser) -> CustomerProfile:
+    first_name = profile.get("first_name") or current_user.user_metadata.get("firstName") or ""
+    middle_name = profile.get("middle_name") or current_user.user_metadata.get("middleName") or None
+    last_name = profile.get("last_name") or current_user.user_metadata.get("lastName") or ""
+    full_name = " ".join(
+        part for part in [first_name, middle_name, last_name] if part
+    ).strip() or current_user.email
+
+    return CustomerProfile(
+        id=current_user.id,
+        firstName=first_name,
+        middleName=middle_name,
+        lastName=last_name,
+        fullName=full_name,
+        email=profile.get("email") or current_user.email,
+        phone=profile.get("mobile_phone_e164") or current_user.phone or "—",
+        address=format_address(profile),
+        streetAddress=profile.get("street_address") or "",
+        apartmentUnit=profile.get("apartment_unit") or None,
+        city=profile.get("city") or "",
+        state=profile.get("state") or "",
+        zipCode=profile.get("zip_code") or "",
+        memberSince=profile.get("created_at") or current_user.created_at,
+        timezone=profile.get("timezone") or "UTC",
+    )
 
 
 async def require_owned_account(account_id: str, user_id: str, *, require_open: bool = False) -> dict:
@@ -427,25 +682,31 @@ async def get_profile(current_user: SupabaseUser = Depends(get_current_user)) ->
     if not rows:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Profile not found.")
 
-    profile = rows[0]
-    first_name = profile.get("first_name") or current_user.user_metadata.get("firstName") or ""
-    middle_name = profile.get("middle_name") or current_user.user_metadata.get("middleName") or None
-    last_name = profile.get("last_name") or current_user.user_metadata.get("lastName") or ""
-    full_name = " ".join(
-        part for part in [first_name, middle_name, last_name] if part
-    ).strip() or current_user.email
+    return map_customer_profile(rows[0], current_user)
 
-    return CustomerProfile(
-        id=current_user.id,
-        firstName=first_name,
-        middleName=middle_name,
-        lastName=last_name,
-        fullName=full_name,
-        email=profile.get("email") or current_user.email,
-        phone=profile.get("mobile_phone_e164") or current_user.phone or "—",
-        address=format_address(profile),
-        memberSince=profile.get("created_at") or current_user.created_at,
+@router.patch("/me/profile", response_model=CustomerProfile)
+async def update_profile(
+    payload: UpdateCustomerProfileIn,
+    current_user: SupabaseUser = Depends(get_current_user),
+) -> CustomerProfile:
+    updated_rows = await supabase_client.update_rows(
+        "profiles",
+        {
+            "first_name": payload.firstName.strip(),
+            "middle_name": payload.middleName.strip() if payload.middleName else None,
+            "last_name": payload.lastName.strip(),
+            "mobile_phone_e164": normalize_phone_e164(payload.phone),
+            "street_address": payload.streetAddress.strip(),
+            "apartment_unit": payload.apartmentUnit.strip() if payload.apartmentUnit else None,
+            "city": payload.city.strip(),
+            "state": payload.state.strip().upper(),
+            "zip_code": normalize_zip_code(payload.zipCode),
+        },
+        filters={"id": f"eq.{current_user.id}"},
     )
+    if not updated_rows:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Profile not found.")
+    return map_customer_profile(updated_rows[0], current_user)
 
 
 @router.get("/accounts", response_model=list[BankAccount])
@@ -509,19 +770,34 @@ async def create_account(
         )
 
     account_type = normalize_account_type(payload.type)
-    routing_number = "121000358" if account_type in {"checking", "savings"} else None
+    routing_number, account_number = await generate_unique_account_identifiers()
+    is_default_internal_receive = False
+    if account_type == "checking":
+        existing_default = await supabase_client.select_rows(
+            "accounts",
+            filters={
+                "user_id": f"eq.{current_user.id}",
+                "account_type": "eq.checking",
+                "status": "eq.open",
+                "is_default_internal_receive": "eq.true",
+            },
+            limit=1,
+        )
+        is_default_internal_receive = len(existing_default) == 0
     created = await supabase_client.insert_row(
         "accounts",
         {
             "user_id": current_user.id,
             "nickname": payload.nickname.strip(),
             "account_type": account_type,
-            "account_last4": random_last4(),
+            "account_last4": account_number[-4:],
+            "account_number": account_number,
             "routing_number": routing_number,
             "status": "open",
             "available_balance_cents": 0,
             "current_balance_cents": 0,
             "close_eligible": False,
+            "is_default_internal_receive": is_default_internal_receive,
         },
     )
     return map_account(created)
@@ -529,6 +805,15 @@ async def create_account(
 
 @router.post("/accounts/{account_id}/close", status_code=status.HTTP_204_NO_CONTENT)
 async def close_account(account_id: str, current_user: SupabaseUser = Depends(get_current_user)) -> None:
+    existing_rows = await supabase_client.select_rows(
+        "accounts",
+        filters={
+            "id": f"eq.{account_id}",
+            "user_id": f"eq.{current_user.id}",
+        },
+        limit=1,
+    )
+    existing_account = existing_rows[0] if existing_rows else None
     result = await supabase_client.rpc(
         "close_customer_account",
         {
@@ -543,6 +828,23 @@ async def close_account(account_id: str, current_user: SupabaseUser = Depends(ge
         )
 
     if result.get("closed"):
+        if existing_account and existing_account.get("is_default_internal_receive"):
+            replacement_rows = await supabase_client.select_rows(
+                "accounts",
+                filters={
+                    "user_id": f"eq.{current_user.id}",
+                    "account_type": "eq.checking",
+                    "status": "eq.open",
+                },
+                order="opened_at.asc",
+                limit=1,
+            )
+            if replacement_rows:
+                await supabase_client.update_rows(
+                    "accounts",
+                    {"is_default_internal_receive": True},
+                    filters={"id": f"eq.{replacement_rows[0]['id']}"},
+                )
         return
 
     reasons = [
@@ -607,6 +909,183 @@ async def create_transfer(
     )
 
 
+@router.post("/member-transfers/resolve-recipient", response_model=MemberTransferRecipient)
+async def resolve_member_recipient(
+    payload: dict,
+    current_user: SupabaseUser = Depends(get_current_user),
+) -> MemberTransferRecipient:
+    recipient_email = str(payload.get("recipientEmail") or "").strip()
+    recipient = await resolve_member_recipient_for_user(current_user, recipient_email)
+    return map_member_transfer_recipient(recipient.model_dump())
+
+
+@router.post("/member-transfers", response_model=MemberTransferSubmissionResult, status_code=status.HTTP_201_CREATED)
+async def create_member_transfer(
+    payload: CreateMemberTransferIn,
+    current_user: SupabaseUser = Depends(get_current_user),
+) -> MemberTransferSubmissionResult:
+    result = await create_member_transfer_for_user(current_user, payload)
+    transfer = result.get("transfer")
+    plan = result.get("plan")
+    recipient = result.get("recipient") or {}
+    return MemberTransferSubmissionResult(
+        mode=map_schedule_mode(result.get("mode")),
+        transfer=map_member_transfer({
+            **transfer,
+            "recipient_display_name": recipient.get("displayName"),
+        }) if transfer else None,
+        plan=map_member_transfer_plan({
+            **plan,
+            "recipient_display_name": recipient.get("displayName"),
+        }) if plan else None,
+    )
+
+
+@router.get("/member-transfers/plans", response_model=list[MemberTransferPlan])
+async def list_member_transfer_plans(
+    current_user: SupabaseUser = Depends(get_current_user),
+) -> list[MemberTransferPlan]:
+    rows = await list_member_transfer_plans_for_user(current_user.id)
+    return [map_member_transfer_plan(row) for row in rows if row.get("status") != "completed"]
+
+
+@router.post("/member-transfers/plans/{plan_id}/cancel", response_model=MemberTransferPlan)
+async def cancel_member_transfer_plan(
+    plan_id: str,
+    current_user: SupabaseUser = Depends(get_current_user),
+) -> MemberTransferPlan:
+    row = await cancel_member_transfer_plan_for_user(current_user.id, plan_id)
+    return map_member_transfer_plan(row)
+
+
+@router.patch("/member-transfers/plans/{plan_id}", response_model=MemberTransferPlan)
+async def update_member_transfer_plan(
+    plan_id: str,
+    payload: UpdateMemberTransferPlanIn,
+    current_user: SupabaseUser = Depends(get_current_user),
+) -> MemberTransferPlan:
+    row = await update_member_transfer_plan_for_user(
+        current_user.id,
+        plan_id,
+        payload.model_dump(exclude_unset=True),
+    )
+    return map_member_transfer_plan(row)
+
+
+@router.post("/member-transfers/plans/{plan_id}/retry", response_model=MemberTransferPlan)
+async def retry_member_transfer_plan(
+    plan_id: str,
+    current_user: SupabaseUser = Depends(get_current_user),
+) -> MemberTransferPlan:
+    row = await retry_member_transfer_plan_for_user(current_user.id, plan_id)
+    return map_member_transfer_plan(row)
+
+
+@router.get("/external-accounts", response_model=list[ExternalAccount])
+async def list_external_accounts(
+    current_user: SupabaseUser = Depends(get_current_user),
+) -> list[ExternalAccount]:
+    rows = await list_external_accounts_for_user(current_user.id)
+    return [map_external_account(row) for row in rows]
+
+
+@router.post("/external-accounts", response_model=ExternalAccount, status_code=status.HTTP_201_CREATED)
+async def create_external_account(
+    payload: CreateExternalAccountIn,
+    current_user: SupabaseUser = Depends(get_current_user),
+) -> ExternalAccount:
+    row = await create_external_account_for_user(current_user, payload)
+    return map_external_account(row)
+
+
+@router.post("/external-accounts/link-session", response_model=CreateExternalLinkSessionOut)
+async def create_external_account_link_session(
+    current_user: SupabaseUser = Depends(get_current_user),
+) -> CreateExternalLinkSessionOut:
+    session = await create_external_link_session_for_user(current_user)
+    return CreateExternalLinkSessionOut(**session)
+
+
+@router.post("/external-accounts/link-complete", response_model=ExternalAccount, status_code=status.HTTP_201_CREATED)
+async def complete_external_account_link(
+    payload: CompleteExternalLinkIn,
+    current_user: SupabaseUser = Depends(get_current_user),
+) -> ExternalAccount:
+    row = await complete_external_link_for_user(current_user, payload)
+    return map_external_account(row)
+
+
+@router.get("/external-transfers", response_model=list[ExternalTransfer])
+async def list_external_transfers(
+    current_user: SupabaseUser = Depends(get_current_user),
+) -> list[ExternalTransfer]:
+    rows = await list_external_transfers_for_user(current_user.id)
+    return [map_external_transfer(row) for row in rows if row.get("status") in {"processing", "failed"}]
+
+
+@router.post("/external-transfers", response_model=ExternalTransferSubmissionResult, status_code=status.HTTP_201_CREATED)
+async def create_external_transfer(
+    payload: CreateExternalTransferIn,
+    current_user: SupabaseUser = Depends(get_current_user),
+) -> ExternalTransferSubmissionResult:
+    result = await create_external_transfer_for_user(current_user, payload)
+    transfer = result.get("transfer")
+    plan = result.get("plan")
+    external_account = result.get("external_account") or {}
+    label = f"{external_account.get('bank_name', 'External bank')} {external_account.get('masked_account_number', '')}".strip()
+    return ExternalTransferSubmissionResult(
+        mode=map_schedule_mode(result.get("mode")),
+        transfer=map_external_transfer({
+            **transfer,
+            "external_account_label": label,
+        }) if transfer else None,
+        plan=map_external_transfer_plan({
+            **plan,
+            "external_account_label": label,
+        }) if plan else None,
+    )
+
+
+@router.get("/external-transfers/plans", response_model=list[ExternalTransferPlan])
+async def list_external_transfer_plans(
+    current_user: SupabaseUser = Depends(get_current_user),
+) -> list[ExternalTransferPlan]:
+    rows = await list_external_transfer_plans_for_user(current_user.id)
+    return [map_external_transfer_plan(row) for row in rows if row.get("status") != "completed"]
+
+
+@router.post("/external-transfers/plans/{plan_id}/cancel", response_model=ExternalTransferPlan)
+async def cancel_external_transfer_plan(
+    plan_id: str,
+    current_user: SupabaseUser = Depends(get_current_user),
+) -> ExternalTransferPlan:
+    row = await cancel_external_transfer_plan_for_user(current_user.id, plan_id)
+    return map_external_transfer_plan(row)
+
+
+@router.patch("/external-transfers/plans/{plan_id}", response_model=ExternalTransferPlan)
+async def update_external_transfer_plan(
+    plan_id: str,
+    payload: UpdateExternalTransferPlanIn,
+    current_user: SupabaseUser = Depends(get_current_user),
+) -> ExternalTransferPlan:
+    row = await update_external_transfer_plan_for_user(
+        current_user.id,
+        plan_id,
+        payload.model_dump(exclude_unset=True),
+    )
+    return map_external_transfer_plan(row)
+
+
+@router.post("/external-transfers/plans/{plan_id}/retry", response_model=ExternalTransferPlan)
+async def retry_external_transfer_plan(
+    plan_id: str,
+    current_user: SupabaseUser = Depends(get_current_user),
+) -> ExternalTransferPlan:
+    row = await retry_external_transfer_plan_for_user(current_user.id, plan_id)
+    return map_external_transfer_plan(row)
+
+
 @router.get("/payees", response_model=list[Payee])
 async def list_payees(current_user: SupabaseUser = Depends(get_current_user)) -> list[Payee]:
     rows = await supabase_client.select_rows(
@@ -620,11 +1099,39 @@ async def list_payees(current_user: SupabaseUser = Depends(get_current_user)) ->
     return [map_payee(row) for row in rows]
 
 
+@router.post("/payees", response_model=Payee, status_code=status.HTTP_201_CREATED)
+async def create_payee(
+    payload: CreatePayeeIn,
+    current_user: SupabaseUser = Depends(get_current_user),
+) -> Payee:
+    routing_number = validate_routing_number(payload.routingNumber)
+    account_number = validate_account_number(payload.accountNumber, field_name="Account number")
+    confirm_account_number = validate_account_number(payload.confirmAccountNumber, field_name="Confirm account number")
+    if account_number != confirm_account_number:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Account number confirmation does not match.")
+    if account_number == routing_number:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Account number cannot match the routing number.")
+
+    created = await supabase_client.insert_row(
+        "payees",
+        {
+            "user_id": current_user.id,
+            "name": payload.name.strip(),
+            "category": payload.category.strip(),
+            "account_last4": account_number[-4:],
+            "routing_number": routing_number,
+            "account_number": account_number,
+            "is_active": True,
+        },
+    )
+    return map_payee(created)
+
+
 @router.get("/payments", response_model=list[ScheduledPayment])
 async def list_payments(current_user: SupabaseUser = Depends(get_current_user)) -> list[ScheduledPayment]:
     rows = await supabase_client.select_rows(
         "bill_payments",
-        select="id,payee_id,account_id,amount_cents,cadence,deliver_by,status,created_at,payee:payee_id(name)",
+        select="id,payee_id,account_id,amount_cents,cadence,deliver_by,status,failure_reason,created_at,payee:payee_id(name)",
         filters={"user_id": f"eq.{current_user.id}"},
         order="deliver_by.asc",
     )
@@ -634,26 +1141,339 @@ async def list_payments(current_user: SupabaseUser = Depends(get_current_user)) 
 @router.post("/payments", response_model=ScheduledPayment, status_code=status.HTTP_201_CREATED)
 async def create_payment(
     payload: CreateScheduledPaymentIn,
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
     current_user: SupabaseUser = Depends(get_current_user),
 ) -> ScheduledPayment:
+    if not idempotency_key:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Idempotency-Key header is required.",
+        )
+
+    validate_payment_amount_or_raise(payload.amount)
+    idempotency_endpoint = "/api/payments"
+    idempotency_payload = {
+        "payeeId": payload.payeeId,
+        "accountId": payload.accountId,
+        "amount": payload.amount,
+        "cadence": payload.cadence,
+        "deliverBy": payload.deliverBy,
+    }
+    replay = await get_idempotency_replay(
+        user_id=current_user.id,
+        endpoint=idempotency_endpoint,
+        idempotency_key=idempotency_key,
+        request_payload=idempotency_payload,
+    )
+    if replay is not None:
+        return ScheduledPayment.model_validate(replay)
+    await reserve_idempotency_key(
+        user_id=current_user.id,
+        endpoint=idempotency_endpoint,
+        idempotency_key=idempotency_key,
+        request_payload=idempotency_payload,
+    )
+
     account = await require_owned_account(payload.accountId, current_user.id, require_open=True)
     payee = await require_owned_payee(payload.payeeId, current_user.id)
+    timezone_name = await get_user_timezone_name(current_user.id)
+    deliver_by = parse_deliver_by_with_timezone(payload.deliverBy, timezone_name)
+    normalized_cadence = normalize_payment_cadence(payload.cadence)
+    amount_cents = amount_to_cents(payload.amount)
 
-    created = await supabase_client.insert_row(
+    try:
+        created = await supabase_client.insert_row(
+            "bill_payments",
+            {
+                "user_id": current_user.id,
+                "payee_id": payee["id"],
+                "account_id": account["id"],
+                "amount_cents": amount_cents,
+                "cadence": normalized_cadence,
+                "deliver_by": deliver_by,
+                "status": "scheduled",
+                "next_run_at": next_run_at_for_date(deliver_by, timezone_name),
+                "failure_reason": None,
+            },
+        )
+
+        local_today = local_today_for_timezone(timezone_name)
+        should_run_now = normalized_cadence == "once" or date.fromisoformat(deliver_by) == local_today
+        if should_run_now:
+            now_utc = datetime.now(timezone.utc)
+            succeeded_run, failure_reason = await attempt_payment_run(created)
+            update_payload = build_payment_update_payload(
+                payment=created,
+                succeeded_run=succeeded_run,
+                failure_reason=failure_reason,
+                now_utc=now_utc,
+                timezone_name=timezone_name,
+            )
+            updated_rows = await supabase_client.update_rows(
+                "bill_payments",
+                update_payload,
+                filters={
+                    "id": f"eq.{created['id']}",
+                    "user_id": f"eq.{current_user.id}",
+                },
+            )
+            created = updated_rows[0] if updated_rows else created
+
+        created["payee"] = {"name": payee.get("name")}
+        response = map_payment(created)
+        await finalize_idempotency_key(
+            user_id=current_user.id,
+            endpoint=idempotency_endpoint,
+            idempotency_key=idempotency_key,
+            response_body=response.model_dump(),
+            response_status=status.HTTP_201_CREATED,
+        )
+        return response
+    except HTTPException as exc:
+        await finalize_idempotency_key(
+            user_id=current_user.id,
+            endpoint=idempotency_endpoint,
+            idempotency_key=idempotency_key,
+            response_body={"detail": exc.detail},
+            response_status=exc.status_code,
+        )
+        raise
+
+
+@router.patch("/payments/{payment_id}", response_model=ScheduledPayment)
+async def update_payment(
+    payment_id: str,
+    payload: UpdateScheduledPaymentIn,
+    current_user: SupabaseUser = Depends(get_current_user),
+) -> ScheduledPayment:
+    payment_rows = await supabase_client.select_rows(
+        "bill_payments",
+        filters={
+            "id": f"eq.{payment_id}",
+            "user_id": f"eq.{current_user.id}",
+        },
+        limit=1,
+    )
+    if not payment_rows:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Payment not found.")
+
+    payment = payment_rows[0]
+    existing_cadence = map_payment_cadence(payment.get("cadence", "once"))
+    existing_status = map_payment_status(payment.get("status", "scheduled"))
+    if existing_status == "CANCELLED":
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Cancelled payments cannot be edited.")
+    if existing_cadence == "Once" and existing_status == "COMPLETED":
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Completed one-time payments cannot be edited.")
+
+    payee_id = payload.payeeId or payment["payee_id"]
+    payee = await require_owned_payee(payee_id, current_user.id)
+
+    timezone_name = await get_user_timezone_name(current_user.id)
+    cadence_label = payload.cadence or map_payment_cadence(payment.get("cadence", "once"))
+    cadence = normalize_payment_cadence(cadence_label)
+    deliver_by = parse_deliver_by_with_timezone(
+        payload.deliverBy or payment.get("deliver_by") or local_today_for_timezone(timezone_name).isoformat(),
+        timezone_name,
+    )
+    amount_value = payload.amount if payload.amount is not None else cents_to_amount(payment.get("amount_cents"))
+    validate_payment_amount_or_raise(amount_value)
+    amount_cents = amount_to_cents(amount_value)
+
+    rows = await supabase_client.update_rows(
         "bill_payments",
         {
-            "user_id": current_user.id,
             "payee_id": payee["id"],
-            "account_id": account["id"],
-            "amount_cents": amount_to_cents(payload.amount),
-            "cadence": normalize_payment_cadence(payload.cadence),
-            "deliver_by": payload.deliverBy,
+            "amount_cents": amount_cents,
+            "cadence": cadence,
+            "deliver_by": deliver_by,
             "status": "scheduled",
-            "next_run_at": f"{payload.deliverBy}T00:00:00+00:00",
+            "next_run_at": next_run_at_for_date(deliver_by, timezone_name),
+            "failure_reason": None,
+        },
+        filters={
+            "id": f"eq.{payment_id}",
+            "user_id": f"eq.{current_user.id}",
         },
     )
-    created["payee"] = {"name": payee.get("name")}
-    return map_payment(created)
+    if not rows:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Payment not found.")
+    rows[0]["payee"] = {"name": payee.get("name")}
+    return map_payment(rows[0])
+
+
+@router.post("/payments/{payment_id}/retry", response_model=ScheduledPayment)
+async def retry_payment(
+    payment_id: str,
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+    current_user: SupabaseUser = Depends(get_current_user),
+) -> ScheduledPayment:
+    if not idempotency_key:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Idempotency-Key header is required.",
+        )
+
+    idempotency_endpoint = f"/api/payments/{payment_id}/retry"
+    idempotency_payload = {"paymentId": payment_id}
+    replay = await get_idempotency_replay(
+        user_id=current_user.id,
+        endpoint=idempotency_endpoint,
+        idempotency_key=idempotency_key,
+        request_payload=idempotency_payload,
+    )
+    if replay is not None:
+        return ScheduledPayment.model_validate(replay)
+    await reserve_idempotency_key(
+        user_id=current_user.id,
+        endpoint=idempotency_endpoint,
+        idempotency_key=idempotency_key,
+        request_payload=idempotency_payload,
+    )
+
+    payment_rows = await supabase_client.select_rows(
+        "bill_payments",
+        filters={
+            "id": f"eq.{payment_id}",
+            "user_id": f"eq.{current_user.id}",
+        },
+        limit=1,
+    )
+    if not payment_rows:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Payment not found.")
+
+    payment = payment_rows[0]
+    status_label = map_payment_status(payment.get("status", "scheduled"))
+    cadence_label = map_payment_cadence(payment.get("cadence", "once"))
+    if status_label == "CANCELLED":
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Cancelled payments cannot be retried.")
+    if cadence_label == "Once" and status_label == "COMPLETED":
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Completed one-time payments cannot be retried.")
+
+    payee_rows = await supabase_client.select_rows(
+        "payees",
+        filters={"id": f"eq.{payment['payee_id']}"},
+        limit=1,
+    )
+    payee_name = payee_rows[0]["name"] if payee_rows else "Manual Payee"
+
+    try:
+        processing_rows = await supabase_client.update_rows(
+            "bill_payments",
+            {
+                "status": "processing",
+                "failure_reason": None,
+            },
+            filters={
+                "id": f"eq.{payment_id}",
+                "user_id": f"eq.{current_user.id}",
+            },
+        )
+        if processing_rows:
+            payment = processing_rows[0]
+
+        timezone_name = await get_user_timezone_name(current_user.id)
+        now_utc = datetime.now(timezone.utc)
+        succeeded_run, failure_reason = await attempt_payment_run(payment)
+        update_payload = build_payment_update_payload(
+            payment=payment,
+            succeeded_run=succeeded_run,
+            failure_reason=failure_reason,
+            now_utc=now_utc,
+            timezone_name=timezone_name,
+        )
+        rows = await supabase_client.update_rows(
+            "bill_payments",
+            update_payload,
+            filters={
+                "id": f"eq.{payment_id}",
+                "user_id": f"eq.{current_user.id}",
+            },
+        )
+        if not rows:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Payment not found.")
+        rows[0]["payee"] = {"name": payee_name}
+        response = map_payment(rows[0])
+        await finalize_idempotency_key(
+            user_id=current_user.id,
+            endpoint=idempotency_endpoint,
+            idempotency_key=idempotency_key,
+            response_body=response.model_dump(),
+            response_status=status.HTTP_200_OK,
+        )
+        return response
+    except HTTPException as exc:
+        await finalize_idempotency_key(
+            user_id=current_user.id,
+            endpoint=idempotency_endpoint,
+            idempotency_key=idempotency_key,
+            response_body={"detail": exc.detail},
+            response_status=exc.status_code,
+        )
+        raise
+
+
+@router.post("/payments/{payment_id}/cancel", response_model=ScheduledPayment)
+async def cancel_payment(
+    payment_id: str,
+    current_user: SupabaseUser = Depends(get_current_user),
+) -> ScheduledPayment:
+    payment_rows = await supabase_client.select_rows(
+        "bill_payments",
+        filters={
+            "id": f"eq.{payment_id}",
+            "user_id": f"eq.{current_user.id}",
+        },
+        limit=1,
+    )
+    if not payment_rows:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Payment not found.")
+
+    payment = payment_rows[0]
+    if payment.get("status") not in {"scheduled", "failed"}:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Only scheduled or failed payments can be cancelled.",
+        )
+
+    rows = await supabase_client.update_rows(
+        "bill_payments",
+        {
+            "status": "cancelled",
+            "failure_reason": None,
+            "next_run_at": None,
+        },
+        filters={
+            "id": f"eq.{payment_id}",
+            "user_id": f"eq.{current_user.id}",
+        },
+    )
+    if not rows:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Payment not found.")
+
+    payee_rows = await supabase_client.select_rows(
+        "payees",
+        filters={"id": f"eq.{payment['payee_id']}"},
+        limit=1,
+    )
+    rows[0]["payee"] = {"name": payee_rows[0]["name"] if payee_rows else "Manual Payee"}
+    return map_payment(rows[0])
+
+
+# DEV-ONLY ENDPOINT: Restricted to admins or DEBUG mode only.
+# Authorization is enforced in execute_payment_for_user() - see payment_service.py for details.
+@router.post("/dev-payments/{payment_id}/run", response_model=ScheduledPayment)
+async def run_payment_now(
+    payment_id: str,
+    current_user: SupabaseUser = Depends(get_current_user),
+) -> ScheduledPayment:
+    updated = await execute_payment_for_user(payment_id, current_user)
+    payee_rows = await supabase_client.select_rows(
+        "payees",
+        filters={"id": f"eq.{updated['payee_id']}"},
+        limit=1,
+    )
+    updated["payee"] = {"name": payee_rows[0]["name"] if payee_rows else "Manual Payee"}
+    return map_payment(updated)
 
 
 @router.get("/deposits", response_model=list[Deposit])
@@ -714,38 +1534,22 @@ async def create_deposit(
     payload: CreateDepositIn,
     current_user: SupabaseUser = Depends(get_current_user),
 ) -> Deposit:
-    account = await require_owned_account(payload.accountId, current_user.id, require_open=True)
-    for image_path in [payload.frontImagePath, payload.backImagePath]:
-        if not image_path.startswith(f"{current_user.id}/"):
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Deposit image paths must belong to the authenticated user.",
-            )
-
-    created = await supabase_client.insert_row(
-        "deposits",
+    await require_owned_account(payload.accountId, current_user.id, require_open=True)
+    result = await supabase_client.rpc(
+        "submit_customer_deposit",
         {
-            "user_id": current_user.id,
-            "account_id": account["id"],
-            "amount_cents": amount_to_cents(payload.amount),
-            "status": "under_review",
-            "note": "Submitted successfully. Review typically completes in 1 business day.",
-            "front_image_path": payload.frontImagePath,
-            "back_image_path": payload.backImagePath,
+            "p_user_id": current_user.id,
+            "p_account_id": payload.accountId,
+            "p_amount_cents": amount_to_cents(payload.amount),
+            "p_deposit_type": payload.depositType,
         },
     )
-    try:
-        await supabase_client.insert_row(
-            "notifications",
-            {
-                "user_id": current_user.id,
-                "type": "deposit",
-                "title": "Deposit pending review",
-                "body": f"Your deposit to {account.get('nickname') or 'your account'} is now under review.",
-            },
+    created = result[0] if isinstance(result, list) else result
+    if not created:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Supabase did not return the created deposit row.",
         )
-    except HTTPException as exc:
-        logger.warning("Notification insert failed after deposit creation: %s", exc.detail)
     return map_deposit(created)
 
 
