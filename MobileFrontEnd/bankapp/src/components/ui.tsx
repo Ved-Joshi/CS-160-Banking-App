@@ -1,14 +1,37 @@
-import { Pressable, ScrollView, StyleSheet, Text, TextInput, View, type ReactNode } from "react-native";
+import type { ReactNode } from "react";
+import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { colors } from "../theme/colors";
 
-export function Screen({ children, scroll = true }: { children: ReactNode; scroll?: boolean }) {
+export function Screen({
+  children,
+  scroll = true,
+  refreshing,
+  onRefresh,
+}: {
+  children: ReactNode;
+  scroll?: boolean;
+  refreshing?: boolean;
+  onRefresh?: () => void;
+}) {
   const insets = useSafeAreaInsets();
   const content = <View style={[styles.page, { paddingBottom: 24 + insets.bottom + 72 }]}>{children}</View>;
 
   if (scroll) {
     return (
-      <ScrollView style={styles.screen} contentContainerStyle={styles.scrollContent}>
+      <ScrollView
+        style={styles.screen}
+        contentContainerStyle={styles.scrollContent}
+        refreshControl={
+          onRefresh ? (
+            <RefreshControl
+              refreshing={Boolean(refreshing)}
+              onRefresh={onRefresh}
+              tintColor={colors.red700}
+            />
+          ) : undefined
+        }
+      >
         {content}
       </ScrollView>
     );

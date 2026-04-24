@@ -1,16 +1,45 @@
 import { useRouter } from "expo-router";
+import { useFocusEffect } from "@react-navigation/native";
+import { useCallback, useRef, useState } from "react";
 import { Text, View } from "react-native";
 import { Button, Card, LinkButton, PageHeader, Screen, StatusChip } from "../../../src/components/ui";
 import { colors } from "../../../src/theme/colors";
 import { formatCurrency } from "../../../src/lib/format";
 import { useAccounts } from "../../../src/lib/hooks";
 
+const ACCOUNTS_MIN_REFRESH_MS = 15_000;
+
 export default function AccountsScreen() {
   const router = useRouter();
-  const { accounts, loading, error } = useAccounts();
+  const { accounts, loading, error, refresh } = useAccounts();
+  const [refreshing, setRefreshing] = useState(false);
+  const refreshingRef = useRef(false);
+  const lastRefreshMsRef = useRef(0);
+
+  const onRefresh = useCallback(async () => {
+    if (refreshingRef.current) return;
+    refreshingRef.current = true;
+    setRefreshing(true);
+    try {
+      await refresh();
+      lastRefreshMsRef.current = Date.now();
+    } finally {
+      setRefreshing(false);
+      refreshingRef.current = false;
+    }
+  }, [refresh]);
+
+  useFocusEffect(
+    useCallback(() => {
+      if (loading) return;
+      const now = Date.now();
+      if (now - lastRefreshMsRef.current < ACCOUNTS_MIN_REFRESH_MS) return;
+      void onRefresh();
+    }, [loading, onRefresh])
+  );
 
   return (
-    <Screen>
+    <Screen refreshing={refreshing} onRefresh={onRefresh}>
       <PageHeader
         title="Accounts"
         eyebrow="Balances and details"
@@ -21,7 +50,7 @@ export default function AccountsScreen() {
         <Card>
           <Text style={{ color: colors.red700, fontWeight: "700" }}>Unable to load accounts</Text>
           <Text>{error}</Text>
-          <LinkButton label="Retry" onPress={() => router.replace("/accounts") } />
+          <LinkButton label="Retry" onPress={onRefresh} />
         </Card>
       ) : loading ? (
         <Card>

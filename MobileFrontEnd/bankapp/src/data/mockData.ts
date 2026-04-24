@@ -39,6 +39,8 @@ export const mockAccounts: BankAccount[] = [
     routingNumber: "121000358",
     openedAt: "2022-08-14T08:00:00.000Z",
     closeEligible: false,
+    canClose: false,
+    closeReasons: ["Balance must be $0.00 before closing."],
     balances: { availableBalance: 8420.14, currentBalance: 8642.14 },
   },
   {
@@ -50,6 +52,8 @@ export const mockAccounts: BankAccount[] = [
     routingNumber: "121000358",
     openedAt: "2022-09-10T08:00:00.000Z",
     closeEligible: false,
+    canClose: false,
+    closeReasons: ["Balance must be $0.00 before closing."],
     balances: { availableBalance: 18240.22, currentBalance: 18240.22 },
   },
   {
@@ -61,6 +65,8 @@ export const mockAccounts: BankAccount[] = [
     routingNumber: "N/A",
     openedAt: "2023-02-03T08:00:00.000Z",
     closeEligible: false,
+    canClose: false,
+    closeReasons: ["Restricted accounts can't be closed online."],
     balances: { availableBalance: 4210, currentBalance: 790 },
   },
 ];

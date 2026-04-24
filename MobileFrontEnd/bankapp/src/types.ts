@@ -50,6 +50,9 @@ export interface BankAccount {
   routingNumber: string;
   openedAt: string;
   closeEligible: boolean;
+  canClose: boolean;
+  closeReasons: string[];
+  isDefaultInternalReceive?: boolean;
   balances: {
     availableBalance: number;
     currentBalance: number;

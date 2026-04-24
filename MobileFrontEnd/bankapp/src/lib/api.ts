@@ -47,7 +47,13 @@ export async function fetchAccounts(): Promise<BankAccount[]> {
   if (!response.ok) throw new Error("Failed to fetch accounts");
 
   const data = await response.json();
-  return data as BankAccount[];
+  return (Array.isArray(data) ? data : []).map((account: any) => ({
+    ...account,
+    canClose: Boolean(account?.canClose ?? account?.closeEligible ?? false),
+    closeEligible: Boolean(account?.closeEligible ?? account?.canClose ?? false),
+    closeReasons: Array.isArray(account?.closeReasons) ? account.closeReasons.filter((r: any) => typeof r === "string") : [],
+    isDefaultInternalReceive: Boolean(account?.isDefaultInternalReceive ?? false),
+  })) as BankAccount[];
 }
 
 export async function createAccount(
@@ -85,7 +91,22 @@ export async function closeAccount(accountId: string): Promise<void> {
     method: "POST",
     headers,
   });
-  if (!response.ok) throw new Error("Failed to close account");
+  if (response.ok) return;
+
+  const errorPayload = await response.text();
+  try {
+    const data = JSON.parse(errorPayload);
+    const detail = data.detail ?? data.message ?? data;
+    const message = typeof detail?.message === "string" ? detail.message : undefined;
+    const reasons = Array.isArray(detail?.reasons) ? detail.reasons.filter((r: any) => typeof r === "string") : [];
+    if (message && reasons.length) {
+      throw new Error(`${message}\n${reasons.map((r: string) => `• ${r}`).join("\n")}`);
+    }
+    if (message) throw new Error(message);
+    throw new Error(typeof detail === "string" ? detail : errorPayload || "Failed to close account");
+  } catch {
+    throw new Error(errorPayload || "Failed to close account");
+  }
 }
 
 // ============= TRANSACTIONS =============
@@ -121,14 +142,23 @@ export async function createTransfer(
     method: "POST",
     headers: { ...headers, "Content-Type": "application/json" },
     body: JSON.stringify({
-      from_account_id: fromAccountId,
-      to_account_id: toAccountId,
+      fromAccountId,
+      toAccountId,
       amount,
       memo,
-      transfer_date: transferDate || new Date().toISOString().split("T")[0],
+      transferDate: transferDate || new Date().toISOString().split("T")[0],
     }),
   });
-  if (!response.ok) throw new Error("Failed to create transfer");
+  if (!response.ok) {
+    const errorPayload = await response.text();
+    try {
+      const data = JSON.parse(errorPayload);
+      const detail = data.detail ?? data.message ?? JSON.stringify(data);
+      throw new Error(detail);
+    } catch {
+      throw new Error(errorPayload || "Failed to create transfer");
+    }
+  }
   return await response.json();
 }
 

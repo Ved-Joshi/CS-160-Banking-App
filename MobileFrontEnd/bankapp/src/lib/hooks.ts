@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type {
   BankAccount,
   Transaction,
@@ -14,28 +14,30 @@ export function useAccounts() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  const mountedRef = useRef(true);
   useEffect(() => {
-    let active = true;
-
-    const load = async () => {
-      try {
-        setLoading(true);
-        setError(null);
-        const data = await api.fetchAccounts();
-        if (active) setAccounts(data);
-      } catch (err) {
-        if (active) setError(err instanceof Error ? err.message : "Failed to load accounts");
-      } finally {
-        if (active) setLoading(false);
-      }
-    };
-
-    load();
-
+    mountedRef.current = true;
     return () => {
-      active = false;
+      mountedRef.current = false;
     };
   }, []);
+
+  const refresh = useCallback(async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      const data = await api.fetchAccounts();
+      if (mountedRef.current) setAccounts(data);
+    } catch (err) {
+      if (mountedRef.current) setError(err instanceof Error ? err.message : "Failed to load accounts");
+    } finally {
+      if (mountedRef.current) setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void refresh();
+  }, [refresh]);
 
   const createAccount = useCallback(async (type: "checking" | "savings" | "credit", nickname?: string) => {
     try {
@@ -60,7 +62,7 @@ export function useAccounts() {
     }
   }, []);
 
-  return { accounts, loading, error, createAccount, closeAccount };
+  return { accounts, loading, error, refresh, createAccount, closeAccount };
 }
 
 export function useTransactions(accountId?: string) {
@@ -68,30 +70,32 @@ export function useTransactions(accountId?: string) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  const mountedRef = useRef(true);
   useEffect(() => {
-    let active = true;
-
-    const load = async () => {
-      try {
-        setLoading(true);
-        setError(null);
-        const data = await api.fetchTransactions(accountId);
-        if (active) setTransactions(data);
-      } catch (err) {
-        if (active) setError(err instanceof Error ? err.message : "Failed to load transactions");
-      } finally {
-        if (active) setLoading(false);
-      }
-    };
-
-    load();
-
+    mountedRef.current = true;
     return () => {
-      active = false;
+      mountedRef.current = false;
     };
+  }, []);
+
+  const refresh = useCallback(async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      const data = await api.fetchTransactions(accountId);
+      if (mountedRef.current) setTransactions(data);
+    } catch (err) {
+      if (mountedRef.current) setError(err instanceof Error ? err.message : "Failed to load transactions");
+    } finally {
+      if (mountedRef.current) setLoading(false);
+    }
   }, [accountId]);
 
-  return { transactions, loading, error };
+  useEffect(() => {
+    void refresh();
+  }, [refresh]);
+
+  return { transactions, loading, error, refresh };
 }
 
 export function useTransfers() {
@@ -130,30 +134,32 @@ export function usePayees() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  const mountedRef = useRef(true);
   useEffect(() => {
-    let active = true;
-
-    const load = async () => {
-      try {
-        setLoading(true);
-        setError(null);
-        const data = await api.fetchPayees();
-        if (active) setPayees(data);
-      } catch (err) {
-        if (active) setError(err instanceof Error ? err.message : "Failed to load payees");
-      } finally {
-        if (active) setLoading(false);
-      }
-    };
-
-    load();
-
+    mountedRef.current = true;
     return () => {
-      active = false;
+      mountedRef.current = false;
     };
   }, []);
 
-  return { payees, loading, error };
+  const refresh = useCallback(async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      const data = await api.fetchPayees();
+      if (mountedRef.current) setPayees(data);
+    } catch (err) {
+      if (mountedRef.current) setError(err instanceof Error ? err.message : "Failed to load payees");
+    } finally {
+      if (mountedRef.current) setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void refresh();
+  }, [refresh]);
+
+  return { payees, loading, error, refresh };
 }
 
 export function useBillPayments() {
@@ -161,28 +167,30 @@ export function useBillPayments() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  const mountedRef = useRef(true);
   useEffect(() => {
-    let active = true;
-
-    const load = async () => {
-      try {
-        setLoading(true);
-        setError(null);
-        const data = await api.fetchBillPayments();
-        if (active) setPayments(data);
-      } catch (err) {
-        if (active) setError(err instanceof Error ? err.message : "Failed to load bill payments");
-      } finally {
-        if (active) setLoading(false);
-      }
-    };
-
-    load();
-
+    mountedRef.current = true;
     return () => {
-      active = false;
+      mountedRef.current = false;
     };
   }, []);
+
+  const refresh = useCallback(async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      const data = await api.fetchBillPayments();
+      if (mountedRef.current) setPayments(data);
+    } catch (err) {
+      if (mountedRef.current) setError(err instanceof Error ? err.message : "Failed to load bill payments");
+    } finally {
+      if (mountedRef.current) setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void refresh();
+  }, [refresh]);
 
   const createPayment = useCallback(
     async (
@@ -224,7 +232,7 @@ export function useBillPayments() {
     }
   }, []);
 
-  return { payments, loading, error, createPayment, cancelPayment };
+  return { payments, loading, error, refresh, createPayment, cancelPayment };
 }
 
 export function useDeposits() {
@@ -232,28 +240,30 @@ export function useDeposits() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  const mountedRef = useRef(true);
   useEffect(() => {
-    let active = true;
-
-    const load = async () => {
-      try {
-        setLoading(true);
-        setError(null);
-        const data = await api.fetchDeposits();
-        if (active) setDeposits(data);
-      } catch (err) {
-        if (active) setError(err instanceof Error ? err.message : "Failed to load deposits");
-      } finally {
-        if (active) setLoading(false);
-      }
-    };
-
-    load();
-
+    mountedRef.current = true;
     return () => {
-      active = false;
+      mountedRef.current = false;
     };
   }, []);
+
+  const refresh = useCallback(async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      const data = await api.fetchDeposits();
+      if (mountedRef.current) setDeposits(data);
+    } catch (err) {
+      if (mountedRef.current) setError(err instanceof Error ? err.message : "Failed to load deposits");
+    } finally {
+      if (mountedRef.current) setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void refresh();
+  }, [refresh]);
 
   const submitDeposit = useCallback(
     async (
@@ -280,7 +290,7 @@ export function useDeposits() {
     []
   );
 
-  return { deposits, loading, error, submitDeposit };
+  return { deposits, loading, error, refresh, submitDeposit };
 }
 
 export async function searchATMs(query?: string, latitude?: number, longitude?: number) {
@@ -292,28 +302,30 @@ export function useNotifications() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  const mountedRef = useRef(true);
   useEffect(() => {
-    let active = true;
-
-    const load = async () => {
-      try {
-        setLoading(true);
-        setError(null);
-        const data = await api.fetchNotifications();
-        if (active) setNotifications(data);
-      } catch (err) {
-        if (active) setError(err instanceof Error ? err.message : "Failed to load notifications");
-      } finally {
-        if (active) setLoading(false);
-      }
-    };
-
-    load();
-
+    mountedRef.current = true;
     return () => {
-      active = false;
+      mountedRef.current = false;
     };
   }, []);
+
+  const refresh = useCallback(async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      const data = await api.fetchNotifications();
+      if (mountedRef.current) setNotifications(data);
+    } catch (err) {
+      if (mountedRef.current) setError(err instanceof Error ? err.message : "Failed to load notifications");
+    } finally {
+      if (mountedRef.current) setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void refresh();
+  }, [refresh]);
 
   const markAsRead = useCallback(async (notificationId: string) => {
     try {
@@ -328,5 +340,5 @@ export function useNotifications() {
     }
   }, []);
 
-  return { notifications, loading, error, markAsRead };
+  return { notifications, loading, error, refresh, markAsRead };
 }

@@ -1,4 +1,6 @@
+import { useFocusEffect } from "@react-navigation/native";
 import { useRouter } from "expo-router";
+import { useCallback, useRef, useState } from "react";
 import { StyleSheet, Text, View } from "react-native";
 import { Card, LinkButton, PageHeader, Screen, StatusChip } from "../../src/components/ui";
 import { formatCurrency, formatDate } from "../../src/lib/format";
@@ -6,19 +8,45 @@ import { colors } from "../../src/theme/colors";
 import { useAccounts, useTransactions, useBillPayments, useDeposits } from "../../src/lib/hooks";
 import { useAuth } from "../../src/auth/AuthContext";
 
+const DASHBOARD_MIN_REFRESH_MS = 15_000;
+
 export default function DashboardScreen() {
   const router = useRouter();
-  const { accounts, loading: accountsLoading } = useAccounts();
-  const { transactions } = useTransactions();
-  const { payments } = useBillPayments();
-  const { deposits } = useDeposits();
+  const { accounts, loading: accountsLoading, refresh: refreshAccounts } = useAccounts();
+  const { transactions, refresh: refreshTransactions } = useTransactions();
+  const { payments, refresh: refreshPayments } = useBillPayments();
+  const { deposits, refresh: refreshDeposits } = useDeposits();
   const { user } = useAuth();
+  const [refreshing, setRefreshing] = useState(false);
+  const refreshingRef = useRef(false);
+  const lastRefreshMsRef = useRef(0);
+
+  const onRefresh = useCallback(async () => {
+    if (refreshingRef.current) return;
+    refreshingRef.current = true;
+    setRefreshing(true);
+    try {
+      await Promise.all([refreshAccounts(), refreshTransactions(), refreshPayments(), refreshDeposits()]);
+      lastRefreshMsRef.current = Date.now();
+    } finally {
+      setRefreshing(false);
+      refreshingRef.current = false;
+    }
+  }, [refreshAccounts, refreshDeposits, refreshPayments, refreshTransactions]);
+
+  useFocusEffect(
+    useCallback(() => {
+      const now = Date.now();
+      if (now - lastRefreshMsRef.current < DASHBOARD_MIN_REFRESH_MS) return;
+      void onRefresh();
+    }, [onRefresh])
+  );
   
   const totalAvailable = accounts.reduce((sum, account) => sum + account.balances.availableBalance, 0);
   const pendingDeposit = deposits.find((deposit) => deposit.status === "PENDING_REVIEW");
 
   return (
-    <Screen>
+    <Screen refreshing={refreshing} onRefresh={onRefresh}>
       <PageHeader
         eyebrow="Account overview"
         title={`Good evening, ${user?.firstName || user?.email || 'there'}.`}
