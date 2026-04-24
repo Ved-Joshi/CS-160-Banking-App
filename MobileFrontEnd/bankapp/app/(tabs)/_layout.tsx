@@ -31,9 +31,10 @@ export default function TabsLayout() {
         tabBarIcon: ({ color, size }) => {
           const map: Record<string, keyof typeof Ionicons.glyphMap> = {
             dashboard: "grid-outline",
-            accounts: "wallet-outline",
+            transactions: "receipt-outline",
+            "accounts/index": "wallet-outline",
             transfers: "swap-horizontal-outline",
-            "bill-pay": "receipt-outline",
+            "bill-pay/index": "receipt-outline",
             more: "ellipsis-horizontal-circle-outline",
           };
           const icon = map[route.name] ?? "ellipse-outline";
@@ -42,19 +43,20 @@ export default function TabsLayout() {
       })}
     >
       <Tabs.Screen name="dashboard" options={{ title: "Dashboard", tabBarLabel: "Dashboard" }} />
+      <Tabs.Screen name="transactions" options={{ title: "Transactions", tabBarLabel: "Transactions" }} />
       <Tabs.Screen name="accounts/index" options={{ title: "Accounts", tabBarLabel: "Accounts" }} />
-      <Tabs.Screen name="transfers" options={{ title: "Transfers", tabBarLabel: "Transfers" }} />
-      <Tabs.Screen name="bill-pay" options={{ title: "Bill Pay", tabBarLabel: "Bill Pay" }} />
       <Tabs.Screen name="more" options={{ title: "More", tabBarLabel: "More" }} />
 
-      <Tabs.Screen name="accounts/[accountId]" options={{ href: null, title: "Account Details" }} />
-      <Tabs.Screen name="bill-pay/payees" options={{ href: null, title: "Payees" }} />
-      <Tabs.Screen name="deposits/index" options={{ href: null, title: "Deposits" }} />
-      <Tabs.Screen name="deposits/[depositId]" options={{ href: null, title: "Deposit Details" }} />
-      <Tabs.Screen name="transactions" options={{ href: null, title: "Transactions" }} />
-      <Tabs.Screen name="atm-locator" options={{ href: null, title: "ATM Locator" }} />
-      <Tabs.Screen name="notifications" options={{ href: null, title: "Notifications" }} />
-      <Tabs.Screen name="settings" options={{ href: null, title: "Settings" }} />
+      <Tabs.Screen name="transfers" options={{ href: null }} />
+      <Tabs.Screen name="bill-pay/index" options={{ href: null }} />
+      <Tabs.Screen name="accounts/new" options={{ href: null }} />
+      <Tabs.Screen name="accounts/[accountId]" options={{ href: null }} />
+      <Tabs.Screen name="bill-pay/payees" options={{ href: null }} />
+      <Tabs.Screen name="deposits/index" options={{ href: null }} />
+      <Tabs.Screen name="deposits/[depositId]" options={{ href: null }} />
+      <Tabs.Screen name="atm-locator" options={{ href: null }} />
+      <Tabs.Screen name="notifications" options={{ href: null }} />
+      <Tabs.Screen name="settings" options={{ href: null }} />
     </Tabs>
   );
 }
