@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   normalizeAccount,
+  normalizeExternalAccount,
   normalizePayment,
   normalizeTransaction,
   normalizeTransferPlan,
@@ -140,5 +141,26 @@ describe('banking contract normalization', () => {
     expect(payment.amount).toBe(40.99);
     expect(payment.cadence).toBe('Weekly');
     expect(payment.status).toBe('PROCESSING');
+  });
+
+  it('normalizes external account provider metadata without breaking existing shape', () => {
+    const account = normalizeExternalAccount({
+      id: 'ext_1',
+      bank_name: 'Wells Fargo',
+      nickname: 'Bills',
+      account_type: 'checking',
+      masked_account_number: '...6789',
+      routing_number: '011000015',
+      verification_status: 'verified',
+      provider: 'stripe_sandbox',
+      provider_account_id: 'ba_test_abc123',
+      is_active: true,
+      created_at: '2026-04-23T01:00:00Z',
+    });
+
+    expect(account.bankName).toBe('Wells Fargo');
+    expect(account.provider).toBe('stripe_sandbox');
+    expect(account.providerAccountId).toBe('ba_test_abc123');
+    expect(account.verificationStatus).toBe('VERIFIED');
   });
 });

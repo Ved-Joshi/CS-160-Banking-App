@@ -146,6 +146,9 @@ describe('BillPayPage', () => {
 
     fireEvent.change(within(dialog).getByLabelText('Payee name'), { target: { value: 'Comcast' } });
     await userEvent.selectOptions(within(dialog).getByLabelText('Category'), 'Internet');
+    await userEvent.type(within(dialog).getByLabelText('Routing number'), '011000015');
+    await userEvent.type(within(dialog).getByLabelText('Account number'), '1234567890');
+    await userEvent.type(within(dialog).getByLabelText('Confirm account number'), '1234567890');
     await userEvent.click(within(dialog).getByRole('button', { name: 'Add payee' }));
 
     await waitFor(() => {
@@ -153,6 +156,9 @@ describe('BillPayPage', () => {
       expect(mocks.createPayee.mock.calls[0]?.[0]).toEqual({
         name: 'Comcast',
         category: 'Internet',
+        routingNumber: '011000015',
+        accountNumber: '1234567890',
+        confirmAccountNumber: '1234567890',
       });
     });
   });

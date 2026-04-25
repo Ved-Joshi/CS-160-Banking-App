@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64" role="img" aria-label="U.S. Bank">
+  <rect width="64" height="64" rx="14" fill="#FFFFFF"/>
+  <path d="M8 18h48v26a8 8 0 0 1-8 8H16a8 8 0 0 1-8-8z" fill="#0A4B8C"/>
+  <path d="M8 18h48v12H8z" fill="#D71920"/>
+  <text x="32" y="42" font-size="13" text-anchor="middle" fill="#FFFFFF" font-family="Arial, sans-serif" font-weight="700">US</text>
+</svg>

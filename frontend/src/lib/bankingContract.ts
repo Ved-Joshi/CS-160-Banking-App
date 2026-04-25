@@ -1,4 +1,19 @@
-import type { BankAccount, ScheduledPayment, Transaction, TransferPlan, TransferResult, TransferSubmissionResult } from '../types/banking';
+import type {
+  BankAccount,
+  ExternalAccount,
+  ExternalTransfer,
+  ExternalTransferPlan,
+  ExternalTransferSubmissionResult,
+  MemberTransfer,
+  MemberTransferPlan,
+  MemberTransferRecipient,
+  MemberTransferSubmissionResult,
+  ScheduledPayment,
+  Transaction,
+  TransferPlan,
+  TransferResult,
+  TransferSubmissionResult,
+} from '../types/banking';
 
 type UnknownRecord = Record<string, unknown>;
 
@@ -80,6 +95,7 @@ export function normalizeAccount(input: unknown): BankAccount {
       availableBalance: asNumber(availableBalance, 0),
       currentBalance: asNumber(currentBalance, 0),
     },
+    isDefaultInternalReceive: asBoolean(row.isDefaultInternalReceive, asBoolean(row.is_default_internal_receive, false)),
   };
 }
 
@@ -159,6 +175,7 @@ export function normalizePayment(input: unknown): ScheduledPayment {
     amount: asNumber(amount, 0),
     cadence: normalizePaymentCadence(row.cadence),
     deliverBy: asString(row.deliverBy) || asString(row.deliver_by) || asString(row.created_at),
+    endDate: asString(row.endDate) || asString(row.end_date) || undefined,
     status: normalizePaymentStatus(row.status),
     failureReason: asString(row.failureReason) || asString(row.failure_reason) || undefined,
   };
@@ -239,4 +256,167 @@ export function normalizeTransferPlans(input: unknown): TransferPlan[] {
 export function normalizePayments(input: unknown): ScheduledPayment[] {
   if (!Array.isArray(input)) return [];
   return input.map(normalizePayment);
+}
+
+function normalizePlanStatus<T extends { status: string }>(status: unknown, fallback: T['status']): T['status'] {
+  const normalized = asString(status).toUpperCase();
+  if (normalized === 'PROCESSING' || normalized === 'COMPLETED' || normalized === 'CANCELLED') {
+    return normalized as T['status'];
+  }
+  return fallback;
+}
+
+export function normalizeMemberTransferRecipient(input: unknown): MemberTransferRecipient {
+  const row = asRecord(input);
+  return {
+    userId: asString(row.userId) || asString(row.user_id),
+    displayName: asString(row.displayName) || asString(row.display_name),
+    email: asString(row.email),
+    defaultCheckingAccountMasked: asString(row.defaultCheckingAccountMasked) || asString(row.default_checking_account_masked),
+  };
+}
+
+export function normalizeMemberTransfer(input: unknown): MemberTransfer {
+  const row = asRecord(input);
+  return {
+    id: asString(row.id),
+    fromAccountId: asString(row.fromAccountId) || asString(row.from_account_id),
+    recipientUserId: asString(row.recipientUserId) || asString(row.recipient_user_id),
+    recipientDisplayName: asString(row.recipientDisplayName) || asString(row.recipient_display_name),
+    amount: asNumber(row.amount ?? centsToDollars(row.amount_cents), 0),
+    memo: asString(row.memo) || undefined,
+    transferDate: asString(row.transferDate) || asString(row.transfer_date),
+    status: normalizeTransferStatus(row.status),
+    submittedAt: asString(row.submittedAt) || asString(row.submitted_at),
+    completedAt: asString(row.completedAt) || asString(row.completed_at) || undefined,
+    failureReason: asString(row.failureReason) || asString(row.failure_reason) || undefined,
+  };
+}
+
+export function normalizeMemberTransferPlan(input: unknown): MemberTransferPlan {
+  const row = asRecord(input);
+  return {
+    id: asString(row.id),
+    fromAccountId: asString(row.fromAccountId) || asString(row.from_account_id),
+    recipientUserId: asString(row.recipientUserId) || asString(row.recipient_user_id),
+    recipientEmail: asString(row.recipientEmail) || asString(row.recipient_email) || asString(row.recipient_handle),
+    recipientDisplayName: asString(row.recipientDisplayName) || asString(row.recipient_display_name),
+    amount: asNumber(row.amount ?? centsToDollars(row.amount_cents), 0),
+    memo: asString(row.memo) || undefined,
+    cadence: normalizeTransferCadence(row.cadence),
+    startDate: asString(row.startDate) || asString(row.start_date),
+    runTime: asString(row.runTime) || asString(row.run_time).slice(0, 5),
+    timezone: asString(row.timezone, 'UTC'),
+    endDate: asString(row.endDate) || asString(row.end_date) || undefined,
+    nextRunAt: asString(row.nextRunAt) || asString(row.next_run_at) || undefined,
+    lastRunAt: asString(row.lastRunAt) || asString(row.last_run_at) || undefined,
+    lastFailureReason: asString(row.lastFailureReason) || asString(row.last_failure_reason) || undefined,
+    status: normalizePlanStatus<MemberTransferPlan>(row.status, 'SCHEDULED'),
+    createdAt: asString(row.createdAt) || asString(row.created_at),
+    updatedAt: asString(row.updatedAt) || asString(row.updated_at),
+  };
+}
+
+export function normalizeMemberTransferSubmissionResult(input: unknown): MemberTransferSubmissionResult {
+  const row = asRecord(input);
+  return {
+    mode: asString(row.mode).toUpperCase() === 'SCHEDULED' ? 'SCHEDULED' : 'NOW',
+    transfer: row.transfer ? normalizeMemberTransfer(row.transfer) : undefined,
+    plan: row.plan ? normalizeMemberTransferPlan(row.plan) : undefined,
+  };
+}
+
+export function normalizeMemberTransferPlans(input: unknown): MemberTransferPlan[] {
+  if (!Array.isArray(input)) return [];
+  return input.map(normalizeMemberTransferPlan);
+}
+
+export function normalizeExternalAccount(input: unknown): ExternalAccount {
+  const row = asRecord(input);
+  return {
+    id: asString(row.id),
+    bankName: asString(row.bankName) || asString(row.bank_name),
+    nickname: asString(row.nickname),
+    accountType: asString(row.accountType) === 'Savings' || asString(row.account_type).toLowerCase() === 'savings' ? 'Savings' : 'Checking',
+    maskedAccountNumber: asString(row.maskedAccountNumber) || asString(row.masked_account_number),
+    routingNumber: asString(row.routingNumber) || asString(row.routing_number),
+    verificationStatus: asString(row.verificationStatus || row.verification_status).toUpperCase() === 'FAILED'
+      ? 'FAILED'
+      : asString(row.verificationStatus || row.verification_status).toUpperCase() === 'PENDING'
+        ? 'PENDING'
+        : 'VERIFIED',
+    provider: asString(row.provider) || undefined,
+    providerAccountId: asString(row.providerAccountId) || asString(row.provider_account_id) || undefined,
+    isActive: asBoolean(row.isActive, asBoolean(row.is_active, true)),
+    createdAt: asString(row.createdAt) || asString(row.created_at),
+  };
+}
+
+export function normalizeExternalAccounts(input: unknown): ExternalAccount[] {
+  if (!Array.isArray(input)) return [];
+  return input.map(normalizeExternalAccount);
+}
+
+export function normalizeExternalTransfer(input: unknown): ExternalTransfer {
+  const row = asRecord(input);
+  const normalizedStatus = asString(row.status).toUpperCase();
+  return {
+    id: asString(row.id),
+    fromAccountId: asString(row.fromAccountId) || asString(row.from_account_id),
+    externalAccountId: asString(row.externalAccountId) || asString(row.external_account_id),
+    externalAccountLabel: asString(row.externalAccountLabel) || asString(row.external_account_label),
+    amount: asNumber(row.amount ?? centsToDollars(row.amount_cents), 0),
+    memo: asString(row.memo) || undefined,
+    transferDate: asString(row.transferDate) || asString(row.transfer_date),
+    status: normalizedStatus === 'COMPLETED' || normalizedStatus === 'FAILED' || normalizedStatus === 'CANCELLED'
+      ? normalizedStatus as ExternalTransfer['status']
+      : 'PROCESSING',
+    submittedAt: asString(row.submittedAt) || asString(row.submitted_at),
+    processedAt: asString(row.processedAt) || asString(row.processed_at) || undefined,
+    completedAt: asString(row.completedAt) || asString(row.completed_at) || undefined,
+    settleAfter: asString(row.settleAfter) || asString(row.settle_after) || undefined,
+    failureReason: asString(row.failureReason) || asString(row.failure_reason) || undefined,
+  };
+}
+
+export function normalizeExternalTransferPlan(input: unknown): ExternalTransferPlan {
+  const row = asRecord(input);
+  return {
+    id: asString(row.id),
+    fromAccountId: asString(row.fromAccountId) || asString(row.from_account_id),
+    externalAccountId: asString(row.externalAccountId) || asString(row.external_account_id),
+    externalAccountLabel: asString(row.externalAccountLabel) || asString(row.external_account_label),
+    amount: asNumber(row.amount ?? centsToDollars(row.amount_cents), 0),
+    memo: asString(row.memo) || undefined,
+    cadence: normalizeTransferCadence(row.cadence),
+    startDate: asString(row.startDate) || asString(row.start_date),
+    runTime: asString(row.runTime) || asString(row.run_time).slice(0, 5),
+    timezone: asString(row.timezone, 'UTC'),
+    endDate: asString(row.endDate) || asString(row.end_date) || undefined,
+    nextRunAt: asString(row.nextRunAt) || asString(row.next_run_at) || undefined,
+    lastRunAt: asString(row.lastRunAt) || asString(row.last_run_at) || undefined,
+    lastFailureReason: asString(row.lastFailureReason) || asString(row.last_failure_reason) || undefined,
+    status: normalizePlanStatus<ExternalTransferPlan>(row.status, 'SCHEDULED'),
+    createdAt: asString(row.createdAt) || asString(row.created_at),
+    updatedAt: asString(row.updatedAt) || asString(row.updated_at),
+  };
+}
+
+export function normalizeExternalTransferSubmissionResult(input: unknown): ExternalTransferSubmissionResult {
+  const row = asRecord(input);
+  return {
+    mode: asString(row.mode).toUpperCase() === 'SCHEDULED' ? 'SCHEDULED' : 'NOW',
+    transfer: row.transfer ? normalizeExternalTransfer(row.transfer) : undefined,
+    plan: row.plan ? normalizeExternalTransferPlan(row.plan) : undefined,
+  };
+}
+
+export function normalizeExternalTransferPlans(input: unknown): ExternalTransferPlan[] {
+  if (!Array.isArray(input)) return [];
+  return input.map(normalizeExternalTransferPlan);
+}
+
+export function normalizeExternalTransfers(input: unknown): ExternalTransfer[] {
+  if (!Array.isArray(input)) return [];
+  return input.map(normalizeExternalTransfer);
 }
