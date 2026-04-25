@@ -23,6 +23,7 @@ services:
     build:
       context: ./frontend
       dockerfile: Dockerfile
+    command: ["serve", "-s", "dist", "-l", "5173"]
     ports:
       - "5173:5173"
     env_file:
