@@ -145,7 +145,7 @@ class DepositUploadUrls(BaseModel):
 class CreateDepositIn(BaseModel):
     accountId: str
     amount: float = Field(gt=0)
-    depositType: DepositType
+    depositType: DepositType = "check"
 
 
 class NotificationItem(BaseModel):
