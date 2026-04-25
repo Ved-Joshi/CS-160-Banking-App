@@ -1544,6 +1544,7 @@ async def create_deposit(
             "p_deposit_type": payload.depositType,
         },
     )
+
     created = result[0] if isinstance(result, list) else result
     if not created:
         raise HTTPException(

@@ -154,10 +154,21 @@ export const depositsService = {
       body: input,
     });
   },
-  create(input: CreateDepositInput): Promise<Deposit> {
+  create(
+    input: CreateDepositInput & {
+      frontImagePath?: string;
+      backImagePath?: string;
+      depositType?: CreateDepositInput['depositType'];
+    },
+  ): Promise<Deposit> {
+    const payload: CreateDepositInput = {
+      accountId: input.accountId,
+      amount: input.amount,
+      depositType: input.depositType ?? 'check',
+    };
     return apiRequest('/api/deposits', {
       method: 'POST',
-      body: input,
+      body: payload,
     });
   },
 };
