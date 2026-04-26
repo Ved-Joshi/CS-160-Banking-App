@@ -94,6 +94,54 @@ async def ensure_customer_ledger_account(account: dict) -> dict:
         ) from exc
 
 
+async def get_or_create_billpay_clearing_ledger_account() -> dict:
+    """
+    Ensure the bank-owned bill payment clearing ledger account exists.
+
+    This account is used as the offsetting side for bill payment journals.
+    The helper is idempotent so it can safely run before every bill payment
+    execution path.
+    """
+    ledger_code = "BANK_BILLPAY_CLEARING_USD"
+
+    existing_rows = await supabase_client.select_rows(
+        "ledger_accounts",
+        filters={"ledger_code": f"eq.{ledger_code}"},
+        limit=1,
+    )
+    if existing_rows:
+        return existing_rows[0]
+
+    ledger_account_payload = {
+        "owner_type": "bank",
+        "owner_user_id": None,
+        "product_account_id": None,
+        "ledger_code": ledger_code,
+        "name": "Bill Pay Clearing",
+        "account_class": "asset",
+        "normal_balance": "debit",
+        "currency": "USD",
+        "is_active": True,
+    }
+
+    try:
+        ledger_account = await supabase_client.insert_row("ledger_accounts", ledger_account_payload)
+        return ledger_account
+    except HTTPException as exc:
+        if "duplicate" in str(exc.detail).lower() or "unique" in str(exc.detail).lower():
+            rows = await supabase_client.select_rows(
+                "ledger_accounts",
+                filters={"ledger_code": f"eq.{ledger_code}"},
+                limit=1,
+            )
+            if rows:
+                return rows[0]
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to create bill pay clearing ledger account: {exc.detail}",
+        ) from exc
+
+
 async def ensure_ledger_accounts_for_transfer(
     from_account: dict,
     to_account: dict,
