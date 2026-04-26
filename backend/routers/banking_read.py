@@ -65,6 +65,7 @@ from services.payment_service import (
     reserve_idempotency_key,
     validate_payment_amount_or_raise,
 )
+from services.ledger_service import get_or_create_deposit_clearing_ledger_account
 from services.transfer_service import (
     cancel_external_transfer_plan_for_user,
     cancel_member_transfer_plan_for_user,
@@ -1535,6 +1536,7 @@ async def create_deposit(
     current_user: SupabaseUser = Depends(get_current_user),
 ) -> Deposit:
     await require_owned_account(payload.accountId, current_user.id, require_open=True)
+    await get_or_create_deposit_clearing_ledger_account()
     result = await supabase_client.rpc(
         "submit_customer_deposit",
         {

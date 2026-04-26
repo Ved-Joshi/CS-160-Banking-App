@@ -94,16 +94,19 @@ async def ensure_customer_ledger_account(account: dict) -> dict:
         ) from exc
 
 
-async def get_or_create_billpay_clearing_ledger_account() -> dict:
+async def _get_or_create_bank_ledger_account(
+    *,
+    ledger_code: str,
+    name: str,
+    account_class: str,
+    normal_balance: str,
+) -> dict:
     """
-    Ensure the bank-owned bill payment clearing ledger account exists.
+    Ensure a bank-owned ledger account exists.
 
-    This account is used as the offsetting side for bill payment journals.
-    The helper is idempotent so it can safely run before every bill payment
-    execution path.
+    This helper is used for operational clearing accounts that support
+    write-through ledger flows like bill pay and deposits.
     """
-    ledger_code = "BANK_BILLPAY_CLEARING_USD"
-
     existing_rows = await supabase_client.select_rows(
         "ledger_accounts",
         filters={"ledger_code": f"eq.{ledger_code}"},
@@ -117,9 +120,9 @@ async def get_or_create_billpay_clearing_ledger_account() -> dict:
         "owner_user_id": None,
         "product_account_id": None,
         "ledger_code": ledger_code,
-        "name": "Bill Pay Clearing",
-        "account_class": "asset",
-        "normal_balance": "debit",
+        "name": name,
+        "account_class": account_class,
+        "normal_balance": normal_balance,
         "currency": "USD",
         "is_active": True,
     }
@@ -138,8 +141,40 @@ async def get_or_create_billpay_clearing_ledger_account() -> dict:
                 return rows[0]
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to create bill pay clearing ledger account: {exc.detail}",
+            detail=f"Failed to create {name.lower()} ledger account: {exc.detail}",
         ) from exc
+
+
+async def get_or_create_billpay_clearing_ledger_account() -> dict:
+    """
+    Ensure the bank-owned bill payment clearing ledger account exists.
+
+    This account is used as the offsetting side for bill payment journals.
+    The helper is idempotent so it can safely run before every bill payment
+    execution path.
+    """
+    return await _get_or_create_bank_ledger_account(
+        ledger_code="BANK_BILLPAY_CLEARING_USD",
+        name="Bill Pay Clearing",
+        account_class="asset",
+        normal_balance="debit",
+    )
+
+
+async def get_or_create_deposit_clearing_ledger_account() -> dict:
+    """
+    Ensure the bank-owned deposit clearing ledger account exists.
+
+    Deposit write-through already runs in the SQL RPC, but the backend
+    validates this clearing account exists before invoking the RPC so the
+    operation fails fast with a clearer error if seed data is missing.
+    """
+    return await _get_or_create_bank_ledger_account(
+        ledger_code="DEPOSIT_CLEARING",
+        name="Deposit Clearing",
+        account_class="asset",
+        normal_balance="debit",
+    )
 
 
 async def ensure_ledger_accounts_for_transfer(
