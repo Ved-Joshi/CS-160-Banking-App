@@ -15,7 +15,7 @@ type RegistrationPayload = {
   date_of_birth: string;
 };
 
-const FUNCTION_VERSION = "2026-03-23-1";
+const FUNCTION_VERSION = "2026-04-27-ssn-removed";
 const REQUIRED_FIELDS: (keyof RegistrationPayload)[] = [
   "email",
   "first_name",
@@ -63,8 +63,6 @@ const getEnvAny = (keys: string[]) => {
 
 const normalizeEmail = (email: string) => email.trim().toLowerCase();
 const normalizeState = (state: string) => state.trim().toUpperCase();
-const isTruthy = (value: string | undefined | null) =>
-  Boolean(value && ["1", "true", "yes", "on"].includes(value.trim().toLowerCase()));
 const normalizePhone = (phone: string) => {
   const trimmed = phone.trim();
   const digits = trimmed.replace(/\D/g, "");
