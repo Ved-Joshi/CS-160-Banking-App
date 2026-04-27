@@ -1,4 +1,5 @@
 import Constants from "expo-constants";
+import * as FileSystem from "expo-file-system/legacy";
 import { Platform } from "react-native";
 import { supabase } from "./supabaseClient";
 import type {
@@ -7,8 +8,38 @@ import type {
   Payee,
   ScheduledPayment,
   Deposit,
+  DepositStatus,
   AtmLocation,
+  AtmSearchResponse,
+  AtmWithdrawalResult,
+  CustomerProfile,
+  UpdateCustomerProfileInput,
+  ExternalAccount,
+  ExternalLinkSession,
+  ExternalTransferSubmissionResult,
+  ExternalTransfer,
+  ExternalTransferPlan,
 } from "../types";
+
+export type DepositUploadTarget = { path: string; token: string; signedUrl: string };
+export type DepositUploadUrls = { bucket: string; front: DepositUploadTarget; back: DepositUploadTarget };
+export type CreateDepositUploadUrlsInput = {
+  frontFileName: string;
+  backFileName: string;
+  frontContentType: string;
+  backContentType: string;
+  frontFileSizeBytes: number;
+  backFileSizeBytes: number;
+};
+export type CreateDepositInput = {
+  accountId: string;
+  amount: number;
+  depositMethod: "atm" | "check";
+  depositType?: "cash" | "check";
+  note?: string;
+  frontImagePath?: string;
+  backImagePath?: string;
+};
 
 function resolveApiUrl(): string {
   const config = Constants.expoConfig?.extra ?? {};
@@ -28,6 +59,25 @@ function resolveApiUrl(): string {
 }
 
 const API_URL = resolveApiUrl();
+
+function createIdempotencyKey(): string {
+  if (typeof globalThis.crypto?.randomUUID === "function") return globalThis.crypto.randomUUID();
+  return `mobile-${Date.now()}-${Math.random().toString(16).slice(2)}-${Math.random().toString(16).slice(2)}`;
+}
+
+async function readApiErrorMessage(response: Response, fallback: string): Promise<string> {
+  const text = await response.text();
+  if (!text) return fallback;
+  try {
+    const data = JSON.parse(text) as any;
+    const detail = data?.detail ?? data?.message ?? data;
+    if (typeof detail === "string") return detail;
+    if (typeof detail?.message === "string") return detail.message;
+    return JSON.stringify(detail);
+  } catch {
+    return text;
+  }
+}
 
 // Helper to get authorization header with session token
 async function getAuthHeader(): Promise<{ Authorization: string }> {
@@ -109,6 +159,25 @@ export async function closeAccount(accountId: string): Promise<void> {
   }
 }
 
+// ============= PROFILE =============
+export async function fetchProfile(): Promise<CustomerProfile> {
+  const headers = await getAuthHeader();
+  const response = await fetch(`${API_URL}/api/me/profile`, { headers });
+  if (!response.ok) throw new Error(await readApiErrorMessage(response, "Failed to fetch profile"));
+  return (await response.json()) as CustomerProfile;
+}
+
+export async function updateProfile(input: UpdateCustomerProfileInput): Promise<CustomerProfile> {
+  const headers = await getAuthHeader();
+  const response = await fetch(`${API_URL}/api/me/profile`, {
+    method: "PATCH",
+    headers: { ...headers, "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  if (!response.ok) throw new Error(await readApiErrorMessage(response, "Failed to update profile"));
+  return (await response.json()) as CustomerProfile;
+}
+
 // ============= TRANSACTIONS =============
 export async function fetchTransactions(accountId?: string): Promise<Transaction[]> {
   const headers = await getAuthHeader();
@@ -160,6 +229,18 @@ export async function createTransfer(
     }
   }
   return await response.json();
+}
+
+// ============= WITHDRAWALS =============
+export async function submitAtmWithdrawal(accountId: string, amount: number): Promise<AtmWithdrawalResult> {
+  const headers = await getAuthHeader();
+  const response = await fetch(`${API_URL}/api/withdrawals/atm`, {
+    method: "POST",
+    headers: { ...headers, "Content-Type": "application/json" },
+    body: JSON.stringify({ accountId, amount }),
+  });
+  if (!response.ok) throw new Error(await readApiErrorMessage(response, "Failed to submit ATM withdrawal"));
+  return (await response.json()) as AtmWithdrawalResult;
 }
 
 // ============= MEMBER TRANSFERS =============
@@ -246,70 +327,230 @@ export async function cancelMemberTransferPlan(planId: string): Promise<any> {
   return await response.json();
 }
 
+export async function updateMemberTransferPlan(planId: string, payload: Record<string, unknown>): Promise<any> {
+  const headers = await getAuthHeader();
+  const response = await fetch(`${API_URL}/api/member-transfers/plans/${planId}`, {
+    method: "PATCH",
+    headers: { ...headers, "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!response.ok) throw new Error(await readApiErrorMessage(response, "Failed to update member transfer plan"));
+  return await response.json();
+}
+
+export async function retryMemberTransferPlan(planId: string): Promise<any> {
+  const headers = await getAuthHeader();
+  const response = await fetch(`${API_URL}/api/member-transfers/plans/${planId}/retry`, {
+    method: "POST",
+    headers,
+  });
+  if (!response.ok) throw new Error(await readApiErrorMessage(response, "Failed to retry member transfer plan"));
+  return await response.json();
+}
+
+// ============= EXTERNAL ACCOUNTS =============
+export async function fetchExternalAccounts(): Promise<ExternalAccount[]> {
+  const headers = await getAuthHeader();
+  const response = await fetch(`${API_URL}/api/external-accounts`, { headers });
+  if (!response.ok) throw new Error(await readApiErrorMessage(response, "Failed to fetch external accounts"));
+  return (await response.json()) as ExternalAccount[];
+}
+
+export async function createExternalAccount(input: {
+  bankName: string;
+  nickname: string;
+  accountType: "Checking" | "Savings";
+  routingNumber: string;
+  accountNumber: string;
+  confirmAccountNumber: string;
+}): Promise<ExternalAccount> {
+  const headers = await getAuthHeader();
+  const response = await fetch(`${API_URL}/api/external-accounts`, {
+    method: "POST",
+    headers: { ...headers, "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  if (!response.ok) throw new Error(await readApiErrorMessage(response, "Failed to link external account"));
+  return (await response.json()) as ExternalAccount;
+}
+
+export async function createExternalLinkSession(): Promise<ExternalLinkSession> {
+  const headers = await getAuthHeader();
+  const response = await fetch(`${API_URL}/api/external-accounts/link-session`, {
+    method: "POST",
+    headers,
+  });
+  if (!response.ok) throw new Error(await readApiErrorMessage(response, "Failed to start external link session"));
+  return (await response.json()) as ExternalLinkSession;
+}
+
+export async function completeExternalLink(accountId: string): Promise<ExternalAccount> {
+  const headers = await getAuthHeader();
+  const response = await fetch(`${API_URL}/api/external-accounts/link-complete`, {
+    method: "POST",
+    headers: { ...headers, "Content-Type": "application/json" },
+    body: JSON.stringify({ accountId }),
+  });
+  if (!response.ok) throw new Error(await readApiErrorMessage(response, "Failed to complete external linking"));
+  return (await response.json()) as ExternalAccount;
+}
+
+// ============= EXTERNAL TRANSFERS =============
+export async function submitExternalTransfer(input: {
+  fromAccountId: string;
+  externalAccountId: string;
+  amount: number;
+  memo?: string;
+  scheduleMode?: "NOW" | "SCHEDULED";
+  transferDate?: string;
+  cadence?: string;
+  startDate?: string;
+  runTime?: string;
+  endDate?: string;
+  timezone?: string;
+}): Promise<ExternalTransferSubmissionResult> {
+  const headers = await getAuthHeader();
+  const response = await fetch(`${API_URL}/api/external-transfers`, {
+    method: "POST",
+    headers: { ...headers, "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  if (!response.ok) throw new Error(await readApiErrorMessage(response, "Failed to submit external transfer"));
+  return (await response.json()) as ExternalTransferSubmissionResult;
+}
+
+export async function fetchExternalTransfers(): Promise<ExternalTransfer[]> {
+  const headers = await getAuthHeader();
+  const response = await fetch(`${API_URL}/api/external-transfers`, { headers });
+  if (!response.ok) throw new Error(await readApiErrorMessage(response, "Failed to fetch external transfers"));
+  return (await response.json()) as ExternalTransfer[];
+}
+
+export async function fetchExternalTransferPlans(): Promise<ExternalTransferPlan[]> {
+  const headers = await getAuthHeader();
+  const response = await fetch(`${API_URL}/api/external-transfers/plans`, { headers });
+  if (!response.ok) throw new Error(await readApiErrorMessage(response, "Failed to fetch external transfer plans"));
+  return (await response.json()) as ExternalTransferPlan[];
+}
+
+export async function cancelExternalTransferPlan(planId: string): Promise<ExternalTransferPlan> {
+  const headers = await getAuthHeader();
+  const response = await fetch(`${API_URL}/api/external-transfers/plans/${planId}/cancel`, {
+    method: "POST",
+    headers,
+  });
+  if (!response.ok) throw new Error(await readApiErrorMessage(response, "Failed to cancel external transfer plan"));
+  return (await response.json()) as ExternalTransferPlan;
+}
+
+export async function updateExternalTransferPlan(planId: string, payload: Record<string, unknown>): Promise<ExternalTransferPlan> {
+  const headers = await getAuthHeader();
+  const response = await fetch(`${API_URL}/api/external-transfers/plans/${planId}`, {
+    method: "PATCH",
+    headers: { ...headers, "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!response.ok) throw new Error(await readApiErrorMessage(response, "Failed to update external transfer plan"));
+  return (await response.json()) as ExternalTransferPlan;
+}
+
+export async function retryExternalTransferPlan(planId: string): Promise<ExternalTransferPlan> {
+  const headers = await getAuthHeader();
+  const response = await fetch(`${API_URL}/api/external-transfers/plans/${planId}/retry`, {
+    method: "POST",
+    headers,
+  });
+  if (!response.ok) throw new Error(await readApiErrorMessage(response, "Failed to retry external transfer plan"));
+  return (await response.json()) as ExternalTransferPlan;
+}
+
 // ============= BILL PAYMENTS =============
 export async function fetchPayees(): Promise<Payee[]> {
   const headers = await getAuthHeader();
   const response = await fetch(`${API_URL}/api/payees`, { headers });
-  if (!response.ok) throw new Error("Failed to fetch payees");
+  if (!response.ok) throw new Error(await readApiErrorMessage(response, "Failed to fetch payees"));
   
   const data = await response.json();
+  if (!Array.isArray(data)) return [];
   return data.map((payee: any) => ({
-    id: payee.id,
-    name: payee.name,
-    category: payee.category || "Other",
-    accountMask: `...${payee.account_last4}`,
-  }));
+    id: String(payee?.id ?? ""),
+    name: String(payee?.name ?? "Unknown payee"),
+    category: String(payee?.category ?? "Other"),
+    accountMask: String(payee?.accountMask ?? payee?.account_mask ?? "...----"),
+  })) as Payee[];
+}
+
+export async function createPayee(input: {
+  name: string;
+  category: string;
+  routingNumber: string;
+  accountNumber: string;
+  confirmAccountNumber: string;
+}): Promise<Payee> {
+  const headers = await getAuthHeader();
+  const response = await fetch(`${API_URL}/api/payees`, {
+    method: "POST",
+    headers: { ...headers, "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  if (!response.ok) throw new Error(await readApiErrorMessage(response, "Failed to create payee"));
+  const payee = await response.json();
+  return {
+    id: String(payee?.id ?? ""),
+    name: String(payee?.name ?? "Unknown payee"),
+    category: String(payee?.category ?? "Other"),
+    accountMask: String(payee?.accountMask ?? payee?.account_mask ?? "...----"),
+  };
 }
 
 export async function fetchBillPayments(): Promise<ScheduledPayment[]> {
   const headers = await getAuthHeader();
   const response = await fetch(`${API_URL}/api/payments`, { headers });
-  if (!response.ok) throw new Error("Failed to fetch bill payments");
+  if (!response.ok) throw new Error(await readApiErrorMessage(response, "Failed to fetch bill payments"));
   
   const data = await response.json();
+  if (!Array.isArray(data)) return [];
   return data.map((payment: any) => ({
-    id: payment.id,
-    payeeId: payment.payee_id,
-    payeeName: payment.payee_name || "Unknown",
-    accountId: payment.account_id,
-    amount: payment.amount_cents / 100,
-    cadence: payment.cadence.charAt(0).toUpperCase() + payment.cadence.slice(1),
-    deliverBy: payment.deliver_by,
-    status: payment.status.toUpperCase(),
-  }));
+    id: String(payment?.id ?? ""),
+    payeeId: String(payment?.payeeId ?? ""),
+    payeeName: String(payment?.payeeName ?? "Unknown"),
+    accountId: String(payment?.accountId ?? ""),
+    amount: Number(payment?.amount ?? 0),
+    cadence: (String(payment?.cadence ?? "Once") as ScheduledPayment["cadence"]),
+    deliverBy: String(payment?.deliverBy ?? ""),
+    status: (String(payment?.status ?? "SCHEDULED") as ScheduledPayment["status"]),
+    failureReason: typeof payment?.failureReason === "string" ? payment.failureReason : null,
+  })) as ScheduledPayment[];
 }
 
 export async function createBillPayment(
-  payeeId: string,
-  accountId: string,
-  amount: number,
-  cadence: "once" | "weekly" | "biweekly" | "monthly",
-  deliverBy: string
+  input: {
+    payeeId: string;
+    accountId: string;
+    amount: number;
+    cadence: ScheduledPayment["cadence"];
+    deliverBy: string;
+  }
 ): Promise<ScheduledPayment> {
   const headers = await getAuthHeader();
   const response = await fetch(`${API_URL}/api/payments`, {
     method: "POST",
-    headers: { ...headers, "Content-Type": "application/json" },
-    body: JSON.stringify({
-      payee_id: payeeId,
-      account_id: accountId,
-      amount_cents: Math.round(amount * 100),
-      cadence,
-      deliver_by: deliverBy,
-    }),
+    headers: { ...headers, "Content-Type": "application/json", "Idempotency-Key": createIdempotencyKey() },
+    body: JSON.stringify(input),
   });
-  if (!response.ok) throw new Error("Failed to create bill payment");
+  if (!response.ok) throw new Error(await readApiErrorMessage(response, "Failed to create bill payment"));
   
-  const payment = await response.json();
+  const payment = (await response.json()) as any;
   return {
-    id: payment.id,
-    payeeId: payment.payee_id,
-    payeeName: payment.payee_name || "Unknown",
-    accountId: payment.account_id,
-    amount: payment.amount_cents / 100,
-    cadence: payment.cadence.charAt(0).toUpperCase() + payment.cadence.slice(1),
-    deliverBy: payment.deliver_by,
-    status: payment.status.toUpperCase(),
+    id: String(payment?.id ?? ""),
+    payeeId: String(payment?.payeeId ?? ""),
+    payeeName: String(payment?.payeeName ?? "Unknown"),
+    accountId: String(payment?.accountId ?? ""),
+    amount: Number(payment?.amount ?? 0),
+    cadence: (String(payment?.cadence ?? "Once") as ScheduledPayment["cadence"]),
+    deliverBy: String(payment?.deliverBy ?? ""),
+    status: (String(payment?.status ?? "SCHEDULED") as ScheduledPayment["status"]),
+    failureReason: typeof payment?.failureReason === "string" ? payment.failureReason : null,
   };
 }
 
@@ -319,92 +560,131 @@ export async function cancelBillPayment(paymentId: string): Promise<void> {
     method: "POST",
     headers,
   });
-  if (!response.ok) throw new Error("Failed to cancel bill payment");
+  if (!response.ok) throw new Error(await readApiErrorMessage(response, "Failed to cancel bill payment"));
+}
+
+export async function retryBillPayment(paymentId: string): Promise<ScheduledPayment> {
+  const headers = await getAuthHeader();
+  const response = await fetch(`${API_URL}/api/payments/${paymentId}/retry`, {
+    method: "POST",
+    headers: { ...headers, "Idempotency-Key": createIdempotencyKey() },
+  });
+  if (!response.ok) throw new Error(await readApiErrorMessage(response, "Failed to retry bill payment"));
+  const payment = (await response.json()) as any;
+  return {
+    id: String(payment?.id ?? ""),
+    payeeId: String(payment?.payeeId ?? ""),
+    payeeName: String(payment?.payeeName ?? "Unknown"),
+    accountId: String(payment?.accountId ?? ""),
+    amount: Number(payment?.amount ?? 0),
+    cadence: (String(payment?.cadence ?? "Once") as ScheduledPayment["cadence"]),
+    deliverBy: String(payment?.deliverBy ?? ""),
+    status: (String(payment?.status ?? "SCHEDULED") as ScheduledPayment["status"]),
+    failureReason: typeof payment?.failureReason === "string" ? payment.failureReason : null,
+  };
 }
 
 // ============= DEPOSITS =============
-export async function getDepositUploadUrls(): Promise<{ front: string; back: string }> {
+export async function getDepositUploadUrls(input: CreateDepositUploadUrlsInput): Promise<DepositUploadUrls> {
   const headers = await getAuthHeader();
   const response = await fetch(`${API_URL}/api/deposits/upload-urls`, {
     method: "POST",
-    headers,
+    headers: { ...headers, "Content-Type": "application/json" },
+    body: JSON.stringify(input),
   });
-  if (!response.ok) throw new Error("Failed to get upload URLs");
-  return await response.json();
+  if (!response.ok) throw new Error(await readApiErrorMessage(response, "Failed to get upload URLs"));
+  return (await response.json()) as DepositUploadUrls;
 }
 
-export async function submitDeposit(
-  accountId: string,
-  amount: number,
-  note?: string,
-  frontImagePath?: string,
-  backImagePath?: string
-): Promise<Deposit> {
+export async function uploadDepositImage(target: DepositUploadTarget, fileUri: string, contentType: string): Promise<void> {
+  const result = await FileSystem.uploadAsync(target.signedUrl, fileUri, {
+    httpMethod: "PUT",
+    uploadType: FileSystem.FileSystemUploadType.BINARY_CONTENT,
+    headers: {
+      "content-type": contentType || "application/octet-stream",
+      "x-upsert": "true",
+    },
+  });
+  if (result.status < 200 || result.status >= 300) {
+    throw new Error("Unable to upload check image. Please try again.");
+  }
+}
+
+function normalizeDeposit(input: any): Deposit {
+  const images = input?.images ?? {};
+  const statusValue: DepositStatus = (() => {
+    const raw = typeof input?.status === "string" ? input.status.toUpperCase() : "";
+    if (raw === "APPROVED" || raw === "DECLINED" || raw === "PENDING_REVIEW") return raw as DepositStatus;
+    return "PENDING_REVIEW";
+  })();
+  return {
+    id: String(input?.id ?? ""),
+    accountId: String(input?.accountId ?? input?.account_id ?? ""),
+    amount: typeof input?.amount === "number" ? input.amount : (input?.amount_cents ?? 0) / 100,
+    submittedAt: String(input?.submittedAt ?? input?.submitted_at ?? input?.created_at ?? ""),
+    status: statusValue,
+    note: typeof input?.note === "string" ? input.note : undefined,
+    images: {
+      front: images?.front ?? undefined,
+      back: images?.back ?? undefined,
+    },
+  };
+}
+
+export async function submitDeposit(input: CreateDepositInput): Promise<Deposit> {
   const headers = await getAuthHeader();
   const response = await fetch(`${API_URL}/api/deposits`, {
     method: "POST",
-    headers: { ...headers, "Content-Type": "application/json" },
+    headers: { ...headers, "Content-Type": "application/json", "Idempotency-Key": createIdempotencyKey() },
     body: JSON.stringify({
-      account_id: accountId,
-      amount_cents: Math.round(amount * 100),
-      note,
-      front_image_path: frontImagePath,
-      back_image_path: backImagePath,
+      accountId: input.accountId,
+      amount: input.amount,
+      depositMethod: input.depositMethod,
+      depositType: input.depositType,
+      note: input.note,
+      frontImagePath: input.frontImagePath,
+      backImagePath: input.backImagePath,
     }),
   });
-  if (!response.ok) throw new Error("Failed to submit deposit");
-  
-  const deposit = await response.json();
-  return {
-    id: deposit.id,
-    accountId: deposit.account_id,
-    amount: deposit.amount_cents / 100,
-    submittedAt: deposit.submitted_at,
-    status: deposit.status === "submitted" ? "PENDING_REVIEW" : deposit.status.toUpperCase(),
-    note: deposit.note,
-    images: {
-      front: deposit.front_image_path ? { id: "front", fileName: "front.jpg", capturedAt: deposit.submitted_at } : undefined,
-      back: deposit.back_image_path ? { id: "back", fileName: "back.jpg", capturedAt: deposit.submitted_at } : undefined,
-    },
-  };
+  if (!response.ok) throw new Error(await readApiErrorMessage(response, "Failed to submit deposit"));
+
+  return normalizeDeposit(await response.json());
 }
 
 export async function fetchDeposits(): Promise<Deposit[]> {
   const headers = await getAuthHeader();
   const response = await fetch(`${API_URL}/api/deposits`, { headers });
-  if (!response.ok) throw new Error("Failed to fetch deposits");
-  
+  if (!response.ok) throw new Error(await readApiErrorMessage(response, "Failed to fetch deposits"));
+
   const data = await response.json();
-  return data.map((deposit: any) => ({
-    id: deposit.id,
-    accountId: deposit.account_id,
-    amount: deposit.amount_cents / 100,
-    submittedAt: deposit.submitted_at,
-    status: deposit.status === "submitted" ? "PENDING_REVIEW" : deposit.status.toUpperCase(),
-    note: deposit.note,
-    images: {
-      front: deposit.front_image_path ? { id: "front", fileName: "front.jpg", capturedAt: deposit.submitted_at } : undefined,
-      back: deposit.back_image_path ? { id: "back", fileName: "back.jpg", capturedAt: deposit.submitted_at } : undefined,
-    },
-  }));
+  if (!Array.isArray(data)) return [];
+  return data.map(normalizeDeposit);
 }
 
 // ============= ATM LOCATOR =============
-export async function searchATMs(
-  query?: string,
-  latitude?: number,
-  longitude?: number
-): Promise<AtmLocation[]> {
+export type AtmSearchParams = {
+  query?: string;
+  latitude?: number;
+  longitude?: number;
+  radiusMiles?: number;
+  openNow?: boolean;
+  limit?: number;
+};
+
+export async function searchATMs(params: AtmSearchParams = {}): Promise<AtmSearchResponse> {
   const headers = await getAuthHeader();
-  const params = new URLSearchParams();
-  if (query) params.append("query", query);
-  if (latitude !== undefined) params.append("latitude", latitude.toString());
-  if (longitude !== undefined) params.append("longitude", longitude.toString());
+  const urlParams = new URLSearchParams();
+  if (params.query) urlParams.append("query", params.query);
+  if (params.latitude !== undefined) urlParams.append("lat", params.latitude.toString());
+  if (params.longitude !== undefined) urlParams.append("lng", params.longitude.toString());
+  if (params.radiusMiles !== undefined) urlParams.append("radius_miles", params.radiusMiles.toString());
+  if (params.openNow !== undefined) urlParams.append("open_now", params.openNow ? "true" : "false");
+  if (params.limit !== undefined) urlParams.append("limit", params.limit.toString());
   
-  const response = await fetch(`${API_URL}/api/atms/search?${params}`, { headers });
-  if (!response.ok) throw new Error("Failed to search ATMs");
+  const response = await fetch(`${API_URL}/api/atms/search?${urlParams}`, { headers });
+  if (!response.ok) throw new Error(await readApiErrorMessage(response, "Failed to search ATMs"));
   
-  const data = await response.json();
+  const data = (await response.json()) as AtmSearchResponse;
   return data;
 }
 

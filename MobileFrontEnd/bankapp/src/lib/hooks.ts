@@ -5,7 +5,15 @@ import type {
   Payee,
   ScheduledPayment,
   Deposit,
-  AtmLocation,
+  AtmSearchResponse,
+  AtmWithdrawalResult,
+  CustomerProfile,
+  UpdateCustomerProfileInput,
+  ExternalAccount,
+  ExternalLinkSession,
+  ExternalTransfer,
+  ExternalTransferPlan,
+  ExternalTransferSubmissionResult,
 } from "../types";
 import * as api from "./api";
 
@@ -65,6 +73,55 @@ export function useAccounts() {
   return { accounts, loading, error, refresh, createAccount, closeAccount };
 }
 
+export function useProfile() {
+  const [profile, setProfile] = useState<CustomerProfile | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
+  const refresh = useCallback(async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      const data = await api.fetchProfile();
+      if (mountedRef.current) setProfile(data);
+    } catch (err) {
+      if (mountedRef.current) setError(err instanceof Error ? err.message : "Failed to load profile");
+    } finally {
+      if (mountedRef.current) setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void refresh();
+  }, [refresh]);
+
+  const update = useCallback(async (input: UpdateCustomerProfileInput) => {
+    try {
+      setLoading(true);
+      setError(null);
+      const updated = await api.updateProfile(input);
+      if (mountedRef.current) setProfile(updated);
+      return updated;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Failed to update profile";
+      setError(message);
+      throw err;
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  return { profile, loading, error, refresh, update };
+}
+
 export function useTransactions(accountId?: string) {
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [loading, setLoading] = useState(true);
@@ -96,6 +153,27 @@ export function useTransactions(accountId?: string) {
   }, [refresh]);
 
   return { transactions, loading, error, refresh };
+}
+
+export function useAtmWithdrawals() {
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const submit = useCallback(async (accountId: string, amount: number): Promise<AtmWithdrawalResult> => {
+    try {
+      setLoading(true);
+      setError(null);
+      return await api.submitAtmWithdrawal(accountId, amount);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Failed to submit ATM withdrawal";
+      setError(message);
+      throw err;
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  return { loading, error, submit };
 }
 
 export function useTransfers() {
@@ -159,7 +237,26 @@ export function usePayees() {
     void refresh();
   }, [refresh]);
 
-  return { payees, loading, error, refresh };
+  const createPayee = useCallback(
+    async (input: Parameters<typeof api.createPayee>[0]) => {
+      try {
+        setLoading(true);
+        setError(null);
+        const created = await api.createPayee(input);
+        setPayees((prev) => [created, ...prev]);
+        return created;
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "Failed to create payee";
+        setError(message);
+        throw err;
+      } finally {
+        setLoading(false);
+      }
+    },
+    []
+  );
+
+  return { payees, loading, error, refresh, createPayee };
 }
 
 export function useBillPayments() {
@@ -197,13 +294,13 @@ export function useBillPayments() {
       payeeId: string,
       accountId: string,
       amount: number,
-      cadence: "once" | "weekly" | "biweekly" | "monthly",
+      cadence: ScheduledPayment["cadence"],
       deliverBy: string
     ) => {
       try {
         setLoading(true);
         setError(null);
-        const payment = await api.createBillPayment(payeeId, accountId, amount, cadence, deliverBy);
+        const payment = await api.createBillPayment({ payeeId, accountId, amount, cadence, deliverBy });
         setPayments((prev) => [payment, ...prev]);
         return payment;
       } catch (err) {
@@ -232,7 +329,23 @@ export function useBillPayments() {
     }
   }, []);
 
-  return { payments, loading, error, refresh, createPayment, cancelPayment };
+  const retryPayment = useCallback(async (paymentId: string) => {
+    try {
+      setLoading(true);
+      setError(null);
+      const updated = await api.retryBillPayment(paymentId);
+      setPayments((prev) => prev.map((p) => (p.id === paymentId ? updated : p)));
+      return updated;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Failed to retry payment";
+      setError(message);
+      throw err;
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  return { payments, loading, error, refresh, createPayment, cancelPayment, retryPayment };
 }
 
 export function useDeposits() {
@@ -266,17 +379,11 @@ export function useDeposits() {
   }, [refresh]);
 
   const submitDeposit = useCallback(
-    async (
-      accountId: string,
-      amount: number,
-      note?: string,
-      frontImagePath?: string,
-      backImagePath?: string
-    ) => {
+    async (input: api.CreateDepositInput) => {
       try {
         setLoading(true);
         setError(null);
-        const deposit = await api.submitDeposit(accountId, amount, note, frontImagePath, backImagePath);
+        const deposit = await api.submitDeposit(input);
         setDeposits((prev) => [deposit, ...prev]);
         return deposit;
       } catch (err) {
@@ -293,8 +400,8 @@ export function useDeposits() {
   return { deposits, loading, error, refresh, submitDeposit };
 }
 
-export async function searchATMs(query?: string, latitude?: number, longitude?: number) {
-  return await api.searchATMs(query, latitude, longitude);
+export async function searchATMs(params: api.AtmSearchParams = {}): Promise<AtmSearchResponse> {
+  return await api.searchATMs(params);
 }
 
 export function useNotifications() {
@@ -433,5 +540,203 @@ export function useMemberTransfers() {
     }
   }, []);
 
-  return { loading, resolving, error, resolveRecipient, createTransfer, fetchPlans, cancelPlan };
+  const updatePlan = useCallback(async (planId: string, payload: Record<string, unknown>) => {
+    try {
+      setLoading(true);
+      setError(null);
+      return await api.updateMemberTransferPlan(planId, payload);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Failed to update plan";
+      setError(message);
+      throw err;
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  const retryPlan = useCallback(async (planId: string) => {
+    try {
+      setLoading(true);
+      setError(null);
+      return await api.retryMemberTransferPlan(planId);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Failed to retry plan";
+      setError(message);
+      throw err;
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  return { loading, resolving, error, resolveRecipient, createTransfer, fetchPlans, cancelPlan, updatePlan, retryPlan };
+}
+
+export function useExternalAccounts() {
+  const [accounts, setAccounts] = useState<ExternalAccount[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
+  const refresh = useCallback(async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      const data = await api.fetchExternalAccounts();
+      if (mountedRef.current) setAccounts(data);
+    } catch (err) {
+      if (mountedRef.current) setError(err instanceof Error ? err.message : "Failed to load external accounts");
+    } finally {
+      if (mountedRef.current) setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void refresh();
+  }, [refresh]);
+
+  const create = useCallback(async (input: Parameters<typeof api.createExternalAccount>[0]) => {
+    try {
+      setLoading(true);
+      setError(null);
+      const created = await api.createExternalAccount(input);
+      setAccounts((prev) => [created, ...prev]);
+      return created;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Failed to link external account";
+      setError(message);
+      throw err;
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  const createLinkSession = useCallback(async (): Promise<ExternalLinkSession> => {
+    try {
+      setLoading(true);
+      setError(null);
+      return await api.createExternalLinkSession();
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Failed to start external link session";
+      setError(message);
+      throw err;
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  const completeLink = useCallback(async (accountId: string): Promise<ExternalAccount> => {
+    try {
+      setLoading(true);
+      setError(null);
+      const created = await api.completeExternalLink(accountId);
+      setAccounts((prev) => [created, ...prev]);
+      return created;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Failed to complete external link";
+      setError(message);
+      throw err;
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  return { accounts, loading, error, refresh, create, createLinkSession, completeLink };
+}
+
+export function useExternalTransfers() {
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const submit = useCallback(async (input: Parameters<typeof api.submitExternalTransfer>[0]): Promise<ExternalTransferSubmissionResult> => {
+    try {
+      setLoading(true);
+      setError(null);
+      return await api.submitExternalTransfer(input);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Failed to submit external transfer";
+      setError(message);
+      throw err;
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  const list = useCallback(async (): Promise<ExternalTransfer[]> => {
+    try {
+      setLoading(true);
+      setError(null);
+      return await api.fetchExternalTransfers();
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Failed to fetch external transfers";
+      setError(message);
+      throw err;
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  const listPlans = useCallback(async (): Promise<ExternalTransferPlan[]> => {
+    try {
+      setLoading(true);
+      setError(null);
+      return await api.fetchExternalTransferPlans();
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Failed to fetch external transfer plans";
+      setError(message);
+      throw err;
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  const cancelPlan = useCallback(async (planId: string): Promise<ExternalTransferPlan> => {
+    try {
+      setLoading(true);
+      setError(null);
+      return await api.cancelExternalTransferPlan(planId);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Failed to cancel external transfer plan";
+      setError(message);
+      throw err;
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  const updatePlan = useCallback(async (planId: string, payload: Record<string, unknown>): Promise<ExternalTransferPlan> => {
+    try {
+      setLoading(true);
+      setError(null);
+      return await api.updateExternalTransferPlan(planId, payload);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Failed to update external transfer plan";
+      setError(message);
+      throw err;
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  const retryPlan = useCallback(async (planId: string): Promise<ExternalTransferPlan> => {
+    try {
+      setLoading(true);
+      setError(null);
+      return await api.retryExternalTransferPlan(planId);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Failed to retry external transfer plan";
+      setError(message);
+      throw err;
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  return { loading, error, submit, list, listPlans, cancelPlan, updatePlan, retryPlan };
 }

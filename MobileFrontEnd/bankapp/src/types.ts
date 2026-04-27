@@ -40,8 +40,29 @@ export interface CustomerProfile {
   email: string;
   phone: string;
   address: string;
+  streetAddress?: string;
+  apartmentUnit?: string | null;
+  city?: string;
+  state?: string;
+  zipCode?: string;
+  firstName?: string;
+  middleName?: string | null;
+  lastName?: string;
   memberSince: string;
+  timezone?: string;
   mfaEnabled: boolean;
+}
+
+export interface UpdateCustomerProfileInput {
+  firstName: string;
+  middleName?: string;
+  lastName: string;
+  phone: string;
+  streetAddress: string;
+  apartmentUnit?: string;
+  city: string;
+  state: string;
+  zipCode: string;
 }
 
 export interface BankAccount {
@@ -86,9 +107,10 @@ export interface ScheduledPayment {
   payeeName: string;
   accountId: string;
   amount: number;
-  cadence: "Once" | "Monthly" | "Biweekly";
+  cadence: TransferCadence;
   deliverBy: string;
   status: PaymentStatus;
+  failureReason?: string | null;
 }
 
 export interface Deposit {
@@ -111,9 +133,98 @@ export interface AtmLocation {
   city: string;
   state: string;
   zip: string;
+  latitude: number;
+  longitude: number;
   distanceMiles: number;
   features: string[];
   hours: string;
+  openNow?: boolean | null;
+  directionsUrl: string;
+}
+
+export interface AtmSearchCenter {
+  latitude: number;
+  longitude: number;
+  label: string;
+}
+
+export interface AtmSearchResponse {
+  center: AtmSearchCenter;
+  atms: AtmLocation[];
+}
+
+export interface AtmWithdrawalResult {
+  id: string;
+  status: "COMPLETED" | "FAILED";
+  submittedAt: string;
+  failureReason?: string | null;
+}
+
+export type ExternalAccountType = "Checking" | "Savings";
+export type ExternalAccountVerificationStatus = "VERIFIED" | "PENDING" | "FAILED";
+
+export interface ExternalLinkSession {
+  clientSecret: string;
+  sessionId: string;
+  publishableKey: string;
+}
+
+export interface ExternalAccount {
+  id: string;
+  bankName: string;
+  nickname: string;
+  accountType: ExternalAccountType;
+  maskedAccountNumber: string;
+  routingNumber: string;
+  verificationStatus: ExternalAccountVerificationStatus;
+  provider?: string | null;
+  providerAccountId?: string | null;
+  isActive: boolean;
+  createdAt: string;
+}
+
+export type ExternalTransferStatus = "PROCESSING" | "COMPLETED" | "FAILED";
+
+export interface ExternalTransfer {
+  id: string;
+  fromAccountId: string;
+  externalAccountId: string;
+  externalAccountLabel: string;
+  amount: number;
+  memo?: string;
+  transferDate: string;
+  status: ExternalTransferStatus;
+  submittedAt: string;
+  processedAt?: string | null;
+  completedAt?: string | null;
+  settleAfter?: string | null;
+  failureReason?: string | null;
+}
+
+export interface ExternalTransferPlan {
+  id: string;
+  fromAccountId: string;
+  externalAccountId: string;
+  externalAccountLabel: string;
+  amount: number;
+  memo?: string;
+  cadence: TransferCadence;
+  startDate: string;
+  runTime: string;
+  timezone: string;
+  endDate?: string | null;
+  nextRunAt?: string | null;
+  lastRunAt?: string | null;
+  lastFailureReason?: string | null;
+  status: MemberTransferPlanStatus;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ExternalTransferSubmissionResult {
+  mode: TransferScheduleMode;
+  transfer?: ExternalTransfer | null;
+  plan?: ExternalTransferPlan | null;
 }
 
 export interface NotificationItem {

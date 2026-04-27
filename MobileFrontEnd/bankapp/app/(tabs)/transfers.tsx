@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
 import { Alert, Modal, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { Button, Card, Field, PageHeader, Row, Screen } from "../../src/components/ui";
-import { useAccounts, useTransfers, useMemberTransfers } from "../../src/lib/hooks";
+import { useAccounts, useExternalAccounts, useExternalTransfers, useMemberTransfers, useTransfers } from "../../src/lib/hooks";
 import { colors } from "../../src/theme/colors";
-import type { TransferCadence, TransferScheduleMode, MemberTransferRecipient } from "../../src/types";
+import type { TransferCadence, TransferScheduleMode, MemberTransferRecipient, ExternalAccountType } from "../../src/types";
 
 function AccountPickerModal({
   visible,
@@ -57,9 +57,35 @@ const CADENCE_OPTIONS: TransferCadence[] = ["Once", "Daily", "Weekly", "Biweekly
 export default function TransfersScreen() {
   const { accounts, loading: accountsLoading, refresh: refreshAccounts } = useAccounts();
   const { createTransfer, loading: transferLoading, error: transferError } = useTransfers();
-  const { resolveRecipient, createTransfer: createMemberTransfer, loading: memberLoading, resolving, error: memberError } = useMemberTransfers();
+  const {
+    resolveRecipient,
+    createTransfer: createMemberTransfer,
+    fetchPlans: fetchMemberPlans,
+    cancelPlan: cancelMemberPlan,
+    retryPlan: retryMemberPlan,
+    loading: memberLoading,
+    resolving,
+    error: memberError,
+  } = useMemberTransfers();
+  const {
+    accounts: externalAccounts,
+    loading: externalAccountsLoading,
+    error: externalAccountsError,
+    refresh: refreshExternalAccounts,
+    create: createExternalAccount,
+    createLinkSession,
+    completeLink,
+  } = useExternalAccounts();
+  const { submit: submitExternalTransfer, loading: externalTransferLoading, error: externalTransferError } = useExternalTransfers();
 
   const [mode, setMode] = useState<"internal" | "member" | "external">("internal");
+  const deviceTimezone = useMemo(() => {
+    try {
+      return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+    } catch {
+      return "UTC";
+    }
+  }, []);
 
   // Internal transfer state
   const [fromAccountId, setFromAccountId] = useState("");
@@ -83,6 +109,28 @@ export default function TransfersScreen() {
   const [runTime, setRunTime] = useState("09:00");
   const [endDate, setEndDate] = useState("");
   const [memberSubmitted, setMemberSubmitted] = useState(false);
+  const [memberPlans, setMemberPlans] = useState<any[]>([]);
+
+  // External linking + transfer state
+  const [externalSelectedAccountId, setExternalSelectedAccountId] = useState("");
+  const [externalBankName, setExternalBankName] = useState("");
+  const [externalNickname, setExternalNickname] = useState("");
+  const [externalAccountType, setExternalAccountType] = useState<ExternalAccountType>("Checking");
+  const [externalRoutingNumber, setExternalRoutingNumber] = useState("");
+  const [externalAccountNumber, setExternalAccountNumber] = useState("");
+  const [externalConfirmAccountNumber, setExternalConfirmAccountNumber] = useState("");
+  const [externalLinkAccountId, setExternalLinkAccountId] = useState("");
+  const [externalLinkSession, setExternalLinkSession] = useState<null | { sessionId: string; publishableKey: string; clientSecret: string }>(null);
+  const [externalFromAccountId, setExternalFromAccountId] = useState("");
+  const [externalAmount, setExternalAmount] = useState("");
+  const [externalMemo, setExternalMemo] = useState("");
+  const [externalScheduleMode, setExternalScheduleMode] = useState<TransferScheduleMode>("NOW");
+  const [externalTransferDate, setExternalTransferDate] = useState(new Date().toISOString().slice(0, 10));
+  const [externalCadence, setExternalCadence] = useState<TransferCadence>("Once");
+  const [externalStartDate, setExternalStartDate] = useState(new Date().toISOString().slice(0, 10));
+  const [externalRunTime, setExternalRunTime] = useState("09:00");
+  const [externalEndDate, setExternalEndDate] = useState("");
+  const [externalSubmitted, setExternalSubmitted] = useState(false);
 
   const openAccounts = useMemo(() => accounts.filter((account) => account.status === "Open"), [accounts]);
   const checkingAccounts = useMemo(
@@ -137,6 +185,20 @@ export default function TransfersScreen() {
       setMemberFromAccountId(checkingAccounts[0]?.id ?? "");
     }
   }, [accountsLoading, checkingAccounts, memberFromAccountId]);
+
+  // Initialize external transfer from account
+  useEffect(() => {
+    if (accountsLoading) return;
+    if (!externalFromAccountId || !checkingAccounts.some((account) => account.id === externalFromAccountId)) {
+      setExternalFromAccountId(checkingAccounts[0]?.id ?? "");
+    }
+  }, [accountsLoading, checkingAccounts, externalFromAccountId]);
+
+  useEffect(() => {
+    if (!externalSelectedAccountId || !externalAccounts.some((account) => account.id === externalSelectedAccountId)) {
+      setExternalSelectedAccountId(externalAccounts[0]?.id ?? "");
+    }
+  }, [externalAccounts, externalSelectedAccountId]);
 
   const handleResolveRecipient = async () => {
     if (!recipientEmail.trim()) {
@@ -221,7 +283,7 @@ export default function TransfersScreen() {
           startDate,
           runTime,
           endDate,
-          undefined
+          deviceTimezone
         );
       }
       Alert.alert("Success", "Member transfer submitted successfully");
@@ -233,6 +295,144 @@ export default function TransfersScreen() {
       await refreshAccounts();
     } catch (err) {
       Alert.alert("Error", err instanceof Error ? err.message : memberError || "Failed to submit member transfer");
+    }
+  };
+
+  const handleLoadMemberPlans = async () => {
+    try {
+      const plans = await fetchMemberPlans();
+      setMemberPlans(Array.isArray(plans) ? plans : []);
+    } catch (err) {
+      Alert.alert("Error", err instanceof Error ? err.message : memberError || "Failed to load transfer plans");
+    }
+  };
+
+  const handleCancelMemberPlan = async (planId: string) => {
+    try {
+      await cancelMemberPlan(planId);
+      await handleLoadMemberPlans();
+      Alert.alert("Cancelled", "Scheduled member transfer cancelled.");
+    } catch (err) {
+      Alert.alert("Error", err instanceof Error ? err.message : memberError || "Failed to cancel plan");
+    }
+  };
+
+  const handleRetryMemberPlan = async (planId: string) => {
+    try {
+      await retryMemberPlan(planId);
+      await handleLoadMemberPlans();
+      Alert.alert("Retried", "Scheduled member transfer retried.");
+    } catch (err) {
+      Alert.alert("Error", err instanceof Error ? err.message : memberError || "Failed to retry plan");
+    }
+  };
+
+  const handleExternalManualLink = async () => {
+    const payload = {
+      bankName: externalBankName.trim(),
+      nickname: externalNickname.trim() || externalBankName.trim(),
+      accountType: externalAccountType,
+      routingNumber: externalRoutingNumber.trim(),
+      accountNumber: externalAccountNumber.trim(),
+      confirmAccountNumber: externalConfirmAccountNumber.trim(),
+    };
+
+    if (
+      payload.bankName.length < 2 ||
+      payload.nickname.length < 2 ||
+      payload.routingNumber.length !== 9 ||
+      payload.accountNumber.length < 4 ||
+      payload.accountNumber !== payload.confirmAccountNumber
+    ) {
+      Alert.alert("Check details", "Enter bank name, routing number (9 digits), and matching account numbers.");
+      return;
+    }
+
+    try {
+      const created = await createExternalAccount(payload);
+      setExternalSelectedAccountId(created.id);
+      setExternalBankName("");
+      setExternalNickname("");
+      setExternalRoutingNumber("");
+      setExternalAccountNumber("");
+      setExternalConfirmAccountNumber("");
+      Alert.alert("Linked", "External bank account linked.");
+    } catch (err) {
+      Alert.alert("Error", err instanceof Error ? err.message : externalAccountsError || "Failed to link account");
+    }
+  };
+
+  const handleStartStripeSandboxLink = async () => {
+    try {
+      const session = await createLinkSession();
+      setExternalLinkSession(session);
+      Alert.alert(
+        "Link session created",
+        "Stripe sandbox linking UI is not embedded on mobile yet. If you have a Stripe financial connections account id, paste it below and complete link."
+      );
+    } catch (err) {
+      Alert.alert("Error", err instanceof Error ? err.message : externalAccountsError || "Failed to start link session");
+    }
+  };
+
+  const handleCompleteStripeSandboxLink = async () => {
+    const id = externalLinkAccountId.trim();
+    if (!id) {
+      Alert.alert("Missing account id", "Paste the linked account id to complete.");
+      return;
+    }
+    try {
+      const created = await completeLink(id);
+      setExternalSelectedAccountId(created.id);
+      setExternalLinkAccountId("");
+      Alert.alert("Linked", "External account linked.");
+    } catch (err) {
+      Alert.alert("Error", err instanceof Error ? err.message : externalAccountsError || "Failed to complete link");
+    }
+  };
+
+  const handleExternalSubmit = async () => {
+    if (!externalFromAccountId || !externalSelectedAccountId || !externalAmount) {
+      Alert.alert("Missing info", "Select a funding account, external account, and amount.");
+      return;
+    }
+    const parsedAmount = Number(externalAmount);
+    if (!Number.isFinite(parsedAmount) || parsedAmount <= 0) {
+      Alert.alert("Error", "Enter a valid transfer amount.");
+      return;
+    }
+    try {
+      if (externalScheduleMode === "NOW") {
+        await submitExternalTransfer({
+          fromAccountId: externalFromAccountId,
+          externalAccountId: externalSelectedAccountId,
+          amount: parsedAmount,
+          memo: externalMemo || undefined,
+          scheduleMode: "NOW",
+          transferDate: externalTransferDate,
+        });
+      } else {
+        await submitExternalTransfer({
+          fromAccountId: externalFromAccountId,
+          externalAccountId: externalSelectedAccountId,
+          amount: parsedAmount,
+          memo: externalMemo || undefined,
+          scheduleMode: "SCHEDULED",
+          cadence: externalCadence,
+          startDate: externalStartDate,
+          runTime: externalRunTime,
+          endDate: externalEndDate || undefined,
+          timezone: deviceTimezone,
+        });
+      }
+      Alert.alert("Success", "External transfer submitted");
+      setExternalSubmitted(true);
+      setExternalAmount("");
+      setExternalMemo("");
+      await refreshAccounts();
+      await refreshExternalAccounts();
+    } catch (err) {
+      Alert.alert("Error", err instanceof Error ? err.message : externalTransferError || "Failed to submit external transfer");
     }
   };
 
@@ -435,10 +635,228 @@ export default function TransfersScreen() {
               )}
             </>
           ) : (
-            <Card>
-              <Text style={{ fontWeight: "800", fontSize: 18 }}>External transfers</Text>
-              <Text>External bank transfers are supported on the web app, but not implemented on mobile yet.</Text>
-            </Card>
+            <>
+              {!checkingAccounts.length ? (
+                <Card>
+                  <Text style={{ fontWeight: "800" }}>Checking account required</Text>
+                  <Text>Open a checking account before making external transfers.</Text>
+                </Card>
+              ) : (
+                <ScrollView>
+                  <Card>
+                    <Text style={{ fontWeight: "800", fontSize: 18 }}>Linked external accounts</Text>
+                    <Text style={{ color: colors.muted }}>
+                      Link an external bank (manual entry), then transfer from your checking account.
+                    </Text>
+                    <Button
+                      label={externalAccountsLoading ? "Refreshing..." : "Refresh linked accounts"}
+                      variant="secondary"
+                      onPress={refreshExternalAccounts}
+                      disabled={externalAccountsLoading}
+                    />
+                    {externalAccountsError ? <Text style={{ color: colors.red700 }}>{externalAccountsError}</Text> : null}
+                    {externalAccountsLoading ? (
+                      <Text>Loading external accounts...</Text>
+                    ) : externalAccounts.length === 0 ? (
+                      <Text>No linked accounts yet.</Text>
+                    ) : (
+                      externalAccounts.map((account) => (
+                        <Row
+                          key={account.id}
+                          title={account.nickname || account.bankName}
+                          subtitle={`${account.bankName} ${account.maskedAccountNumber} • ${account.accountType} • ${account.verificationStatus}`}
+                          right={
+                            account.id === externalSelectedAccountId ? (
+                              <Text style={{ color: colors.text, fontWeight: "800" }}>Selected</Text>
+                            ) : undefined
+                          }
+                          onPress={() => setExternalSelectedAccountId(account.id)}
+                        />
+                      ))
+                    )}
+                  </Card>
+
+                  <Card>
+                    <Text style={{ fontWeight: "800", fontSize: 18 }}>Link external bank (manual)</Text>
+                    <Field label="Bank name" value={externalBankName} onChangeText={setExternalBankName} placeholder="Example Bank" />
+                    <Field label="Nickname" value={externalNickname} onChangeText={setExternalNickname} placeholder="My checking" />
+                    <View style={{ flexDirection: "row", gap: 10 }}>
+                      <View style={{ flex: 1 }}>
+                        <Button
+                          label="Checking"
+                          variant={externalAccountType === "Checking" ? "primary" : "secondary"}
+                          onPress={() => setExternalAccountType("Checking")}
+                          disabled={externalAccountsLoading}
+                        />
+                      </View>
+                      <View style={{ flex: 1 }}>
+                        <Button
+                          label="Savings"
+                          variant={externalAccountType === "Savings" ? "primary" : "secondary"}
+                          onPress={() => setExternalAccountType("Savings")}
+                          disabled={externalAccountsLoading}
+                        />
+                      </View>
+                    </View>
+                    <Field label="Routing number (9 digits)" value={externalRoutingNumber} onChangeText={setExternalRoutingNumber} placeholder="000000000" />
+                    <Field label="Account number" value={externalAccountNumber} onChangeText={setExternalAccountNumber} placeholder="123456789" />
+                    <Field label="Confirm account number" value={externalConfirmAccountNumber} onChangeText={setExternalConfirmAccountNumber} placeholder="123456789" />
+                    <Button label="Link account" onPress={handleExternalManualLink} disabled={externalAccountsLoading} />
+                    <Text style={{ color: colors.muted, fontSize: 12 }}>
+                      Note: This is a sandbox/manual link. Full Stripe Financial Connections UI is web-only right now.
+                    </Text>
+                  </Card>
+
+                  <Card>
+                    <Text style={{ fontWeight: "800", fontSize: 18 }}>Stripe sandbox link (optional)</Text>
+                    <Button label="Create link session" variant="secondary" onPress={handleStartStripeSandboxLink} disabled={externalAccountsLoading} />
+                    {externalLinkSession ? (
+                      <>
+                        <Text style={{ color: colors.muted, fontSize: 12 }}>Session: {externalLinkSession.sessionId}</Text>
+                        <Field
+                          label="Complete with account id"
+                          value={externalLinkAccountId}
+                          onChangeText={setExternalLinkAccountId}
+                          placeholder="fa_..."
+                        />
+                        <Button label="Complete link" onPress={handleCompleteStripeSandboxLink} disabled={externalAccountsLoading} />
+                      </>
+                    ) : null}
+                  </Card>
+
+                  <Card>
+                    <Text style={{ fontWeight: "800", fontSize: 18 }}>External transfer</Text>
+                    <Text style={{ color: colors.muted }}>
+                      Funding account must be checking. External accounts must be linked and verified.
+                    </Text>
+
+                    <Text style={{ marginTop: 10, fontWeight: "700" }}>From (checking)</Text>
+                    {checkingAccounts.map((account) => (
+                      <Row
+                        key={account.id}
+                        title={account.nickname}
+                        subtitle={`${account.type} • ${account.maskedNumber}`}
+                        right={account.id === externalFromAccountId ? <Text style={{ fontWeight: "800" }}>Selected</Text> : undefined}
+                        onPress={() => setExternalFromAccountId(account.id)}
+                      />
+                    ))}
+
+                    <Text style={{ marginTop: 10, fontWeight: "700" }}>To (external)</Text>
+                    {externalAccounts.length === 0 ? (
+                      <Text>Link an external account above first.</Text>
+                    ) : (
+                      externalAccounts.map((account) => (
+                        <Row
+                          key={account.id}
+                          title={account.nickname || account.bankName}
+                          subtitle={`${account.bankName} ${account.maskedAccountNumber}`}
+                          right={account.id === externalSelectedAccountId ? <Text style={{ fontWeight: "800" }}>Selected</Text> : undefined}
+                          onPress={() => setExternalSelectedAccountId(account.id)}
+                        />
+                      ))
+                    )}
+
+                    <Field label="Amount" value={externalAmount} onChangeText={setExternalAmount} placeholder="0.00" />
+                    <Field label="Memo (optional)" value={externalMemo} onChangeText={setExternalMemo} placeholder="Note" />
+
+                    <Text style={{ marginTop: 10, fontWeight: "700" }}>Schedule</Text>
+                    <Button
+                      label="Now"
+                      variant={externalScheduleMode === "NOW" ? "primary" : "secondary"}
+                      onPress={() => setExternalScheduleMode("NOW")}
+                    />
+                    <Button
+                      label="Scheduled"
+                      variant={externalScheduleMode === "SCHEDULED" ? "primary" : "secondary"}
+                      onPress={() => setExternalScheduleMode("SCHEDULED")}
+                    />
+
+                    {externalScheduleMode === "NOW" ? (
+                      <Field label="Transfer date" value={externalTransferDate} onChangeText={setExternalTransferDate} />
+                    ) : (
+                      <>
+                        <Text style={{ marginTop: 12, fontWeight: "600", color: colors.text }}>Recurring schedule</Text>
+                        <Field label="Cadence" value={externalCadence} onChangeText={(val) => setExternalCadence(val as TransferCadence)} />
+                        <Field label="Start date" value={externalStartDate} onChangeText={setExternalStartDate} />
+                        <Field label="Run time (HH:MM)" value={externalRunTime} onChangeText={setExternalRunTime} placeholder="09:00" />
+                        <Field label="End date (optional)" value={externalEndDate} onChangeText={setExternalEndDate} />
+                        <Text style={{ color: colors.muted, fontSize: 12 }}>Timezone: {deviceTimezone}</Text>
+                      </>
+                    )}
+
+                    <Button
+                      label={externalTransferLoading ? "Submitting..." : "Submit external transfer"}
+                      onPress={handleExternalSubmit}
+                      disabled={externalTransferLoading || !externalFromAccountId || !externalSelectedAccountId || !externalAmount}
+                    />
+                    {externalTransferError ? <Text style={{ color: colors.red700 }}>{externalTransferError}</Text> : null}
+                  </Card>
+
+                  <Card>
+                    <Text style={{ fontWeight: "800", fontSize: 18 }}>Transfer review</Text>
+                    <Text>From: {checkingAccounts.find((a) => a.id === externalFromAccountId)?.nickname || "Select checking account"}</Text>
+                    <Text>To: {externalAccounts.find((a) => a.id === externalSelectedAccountId)?.nickname || "Select external account"}</Text>
+                    <Text>Amount: {externalAmount || "0.00"}</Text>
+                    {externalScheduleMode === "NOW" ? (
+                      <Text>Date: {externalTransferDate}</Text>
+                    ) : (
+                      <>
+                        <Text>Cadence: {externalCadence}</Text>
+                        <Text>Start: {externalStartDate}</Text>
+                        {externalEndDate && <Text>End: {externalEndDate}</Text>}
+                      </>
+                    )}
+                    {externalSubmitted ? (
+                      <Text style={{ fontWeight: "700" }}>Transfer submitted.</Text>
+                    ) : (
+                      <Text>Fill out the form to review before submitting.</Text>
+                    )}
+                  </Card>
+                  <Card>
+                    <Text style={{ fontWeight: "800", fontSize: 18 }}>Scheduled member transfers</Text>
+                    <Button
+                      label={memberLoading ? "Loading..." : "Load scheduled plans"}
+                      variant="secondary"
+                      onPress={handleLoadMemberPlans}
+                      disabled={memberLoading}
+                    />
+                    {memberPlans.length === 0 ? (
+                      <Text style={{ color: colors.muted }}>No scheduled plans loaded.</Text>
+                    ) : (
+                      memberPlans.map((plan) => (
+                        <Card key={plan.id} accent>
+                          <Text style={{ fontWeight: "800" }}>{plan.recipientDisplayName || "Member transfer plan"}</Text>
+                          <Text style={{ color: colors.muted }}>
+                            {plan.cadence} • {plan.amount} • {plan.status}
+                          </Text>
+                          <Text style={{ color: colors.muted }}>
+                            Next: {plan.nextRunAt || "—"} • Start: {plan.startDate} • Time: {plan.runTime}
+                          </Text>
+                          <View style={{ flexDirection: "row", gap: 10 }}>
+                            <View style={{ flex: 1 }}>
+                              <Button
+                                label="Cancel"
+                                variant="secondary"
+                                onPress={() => handleCancelMemberPlan(plan.id)}
+                                disabled={memberLoading}
+                              />
+                            </View>
+                            <View style={{ flex: 1 }}>
+                              <Button
+                                label="Retry"
+                                variant="secondary"
+                                onPress={() => handleRetryMemberPlan(plan.id)}
+                                disabled={memberLoading}
+                              />
+                            </View>
+                          </View>
+                        </Card>
+                      ))
+                    )}
+                  </Card>
+                </ScrollView>
+              )}
+            </>
           )}
 
           <AccountPickerModal
