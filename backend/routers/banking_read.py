@@ -1295,12 +1295,12 @@ async def create_payment(
             user_id=current_user.id,
             endpoint=idempotency_endpoint,
             idempotency_key=idempotency_key,
-            response_body={"detail": "Unable to create deposit at this time."},
+            response_body={"detail": "Unable to create payment at this time."},
             response_status=status.HTTP_500_INTERNAL_SERVER_ERROR,
         )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Unable to create deposit at this time.",
+            detail="Unable to create payment at this time.",
         ) from exc
 
 
@@ -1639,6 +1639,7 @@ async def create_deposit(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Deposit method must be atm or check.")
 
     upload_session_id: str | None = None
+    deposit_created = False
     if method == "check":
         if not payload.frontImagePath or not payload.backImagePath:
             raise HTTPException(
@@ -1651,20 +1652,27 @@ async def create_deposit(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail="Deposit image paths must belong to the authenticated user.",
                 )
-        upload_sessions = await supabase_client.select_rows(
+        # Atomically reserve the upload session so concurrent requests cannot reuse it.
+        now_iso = datetime.now(timezone.utc).isoformat()
+        upload_sessions = await supabase_client.update_rows(
             "deposit_upload_sessions",
+            {
+                "status": "consumed",
+                "consumed_at": now_iso,
+            },
             filters={
                 "user_id": f"eq.{current_user.id}",
                 "front_image_path": f"eq.{payload.frontImagePath}",
                 "back_image_path": f"eq.{payload.backImagePath}",
                 "status": "eq.reserved",
+                "expires_at": f"gte.{now_iso}",
+                "deposit_id": "is.null",
             },
-            limit=1,
         )
         if not upload_sessions:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Uploaded check images expired or were not found. Please upload again.",
+                detail="Uploaded check images were missing, expired, or already used. Please upload again.",
             )
         upload_session_id = str(upload_sessions[0].get("id"))
     elif payload.frontImagePath or payload.backImagePath:
@@ -1715,18 +1723,17 @@ async def create_deposit(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="Supabase did not return the created deposit row.",
             )
+        deposit_created = True
 
         if method == "check" and upload_session_id:
             await supabase_client.update_rows(
                 "deposit_upload_sessions",
                 {
-                    "status": "consumed",
                     "deposit_id": created.get("id"),
-                    "consumed_at": datetime.now(timezone.utc).isoformat(),
                 },
                 filters={
                     "id": f"eq.{upload_session_id}",
-                    "status": "eq.reserved",
+                    "status": "eq.consumed",
                 },
             )
 
@@ -1747,6 +1754,19 @@ async def create_deposit(
             response_body={"detail": exc.detail},
             response_status=exc.status_code,
         )
+        if method == "check" and upload_session_id and not deposit_created:
+            await supabase_client.update_rows(
+                "deposit_upload_sessions",
+                {
+                    "status": "reserved",
+                    "consumed_at": None,
+                },
+                filters={
+                    "id": f"eq.{upload_session_id}",
+                    "status": "eq.consumed",
+                    "deposit_id": "is.null",
+                },
+            )
         raise
 
 
