@@ -107,14 +107,6 @@ async def _get_or_create_bank_ledger_account(
     This helper is used for operational clearing accounts that support
     write-through ledger flows like bill pay and deposits.
     """
-    existing_rows = await supabase_client.select_rows(
-        "ledger_accounts",
-        filters={"ledger_code": f"eq.{ledger_code}"},
-        limit=1,
-    )
-    if existing_rows:
-        return existing_rows[0]
-
     ledger_account_payload = {
         "owner_type": "bank",
         "owner_user_id": None,
@@ -126,6 +118,19 @@ async def _get_or_create_bank_ledger_account(
         "currency": "USD",
         "is_active": True,
     }
+
+    existing_rows = await supabase_client.select_rows(
+        "ledger_accounts",
+        filters={"ledger_code": f"eq.{ledger_code}"},
+        limit=1,
+    )
+    if existing_rows:
+        updated_rows = await supabase_client.update_rows(
+            "ledger_accounts",
+            ledger_account_payload,
+            filters={"ledger_code": f"eq.{ledger_code}"},
+        )
+        return updated_rows[0] if updated_rows else existing_rows[0]
 
     try:
         ledger_account = await supabase_client.insert_row("ledger_accounts", ledger_account_payload)
@@ -156,8 +161,8 @@ async def get_or_create_billpay_clearing_ledger_account() -> dict:
     return await _get_or_create_bank_ledger_account(
         ledger_code="BANK_BILLPAY_CLEARING_USD",
         name="Bill Pay Clearing",
-        account_class="asset",
-        normal_balance="debit",
+        account_class="liability",
+        normal_balance="credit",
     )
 
 

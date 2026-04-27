@@ -15,12 +15,21 @@ values (
   null,
   'BANK_BILLPAY_CLEARING_USD',
   'Bill Pay Clearing',
-  'asset',
-  'debit',
+  'liability',
+  'credit',
   'USD',
   true
 )
-on conflict (ledger_code) do nothing;
+on conflict (ledger_code) do update
+set
+  owner_type = excluded.owner_type,
+  owner_user_id = excluded.owner_user_id,
+  product_account_id = excluded.product_account_id,
+  name = excluded.name,
+  account_class = excluded.account_class,
+  normal_balance = excluded.normal_balance,
+  currency = excluded.currency,
+  is_active = excluded.is_active;
 
 create or replace function public.submit_bill_payment(
   p_user_id uuid,
