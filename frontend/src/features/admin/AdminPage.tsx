@@ -48,6 +48,7 @@ export function AdminPage() {
             }}
           >
             <Link className="button button--primary" to="/admin/accounts">Manage accounts</Link>
+            <Link className="button button--secondary" to="/admin/reports">Run reports</Link>
             <Link className="button button--secondary" to="/app/dashboard">Customer view</Link>
             <button className="button button--secondary" type="button" onClick={() => { void signOut(); }}>
               Sign out
@@ -65,6 +66,17 @@ export function AdminPage() {
             </div>
             <div>
               <Link className="button button--secondary" to="/admin/accounts">Open accounts admin</Link>
+            </div>
+          </div>
+        </Card>
+        <Card>
+          <div className="stack-md">
+            <div className="stack-sm">
+              <h3>Reports</h3>
+              <p className="muted">Query customer/account attributes and export report data.</p>
+            </div>
+            <div>
+              <Link className="button button--secondary" to="/admin/reports">Open reporting dashboard</Link>
             </div>
           </div>
         </Card>
