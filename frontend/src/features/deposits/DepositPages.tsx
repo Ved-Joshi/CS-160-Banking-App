@@ -409,18 +409,30 @@ export function DepositsPage() {
               {depositMethod === 'check' ? (
                 <>
                   <Field label="Front of check">
-                    <input
-                      accept="image/*"
-                      onChange={(event) => setFrontImageFile(event.target.files?.[0] ?? null)}
-                      type="file"
-                    />
+                    <label className="file-upload">
+                      <input
+                        accept="image/*"
+                        className="file-upload__input"
+                        disabled={!hasDepositAccounts}
+                        onChange={(event) => setFrontImageFile(event.target.files?.[0] ?? null)}
+                        type="file"
+                      />
+                      <span className="file-upload__button">Choose file</span>
+                      <span className="file-upload__name">{frontImageFile?.name ?? 'No file selected'}</span>
+                    </label>
                   </Field>
                   <Field label="Back of check">
-                    <input
-                      accept="image/*"
-                      onChange={(event) => setBackImageFile(event.target.files?.[0] ?? null)}
-                      type="file"
-                    />
+                    <label className="file-upload">
+                      <input
+                        accept="image/*"
+                        className="file-upload__input"
+                        disabled={!hasDepositAccounts}
+                        onChange={(event) => setBackImageFile(event.target.files?.[0] ?? null)}
+                        type="file"
+                      />
+                      <span className="file-upload__button">Choose file</span>
+                      <span className="file-upload__name">{backImageFile?.name ?? 'No file selected'}</span>
+                    </label>
                   </Field>
                 </>
               ) : null}
