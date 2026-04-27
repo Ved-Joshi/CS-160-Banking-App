@@ -162,6 +162,90 @@ export async function createTransfer(
   return await response.json();
 }
 
+// ============= MEMBER TRANSFERS =============
+export async function resolveMemberRecipient(
+  recipientEmail: string
+): Promise<any> {
+  const headers = await getAuthHeader();
+  const response = await fetch(`${API_URL}/api/member-transfers/resolve-recipient`, {
+    method: "POST",
+    headers: { ...headers, "Content-Type": "application/json" },
+    body: JSON.stringify({ recipientEmail }),
+  });
+  if (!response.ok) {
+    const errorPayload = await response.text();
+    try {
+      const data = JSON.parse(errorPayload);
+      const detail = data.detail ?? data.message ?? JSON.stringify(data);
+      throw new Error(detail);
+    } catch {
+      throw new Error(errorPayload || "Failed to resolve recipient");
+    }
+  }
+  return await response.json();
+}
+
+export async function createMemberTransfer(
+  fromAccountId: string,
+  recipientEmail: string,
+  amount: number,
+  memo?: string,
+  scheduleMode?: string,
+  transferDate?: string,
+  cadence?: string,
+  startDate?: string,
+  runTime?: string,
+  endDate?: string,
+  timezone?: string
+): Promise<any> {
+  const headers = await getAuthHeader();
+  const response = await fetch(`${API_URL}/api/member-transfers`, {
+    method: "POST",
+    headers: { ...headers, "Content-Type": "application/json" },
+    body: JSON.stringify({
+      fromAccountId,
+      recipientEmail,
+      amount,
+      memo,
+      scheduleMode: scheduleMode || "NOW",
+      transferDate,
+      cadence,
+      startDate,
+      runTime,
+      endDate,
+      timezone,
+    }),
+  });
+  if (!response.ok) {
+    const errorPayload = await response.text();
+    try {
+      const data = JSON.parse(errorPayload);
+      const detail = data.detail ?? data.message ?? JSON.stringify(data);
+      throw new Error(detail);
+    } catch {
+      throw new Error(errorPayload || "Failed to create member transfer");
+    }
+  }
+  return await response.json();
+}
+
+export async function fetchMemberTransferPlans(): Promise<any[]> {
+  const headers = await getAuthHeader();
+  const response = await fetch(`${API_URL}/api/member-transfers/plans`, { headers });
+  if (!response.ok) throw new Error("Failed to fetch member transfer plans");
+  return await response.json();
+}
+
+export async function cancelMemberTransferPlan(planId: string): Promise<any> {
+  const headers = await getAuthHeader();
+  const response = await fetch(`${API_URL}/api/member-transfers/plans/${planId}/cancel`, {
+    method: "POST",
+    headers,
+  });
+  if (!response.ok) throw new Error("Failed to cancel member transfer plan");
+  return await response.json();
+}
+
 // ============= BILL PAYMENTS =============
 export async function fetchPayees(): Promise<Payee[]> {
   const headers = await getAuthHeader();

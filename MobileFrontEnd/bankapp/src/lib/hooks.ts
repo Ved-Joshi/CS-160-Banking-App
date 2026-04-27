@@ -342,3 +342,96 @@ export function useNotifications() {
 
   return { notifications, loading, error, refresh, markAsRead };
 }
+
+export function useMemberTransfers() {
+  const [loading, setLoading] = useState(false);
+  const [resolving, setResolving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const resolveRecipient = useCallback(async (recipientEmail: string) => {
+    try {
+      setResolving(true);
+      setError(null);
+      const recipient = await api.resolveMemberRecipient(recipientEmail);
+      return recipient;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Failed to resolve recipient";
+      setError(message);
+      throw err;
+    } finally {
+      setResolving(false);
+    }
+  }, []);
+
+  const createTransfer = useCallback(
+    async (
+      fromAccountId: string,
+      recipientEmail: string,
+      amount: number,
+      memo?: string,
+      scheduleMode?: string,
+      transferDate?: string,
+      cadence?: string,
+      startDate?: string,
+      runTime?: string,
+      endDate?: string,
+      timezone?: string
+    ) => {
+      try {
+        setLoading(true);
+        setError(null);
+        const result = await api.createMemberTransfer(
+          fromAccountId,
+          recipientEmail,
+          amount,
+          memo,
+          scheduleMode,
+          transferDate,
+          cadence,
+          startDate,
+          runTime,
+          endDate,
+          timezone
+        );
+        return result;
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "Failed to create member transfer";
+        setError(message);
+        throw err;
+      } finally {
+        setLoading(false);
+      }
+    },
+    []
+  );
+
+  const fetchPlans = useCallback(async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      return await api.fetchMemberTransferPlans();
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Failed to fetch member transfer plans";
+      setError(message);
+      throw err;
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  const cancelPlan = useCallback(async (planId: string) => {
+    try {
+      setLoading(true);
+      setError(null);
+      return await api.cancelMemberTransferPlan(planId);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Failed to cancel plan";
+      setError(message);
+      throw err;
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  return { loading, resolving, error, resolveRecipient, createTransfer, fetchPlans, cancelPlan };
+}

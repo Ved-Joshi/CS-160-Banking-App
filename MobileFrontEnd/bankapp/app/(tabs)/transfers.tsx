@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
-import { Alert, Modal, Pressable, StyleSheet, Text, View } from "react-native";
+import { Alert, Modal, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { Button, Card, Field, PageHeader, Row, Screen } from "../../src/components/ui";
-import { useAccounts, useTransfers } from "../../src/lib/hooks";
+import { useAccounts, useTransfers, useMemberTransfers } from "../../src/lib/hooks";
 import { colors } from "../../src/theme/colors";
+import type { TransferCadence, TransferScheduleMode, MemberTransferRecipient } from "../../src/types";
 
 function AccountPickerModal({
   visible,
@@ -51,11 +52,16 @@ function AccountPickerModal({
   );
 }
 
+const CADENCE_OPTIONS: TransferCadence[] = ["Once", "Daily", "Weekly", "Biweekly", "Monthly"];
+
 export default function TransfersScreen() {
   const { accounts, loading: accountsLoading, refresh: refreshAccounts } = useAccounts();
   const { createTransfer, loading: transferLoading, error: transferError } = useTransfers();
+  const { resolveRecipient, createTransfer: createMemberTransfer, loading: memberLoading, resolving, error: memberError } = useMemberTransfers();
 
-  const [mode, setMode] = useState<"internal" | "external">("internal");
+  const [mode, setMode] = useState<"internal" | "member" | "external">("internal");
+
+  // Internal transfer state
   const [fromAccountId, setFromAccountId] = useState("");
   const [toAccountId, setToAccountId] = useState("");
   const [amount, setAmount] = useState("");
@@ -64,11 +70,27 @@ export default function TransfersScreen() {
   const [submitted, setSubmitted] = useState(false);
   const [picking, setPicking] = useState<null | "from" | "to">(null);
 
+  // Member transfer state
+  const [memberFromAccountId, setMemberFromAccountId] = useState("");
+  const [recipientEmail, setRecipientEmail] = useState("");
+  const [recipient, setRecipient] = useState<MemberTransferRecipient | null>(null);
+  const [memberAmount, setMemberAmount] = useState("");
+  const [memberMemo, setMemberMemo] = useState("");
+  const [scheduleMode, setScheduleMode] = useState<TransferScheduleMode>("NOW");
+  const [memberTransferDate, setMemberTransferDate] = useState(new Date().toISOString().slice(0, 10));
+  const [cadence, setCadence] = useState<TransferCadence>("Once");
+  const [startDate, setStartDate] = useState(new Date().toISOString().slice(0, 10));
+  const [runTime, setRunTime] = useState("09:00");
+  const [endDate, setEndDate] = useState("");
+  const [memberSubmitted, setMemberSubmitted] = useState(false);
+
   const openAccounts = useMemo(() => accounts.filter((account) => account.status === "Open"), [accounts]);
   const checkingAccounts = useMemo(
     () => openAccounts.filter((account) => account.type === "Checking"),
     [openAccounts]
   );
+
+  // Internal transfer memos
   const toAccountOptions = useMemo(
     () => openAccounts.filter((account) => account.id !== fromAccountId),
     [fromAccountId, openAccounts]
@@ -82,6 +104,13 @@ export default function TransfersScreen() {
     [openAccounts, toAccountId]
   );
 
+  // Member transfer memos
+  const memberFromAccount = useMemo(
+    () => checkingAccounts.find((account) => account.id === memberFromAccountId) ?? null,
+    [checkingAccounts, memberFromAccountId]
+  );
+
+  // Initialize internal transfer from account
   useEffect(() => {
     if (accountsLoading) return;
 
@@ -90,6 +119,7 @@ export default function TransfersScreen() {
     }
   }, [accountsLoading, checkingAccounts, fromAccountId]);
 
+  // Initialize internal transfer to account
   useEffect(() => {
     if (accountsLoading) return;
     if (!fromAccountId) return;
@@ -99,9 +129,31 @@ export default function TransfersScreen() {
     }
   }, [accountsLoading, fromAccountId, toAccountId, toAccountOptions]);
 
-  const handleSubmit = async () => {
-    if (mode !== "internal") return;
+  // Initialize member transfer from account
+  useEffect(() => {
+    if (accountsLoading) return;
 
+    if (!memberFromAccountId || !checkingAccounts.some((account) => account.id === memberFromAccountId)) {
+      setMemberFromAccountId(checkingAccounts[0]?.id ?? "");
+    }
+  }, [accountsLoading, checkingAccounts, memberFromAccountId]);
+
+  const handleResolveRecipient = async () => {
+    if (!recipientEmail.trim()) {
+      Alert.alert("Error", "Please enter a recipient email");
+      return;
+    }
+
+    try {
+      const resolvedRecipient = await resolveRecipient(recipientEmail);
+      setRecipient(resolvedRecipient);
+      Alert.alert("Success", `Found ${resolvedRecipient.displayName}`);
+    } catch (err) {
+      Alert.alert("Error", err instanceof Error ? err.message : "Failed to resolve recipient");
+    }
+  };
+
+  const handleInternalSubmit = async () => {
     if (!fromAccountId || !toAccountId || !amount) {
       Alert.alert("Error", "Please fill in all required fields");
       return;
@@ -135,9 +187,62 @@ export default function TransfersScreen() {
     }
   };
 
+  const handleMemberSubmit = async () => {
+    if (!memberFromAccountId || !recipient || !memberAmount) {
+      Alert.alert("Error", "Please fill in all required fields and resolve recipient");
+      return;
+    }
+
+    const parsedAmount = Number(memberAmount);
+    if (!Number.isFinite(parsedAmount) || parsedAmount <= 0) {
+      Alert.alert("Error", "Enter a valid transfer amount.");
+      return;
+    }
+
+    try {
+      if (scheduleMode === "NOW") {
+        await createMemberTransfer(
+          memberFromAccountId,
+          recipientEmail,
+          parsedAmount,
+          memberMemo,
+          "NOW",
+          memberTransferDate
+        );
+      } else {
+        await createMemberTransfer(
+          memberFromAccountId,
+          recipientEmail,
+          parsedAmount,
+          memberMemo,
+          "SCHEDULED",
+          undefined,
+          cadence,
+          startDate,
+          runTime,
+          endDate,
+          undefined
+        );
+      }
+      Alert.alert("Success", "Member transfer submitted successfully");
+      setMemberSubmitted(true);
+      setRecipientEmail("");
+      setRecipient(null);
+      setMemberAmount("");
+      setMemberMemo("");
+      await refreshAccounts();
+    } catch (err) {
+      Alert.alert("Error", err instanceof Error ? err.message : memberError || "Failed to submit member transfer");
+    }
+  };
+
   return (
     <Screen>
-      <PageHeader title="Transfers" eyebrow="Move money" subtitle="Transfer between your accounts or to an external bank." />
+      <PageHeader
+        title="Transfers"
+        eyebrow="Move money"
+        subtitle="Transfer between your accounts, to members, or external banks."
+      />
       {accountsLoading ? (
         <Card>
           <Text>Loading accounts...</Text>
@@ -155,6 +260,11 @@ export default function TransfersScreen() {
               onPress={() => setMode("internal")}
             />
             <Button
+              label="Member"
+              variant={mode === "member" ? "primary" : "secondary"}
+              onPress={() => setMode("member")}
+            />
+            <Button
               label="External bank"
               variant={mode === "external" ? "primary" : "secondary"}
               onPress={() => setMode("external")}
@@ -169,11 +279,11 @@ export default function TransfersScreen() {
                   <Text>Open a checking account before making internal transfers.</Text>
                 </Card>
               ) : (
-                <>
+                <ScrollView>
                   <Card>
                     <Text style={{ fontWeight: "800", fontSize: 18 }}>Internal transfer</Text>
                     <Text style={{ color: colors.muted }}>
-                      Step 1: Tap the rows below to pick accounts. Step 2: Enter an amount. Step 3: Press “Submit transfer”.
+                      Step 1: Tap the rows below to pick accounts. Step 2: Enter an amount. Step 3: Press "Submit transfer".
                     </Text>
                     <Row
                       title="From (checking)"
@@ -187,11 +297,15 @@ export default function TransfersScreen() {
                       right={<Text style={{ color: colors.linkBlue, fontWeight: "800" }}>Change</Text>}
                       onPress={() => setPicking("to")}
                     />
-                  <Field label="Amount" value={amount} onChangeText={setAmount} />
-                  <Field label="Memo" value={memo} onChangeText={setMemo} />
-                  <Field label="Transfer date" value={transferDate} onChangeText={setTransferDate} />
-                  <Button label="Submit transfer" onPress={handleSubmit} disabled={transferLoading || !fromAccountId || !toAccountId} />
-                </Card>
+                    <Field label="Amount" value={amount} onChangeText={setAmount} />
+                    <Field label="Memo" value={memo} onChangeText={setMemo} />
+                    <Field label="Transfer date" value={transferDate} onChangeText={setTransferDate} />
+                    <Button
+                      label="Submit transfer"
+                      onPress={handleInternalSubmit}
+                      disabled={transferLoading || !fromAccountId || !toAccountId}
+                    />
+                  </Card>
 
                   <Card>
                     <Text style={{ fontWeight: "800", fontSize: 18 }}>Transfer review</Text>
@@ -199,9 +313,125 @@ export default function TransfersScreen() {
                     <Text>To: {toAccount?.nickname || "Select account"}</Text>
                     <Text>Amount: {amount || "0.00"}</Text>
                     <Text>Date: {transferDate}</Text>
-                    {submitted ? <Text style={{ fontWeight: "700" }}>Transfer submitted.</Text> : <Text>Fill out the form to review before submitting.</Text>}
+                    {submitted ? (
+                      <Text style={{ fontWeight: "700" }}>Transfer submitted.</Text>
+                    ) : (
+                      <Text>Fill out the form to review before submitting.</Text>
+                    )}
                   </Card>
-                </>
+                </ScrollView>
+              )}
+            </>
+          ) : mode === "member" ? (
+            <>
+              {!checkingAccounts.length ? (
+                <Card>
+                  <Text style={{ fontWeight: "800" }}>Checking account required</Text>
+                  <Text>Open a checking account before making member transfers.</Text>
+                </Card>
+              ) : (
+                <ScrollView>
+                  <Card>
+                    <Text style={{ fontWeight: "800", fontSize: 18 }}>Member transfer</Text>
+                    <Text style={{ color: colors.muted }}>
+                      Transfer money to another bank member. Enter their email and resolve to find them.
+                    </Text>
+                    <Row
+                      title="From (checking)"
+                      subtitle={memberFromAccount ? `${memberFromAccount.nickname} (${memberFromAccount.maskedNumber})` : "Select checking account"}
+                      right={<Text style={{ color: colors.linkBlue, fontWeight: "800" }}>Change</Text>}
+                      onPress={() => setPicking("from")}
+                    />
+                    <Field
+                      label="Recipient email"
+                      value={recipientEmail}
+                      onChangeText={setRecipientEmail}
+                      placeholder="example@email.com"
+                    />
+                    <Button
+                      label={resolving ? "Resolving..." : "Resolve recipient"}
+                      onPress={handleResolveRecipient}
+                      disabled={resolving || transferLoading}
+                    />
+                    {recipient && (
+                      <View style={{ marginTop: 12, padding: 12, backgroundColor: "rgba(76, 175, 80, 0.1)", borderRadius: 8 }}>
+                        <Text style={{ fontWeight: "800", color: colors.text }}>
+                          {recipient.displayName}
+                        </Text>
+                        <Text style={{ color: colors.muted, fontSize: 12 }}>
+                          {recipient.email}
+                        </Text>
+                        <Text style={{ color: colors.muted, fontSize: 12, marginTop: 4 }}>
+                          Default account: {recipient.defaultCheckingAccountMasked}
+                        </Text>
+                      </View>
+                    )}
+                  </Card>
+
+                  <Card>
+                    <Text style={{ fontWeight: "800", fontSize: 18 }}>Transfer details</Text>
+                    <Field label="Amount" value={memberAmount} onChangeText={setMemberAmount} />
+                    <Field label="Memo" value={memberMemo} onChangeText={setMemberMemo} />
+                  </Card>
+
+                  <Card>
+                    <Text style={{ fontWeight: "800", fontSize: 18 }}>Schedule</Text>
+                    <Text style={{ color: colors.muted }}>
+                      Choose whether to transfer now or schedule for later.
+                    </Text>
+                    <Button
+                      label="Now"
+                      variant={scheduleMode === "NOW" ? "primary" : "secondary"}
+                      onPress={() => setScheduleMode("NOW")}
+                    />
+                    <Button
+                      label="Scheduled"
+                      variant={scheduleMode === "SCHEDULED" ? "primary" : "secondary"}
+                      onPress={() => setScheduleMode("SCHEDULED")}
+                    />
+
+                    {scheduleMode === "NOW" ? (
+                      <Field label="Transfer date" value={memberTransferDate} onChangeText={setMemberTransferDate} />
+                    ) : (
+                      <>
+                        <Text style={{ marginTop: 12, fontWeight: "600", color: colors.text }}>Recurring schedule</Text>
+                        <Field label="Cadence" value={cadence} onChangeText={(val) => setCadence(val as TransferCadence)} />
+                        <Field label="Start date" value={startDate} onChangeText={setStartDate} />
+                        <Field label="Run time (HH:MM)" value={runTime} onChangeText={setRunTime} placeholder="09:00" />
+                        <Field label="End date (optional)" value={endDate} onChangeText={setEndDate} />
+                      </>
+                    )}
+                  </Card>
+
+                  <Card>
+                    <Button
+                      label="Submit transfer"
+                      onPress={handleMemberSubmit}
+                      disabled={memberLoading || !memberFromAccountId || !recipient || !memberAmount}
+                    />
+                  </Card>
+
+                  <Card>
+                    <Text style={{ fontWeight: "800", fontSize: 18 }}>Transfer review</Text>
+                    <Text>From: {memberFromAccount?.nickname || "Select account"}</Text>
+                    <Text>To: {recipient?.displayName || "Resolve recipient"}</Text>
+                    <Text>Amount: {memberAmount || "0.00"}</Text>
+                    {scheduleMode === "NOW" ? (
+                      <Text>Date: {memberTransferDate}</Text>
+                    ) : (
+                      <>
+                        <Text>Cadence: {cadence}</Text>
+                        <Text>Start: {startDate}</Text>
+                        {endDate && <Text>End: {endDate}</Text>}
+                      </>
+                    )}
+                    {memberSubmitted ? (
+                      <Text style={{ fontWeight: "700" }}>Transfer submitted.</Text>
+                    ) : (
+                      <Text>Fill out the form to review before submitting.</Text>
+                    )}
+                  </Card>
+                </ScrollView>
               )}
             </>
           ) : (
@@ -223,8 +453,12 @@ export default function TransfersScreen() {
             }))}
             onClose={() => setPicking(null)}
             onSelect={(accountId) => {
-              if (picking === "from") setFromAccountId(accountId);
-              else setToAccountId(accountId);
+              if (mode === "internal") {
+                if (picking === "from") setFromAccountId(accountId);
+                else setToAccountId(accountId);
+              } else if (mode === "member") {
+                if (picking === "from") setMemberFromAccountId(accountId);
+              }
               setPicking(null);
             }}
           />

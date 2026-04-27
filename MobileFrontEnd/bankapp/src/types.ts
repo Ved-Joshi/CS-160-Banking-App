@@ -4,6 +4,9 @@ export type TransactionStatus = "PENDING" | "COMPLETED" | "FAILED";
 export type DepositStatus = "PENDING_REVIEW" | "APPROVED" | "DECLINED";
 export type PaymentStatus = "SCHEDULED" | "PROCESSING" | "COMPLETED" | "FAILED" | "CANCELLED";
 export type NotificationType = "deposit" | "payment" | "transfer" | "security";
+export type TransferScheduleMode = "NOW" | "SCHEDULED";
+export type TransferCadence = "Once" | "Daily" | "Weekly" | "Biweekly" | "Monthly";
+export type MemberTransferPlanStatus = "SCHEDULED" | "PROCESSING" | "COMPLETED" | "CANCELLED";
 
 export interface User {
   id: string;
@@ -120,4 +123,42 @@ export interface NotificationItem {
   body: string;
   createdAt: string;
   read: boolean;
+}
+
+export interface MemberTransferRecipient {
+  userId: string;
+  displayName: string;
+  email: string;
+  defaultCheckingAccountMasked: string;
+}
+
+export interface MemberTransfer {
+  id: string;
+  fromAccountId: string;
+  toAccountId: string;
+  recipientDisplayName: string;
+  amount: number;
+  memo?: string;
+  transferDate: string;
+  status: "PENDING" | "COMPLETED" | "FAILED";
+  submittedAt: string;
+}
+
+export interface MemberTransferPlan {
+  id: string;
+  fromAccountId: string;
+  recipientUserId: string;
+  recipientDisplayName: string;
+  amount: number;
+  memo?: string;
+  cadence: TransferCadence;
+  startDate: string;
+  runTime: string;
+  endDate?: string;
+  timezone: string;
+  nextRunAt?: string;
+  lastFailureReason?: string;
+  status: MemberTransferPlanStatus;
+  createdAt: string;
+  updatedAt: string;
 }
