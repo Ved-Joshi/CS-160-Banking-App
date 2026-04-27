@@ -1,65 +1,98 @@
-# CS160 Banking App Frontend
+# CS160 Banking App
 
-Responsive React web frontend for a mock-first banking application, built for the CS160 team project.
+Full-stack banking demo project with:
+- `backend/`: FastAPI + Supabase REST/RPC integration
+- `frontend/`: React/Vite app
+- `docker-compose.yml`: local one-command runtime (backend, frontend, scheduler, demo seed)
 
-## Stack
+## Prerequisites
 
-- React 19
-- Vite
-- TypeScript
-- React Router
-- TanStack Query
-- React Hook Form
-- Zod
-- Vitest
+- Docker Desktop running
+- A Supabase project (URL, anon key, service-role key)
 
-## Implemented Experience
+## Environment Setup
 
-- Public auth entry pages: welcome, sign in, register, reset password, MFA
-- Authenticated banking shell with responsive side navigation
-- Dashboard with balances, alerts, quick actions, recent transactions, and upcoming bill pay
-- Accounts list and account detail pages
-- Internal transfer flow with review and submission states
-- Bill pay scheduling and payee reference pages
-- Deposit submission flow and deposit detail tracking
-- Transaction history with filters
-- ATM locator with list/map split layout
-- Notifications and settings pages
+1. Copy backend env file:
+```bash
+cp backend/.env.example backend/.env
+```
 
-## Mock-First Architecture
+2. Fill required backend values in `backend/.env`:
+- `SUPABASE_URL`
+- `SUPABASE_SERVICE_ROLE_KEY`
+- `TRANSFER_RUNNER_SECRET`
+- `STRIPE_SECRET_KEY` / `STRIPE_PUBLISHABLE_KEY` (if testing external-link flow)
 
-The app uses typed mock services in [`src/lib/mockApi.ts`](/Users/vedjoshi/CS-160-Banking-App/frontend/src/lib/mockApi.ts) and deterministic fixtures in [`src/mocks/data.ts`](/Users/vedjoshi/CS-160-Banking-App/frontend/src/mocks/data.ts). The UI is already organized around backend-ready service boundaries so FastAPI integration can replace the mock layer later.
+3. Copy frontend env file:
+```bash
+cp frontend/.env.example frontend/.env
+```
 
-## Run (Ensure docker is running)
+4. Fill required frontend values in `frontend/.env`:
+- `VITE_SUPABASE_URL`
+- `VITE_SUPABASE_ANON_KEY`
+- `VITE_API_URL=http://localhost:8000`
+
+## Run with Docker
 
 ```bash
-docker-compose up --build -d
+docker compose up --build -d
 ```
-To remove all volumes/rebuild after edits: 
+
+Services:
+- Backend: [http://localhost:8000](http://localhost:8000)
+- Frontend: [http://localhost:5173](http://localhost:5173)
+
+The `seed` service runs automatically once and creates/updates demo data.
+
+## Tester Account (Seeded)
+
+By default, compose seeds this tester login:
+- Email: `demo.tester@example.com`
+- Password: `DemoPass123!`
+
+Seeded data includes:
+- Multiple accounts (checking/savings/credit) with balances
+- Payee and bill pay sample
+- Deposit sample
+- Transfer/external-transfer sample
+- A recipient account for member-transfer flow
+
+You can override seed credentials in `backend/.env`:
+- `DEMO_TEST_EMAIL`
+- `DEMO_TEST_PASSWORD`
+- `DEMO_RECIPIENT_EMAIL`
+- `DEMO_RECIPIENT_PASSWORD`
+
+Disable seeding by setting:
+- `SEED_DEMO_DATA=false`
+
+## Common Commands
+
+Rebuild/restart:
 ```bash
-docker-compose down -v
+docker compose up --build -d
 ```
 
-
-
-
-Create a `.env` file (see `.env.example`) with your Supabase project values:
-
-```
-VITE_SUPABASE_URL=...
-VITE_SUPABASE_ANON_KEY=...
-VITE_API_URL=http://localhost:8000
+Stop all services:
+```bash
+docker compose down
 ```
 
-Password reset flow
-- Users request a reset at `/reset-password` (sends Supabase email).
-- Email link redirects to `/reset-password`; once the session is restored, the page shows a new-password form and calls `supabase.auth.updateUser`.
+Tail logs:
+```bash
+docker compose logs -f backend frontend seed scheduler
+```
 
-## Verify
+## Test Suites
 
+Frontend:
 ```bash
 cd frontend
-npm run build
-npm run lint
-npm run test
+npm test
+```
+
+Backend (inside backend container):
+```bash
+docker exec banking-backend python -m pytest -q /app/tests
 ```

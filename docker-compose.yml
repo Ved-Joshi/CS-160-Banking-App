@@ -5,13 +5,11 @@ services:
       dockerfile: Dockerfile
     ports:
       - "8000:8000"
-    volumes:
-      - ./backend:/app
     env_file:
       - ./backend/.env
     environment:
       - PYTHONPATH=/app
-    command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+    command: uvicorn main:app --host 0.0.0.0 --port 8000
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/openapi.json', timeout=5)"]
       interval: 15s
@@ -33,12 +31,34 @@ services:
       backend:
         condition: service_healthy
 
+  seed:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: banking-seed
+    env_file:
+      - ./backend/.env
+    environment:
+      - BACKEND_BASE_URL=http://backend:8000
+      - SEED_DEMO_DATA=true
+      - DEMO_TEST_EMAIL=demo.tester@example.com
+      - DEMO_TEST_PASSWORD=DemoPass123!
+      - DEMO_RECIPIENT_EMAIL=demo.recipient@example.com
+      - DEMO_RECIPIENT_PASSWORD=DemoPass123!
+    command: python /app/scripts/seed_demo_data.py
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: "no"
+
   scheduler:
     image: curlimages/curl:8.7.1
     container_name: banking-scheduler
     depends_on:
       backend:
         condition: service_healthy
+      seed:
+        condition: service_completed_successfully
     env_file:
       - ./backend/.env
     command:
