@@ -895,7 +895,10 @@ async def close_account(account_id: str, current_user: SupabaseUser = Depends(ge
                 await supabase_client.update_rows(
                     "accounts",
                     {"is_default_internal_receive": True},
-                    filters={"id": f"eq.{replacement_rows[0]['id']}"},
+                    filters={
+                        "id": f"eq.{replacement_rows[0]['id']}",
+                        "user_id": f"eq.{current_user.id}",
+                    },
                 )
         return
 

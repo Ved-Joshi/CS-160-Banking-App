@@ -10,7 +10,7 @@ class Settings(BaseSettings):
     )
 
     # Server Configuration
-    DEBUG: bool = True
+    DEBUG: bool = False
     HOST: str = "0.0.0.0"
     PORT: int = 8000
     
@@ -36,6 +36,10 @@ class Settings(BaseSettings):
 
     # Internal scheduler auth for processing due transfer plans
     TRANSFER_RUNNER_SECRET: Optional[str] = None
+
+    # API-wide rate limiting
+    RATE_LIMIT_REQUESTS_PER_WINDOW: int = 240
+    RATE_LIMIT_WINDOW_SECONDS: int = 60
 
     # External account linking provider: stripe_sandbox | local
     EXTERNAL_ACCOUNT_PROVIDER: str = "stripe_sandbox"
