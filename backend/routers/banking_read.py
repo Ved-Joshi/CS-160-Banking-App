@@ -1712,6 +1712,7 @@ async def create_deposit(
     )
 
     try:
+        await get_or_create_deposit_clearing_ledger_account()
         result = await supabase_client.rpc(
             "submit_customer_deposit",
             {
