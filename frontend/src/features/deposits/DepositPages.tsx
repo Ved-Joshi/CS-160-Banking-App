@@ -319,7 +319,7 @@ export function DepositsPage() {
         </div>
       ) : null}
 
-      <div className="button-row">
+      <div className="button-row deposits-tab-row">
         <Button onClick={() => setActiveTab('deposit')} type="button" variant={activeTab === 'deposit' ? 'primary' : 'secondary'}>
           Deposit
         </Button>

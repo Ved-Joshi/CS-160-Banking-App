@@ -422,6 +422,11 @@ p {
   text-align: center;
 }
 
+.deposits-tab-row {
+  justify-content: flex-start;
+  width: auto;
+}
+
 .top-header .utility-link {
   color: var(--navy-900);
   background: rgba(255, 255, 255, 0.86);
@@ -2281,6 +2286,10 @@ small {
   .page-header__actions {
     width: 100%;
     justify-content: stretch;
+  }
+
+  .deposits-tab-row {
+    justify-content: flex-start;
   }
 
   .button-row > .button,
