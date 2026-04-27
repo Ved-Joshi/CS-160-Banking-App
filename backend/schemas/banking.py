@@ -7,7 +7,7 @@ AccountType = Literal["Checking", "Savings", "Credit"]
 TransactionType = Literal["Deposit", "Withdrawal", "Transfer", "Bill Pay", "ATM", "Interest"]
 TransactionStatus = Literal["PENDING", "COMPLETED", "FAILED"]
 DepositStatus = Literal["PENDING_REVIEW", "APPROVED", "DECLINED"]
-DepositType = Literal["cash", "check"]
+DepositType = Literal["atm", "check"]
 PaymentStatus = Literal["SCHEDULED", "PROCESSING", "COMPLETED", "FAILED", "CANCELLED"]
 NotificationType = Literal["deposit", "payment", "transfer", "security"]
 PaymentCadence = Literal["Once", "Daily", "Weekly", "Biweekly", "Monthly"]
@@ -137,6 +137,10 @@ class Deposit(BaseModel):
 class CreateDepositUploadUrlsIn(BaseModel):
     frontFileName: str = Field(min_length=1, max_length=255)
     backFileName: str = Field(min_length=1, max_length=255)
+    frontContentType: str = Field(min_length=1, max_length=100)
+    backContentType: str = Field(min_length=1, max_length=100)
+    frontFileSizeBytes: int = Field(gt=0, le=20 * 1024 * 1024)
+    backFileSizeBytes: int = Field(gt=0, le=20 * 1024 * 1024)
 
 
 class SignedUploadTarget(BaseModel):
@@ -154,7 +158,22 @@ class DepositUploadUrls(BaseModel):
 class CreateDepositIn(BaseModel):
     accountId: str
     amount: float = Field(gt=0)
-    depositType: DepositType = "check"
+    depositMethod: Optional[DepositType] = None
+    depositType: Optional[Literal["cash", "check"]] = None
+    frontImagePath: Optional[str] = None
+    backImagePath: Optional[str] = None
+
+
+class CreateAtmWithdrawalIn(BaseModel):
+    accountId: str
+    amount: float = Field(gt=0)
+
+
+class AtmWithdrawalResult(BaseModel):
+    id: str
+    status: Literal["COMPLETED", "FAILED"]
+    submittedAt: str
+    failureReason: Optional[str] = None
 
 
 class NotificationItem(BaseModel):

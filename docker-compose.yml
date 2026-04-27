@@ -5,19 +5,16 @@ services:
       dockerfile: Dockerfile
     ports:
       - "8000:8000"
-    volumes:
-      - ./backend:/app
     env_file:
       - ./backend/.env
     environment:
       - PYTHONPATH=/app
-    command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+    command: uvicorn main:app --host 0.0.0.0 --port 8000
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/openapi.json', timeout=5)"]
       interval: 15s
       timeout: 5s
       retries: 10
-    container_name: banking-backend
 
   frontend:
     build:
@@ -28,17 +25,36 @@ services:
       - "5173:5173"
     env_file:
       - ./frontend/.env
-    container_name: banking-frontend
     depends_on:
       backend:
         condition: service_healthy
 
-  scheduler:
-    image: curlimages/curl:8.7.1
-    container_name: banking-scheduler
+  seed:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    env_file:
+      - ./backend/.env
+    environment:
+      - BACKEND_BASE_URL=http://backend:8000
+      - SEED_DEMO_DATA=true
+      - DEMO_TEST_EMAIL=demo.tester@example.com
+      - DEMO_TEST_PASSWORD=DemoPass123!
+      - DEMO_RECIPIENT_EMAIL=demo.recipient@example.com
+      - DEMO_RECIPIENT_PASSWORD=DemoPass123!
+    command: python /app/scripts/seed_demo_data.py
     depends_on:
       backend:
         condition: service_healthy
+    restart: "no"
+
+  scheduler:
+    image: curlimages/curl:8.7.1
+    depends_on:
+      backend:
+        condition: service_healthy
+      seed:
+        condition: service_completed_successfully
     env_file:
       - ./backend/.env
     command:
@@ -49,10 +65,16 @@ services:
           echo "TRANSFER_RUNNER_SECRET is not set; scheduler is idle."
           tail -f /dev/null
         fi
+        tick=0
         while true; do
-          curl -fsS -X POST "http://backend:8000/internal/jobs/process-transfer-plans?limit=50" -H "X-Runner-Secret: $$TRANSFER_RUNNER_SECRET" >/dev/null || true
-          curl -fsS -X POST "http://backend:8000/internal/jobs/process-member-transfer-plans?limit=50" -H "X-Runner-Secret: $$TRANSFER_RUNNER_SECRET" >/dev/null || true
-          curl -fsS -X POST "http://backend:8000/internal/jobs/process-external-transfers?limit=50" -H "X-Runner-Secret: $$TRANSFER_RUNNER_SECRET" >/dev/null || true
-          curl -fsS -X POST "http://backend:8000/internal/jobs/process-bill-payments?limit=50" -H "X-Runner-Secret: $$TRANSFER_RUNNER_SECRET" >/dev/null || true
-          sleep 60
+          curl -fsS -X POST "http://backend:8000/internal/jobs/process-pending-check-deposits?limit=50" -H "X-Runner-Secret: $$TRANSFER_RUNNER_SECRET" >/dev/null || true
+          if [ $$((tick % 6)) -eq 0 ]; then
+            curl -fsS -X POST "http://backend:8000/internal/jobs/cleanup-orphaned-deposit-uploads?limit=100" -H "X-Runner-Secret: $$TRANSFER_RUNNER_SECRET" >/dev/null || true
+            curl -fsS -X POST "http://backend:8000/internal/jobs/process-transfer-plans?limit=50" -H "X-Runner-Secret: $$TRANSFER_RUNNER_SECRET" >/dev/null || true
+            curl -fsS -X POST "http://backend:8000/internal/jobs/process-member-transfer-plans?limit=50" -H "X-Runner-Secret: $$TRANSFER_RUNNER_SECRET" >/dev/null || true
+            curl -fsS -X POST "http://backend:8000/internal/jobs/process-external-transfers?limit=50" -H "X-Runner-Secret: $$TRANSFER_RUNNER_SECRET" >/dev/null || true
+            curl -fsS -X POST "http://backend:8000/internal/jobs/process-bill-payments?limit=50" -H "X-Runner-Secret: $$TRANSFER_RUNNER_SECRET" >/dev/null || true
+          fi
+          tick=$$((tick + 1))
+          sleep 10
         done

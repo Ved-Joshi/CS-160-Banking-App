@@ -119,7 +119,10 @@ async def close_account_for_user(account_id: str, current_user: SupabaseUser) ->
     updated_rows = await supabase_client.update_rows(
         "accounts",
         {"status": "closed"},
-        filters={"id": f"eq.{account_id}"},
+        filters={
+            "id": f"eq.{account_id}",
+            "user_id": f"eq.{current_user.id}",
+        },
     )
 
     if not updated_rows:

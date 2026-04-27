@@ -212,5 +212,12 @@ class SupabaseClient:
             body=values,
         )
 
+    async def delete_storage_object(self, bucket: str, path: str) -> None:
+        encoded_path = quote(path, safe="/")
+        await self._request(
+            "DELETE",
+            f"/storage/v1/object/{bucket}/{encoded_path}",
+        )
+
 
 supabase_client = SupabaseClient()

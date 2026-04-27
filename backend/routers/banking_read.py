@@ -1,4 +1,4 @@
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import PurePosixPath
 from uuid import uuid4
 
@@ -6,10 +6,12 @@ from fastapi import APIRouter, Depends, HTTPException, Header, Query, status
 
 from dependencies.auth import get_current_user
 from schemas.banking import (
+    AtmWithdrawalResult,
     AtmLocation,
     AtmSearchCenter,
     AtmSearchResponse,
     BankAccount,
+    CreateAtmWithdrawalIn,
     CreateBankAccountIn,
     CreateDepositIn,
     CreateDepositUploadUrlsIn,
@@ -88,6 +90,18 @@ from services.transfer_service import (
 
 router = APIRouter(prefix="/api", tags=["banking"])
 
+MAX_CHECK_IMAGE_SIZE_BYTES = 10 * 1024 * 1024
+MIN_CHECK_IMAGE_SIZE_BYTES = 1024
+DEPOSIT_UPLOAD_SESSION_TTL_MINUTES = 30
+ALLOWED_CHECK_IMAGE_MIME_TYPES = {
+    "image/jpeg",
+    "image/png",
+    "image/webp",
+    "image/heic",
+    "image/heif",
+}
+ALLOWED_CHECK_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".heic", ".heif"}
+
 
 def map_account_type(value: str) -> str:
     return {
@@ -115,9 +129,9 @@ def map_transaction_type(value: str) -> str:
         "transfer": "Transfer",
         "bill_payment": "Bill Pay",
         "interest": "Interest",
-        "fee": "Withdrawal",
+        "fee": "ATM",
         "adjustment": "Withdrawal",
-    }.get(value, "Withdrawal")
+    }.get(value, "Transfer")
 
 
 def map_transaction_status(value: str) -> str:
@@ -135,8 +149,8 @@ def normalize_transaction_filter(value: str | None) -> str | None:
         "Transfer": "eq.transfer",
         "Bill Pay": "eq.bill_payment",
         "Interest": "eq.interest",
-        "Withdrawal": "in.(fee,adjustment)",
-        "ATM": "eq.adjustment",
+        "Withdrawal": "eq.adjustment",
+        "ATM": "in.(fee,adjustment)",
     }.get(value or "")
 
 
@@ -504,11 +518,14 @@ def map_deposit_image(path: str | None, submitted_at: str) -> DepositImage | Non
 
 def map_deposit(row: dict) -> Deposit:
     submitted_at = row.get("submitted_at") or row.get("created_at") or ""
+    deposit_type = row.get("deposit_type") or row.get("deposit_method") or "check"
+    if deposit_type == "cash":
+        deposit_type = "atm"
     return Deposit(
         id=row["id"],
         accountId=row["account_id"],
         amount=cents_to_amount(row.get("amount_cents")),
-        depositType=row.get("deposit_type") or "check",
+        depositType=deposit_type,
         submittedAt=submitted_at,
         status=map_deposit_status(row.get("status", "submitted")),
         note=row.get("note"),
@@ -640,6 +657,41 @@ async def require_owned_payee(payee_id: str, user_id: str) -> dict:
 def sanitize_file_name(file_name: str) -> str:
     cleaned = "".join(char for char in file_name.strip() if char.isalnum() or char in {".", "-", "_"})
     return cleaned or "image.jpg"
+
+
+def validate_check_image_upload_meta(
+    *,
+    side: str,
+    file_name: str,
+    content_type: str,
+    size_bytes: int,
+) -> None:
+    normalized_content_type = (content_type or "").strip().lower()
+    if normalized_content_type not in ALLOWED_CHECK_IMAGE_MIME_TYPES:
+        allowed = ", ".join(sorted(ALLOWED_CHECK_IMAGE_MIME_TYPES))
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"{side} check image type must be one of: {allowed}.",
+        )
+
+    if size_bytes < MIN_CHECK_IMAGE_SIZE_BYTES:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"{side} check image is too small. Please upload a clearer photo.",
+        )
+    if size_bytes > MAX_CHECK_IMAGE_SIZE_BYTES:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"{side} check image exceeds 10MB limit.",
+        )
+
+    extension = PurePosixPath(file_name).suffix.lower()
+    if extension not in ALLOWED_CHECK_IMAGE_EXTENSIONS:
+        allowed_ext = ", ".join(sorted(ALLOWED_CHECK_IMAGE_EXTENSIONS))
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"{side} check image extension must be one of: {allowed_ext}.",
+        )
 
 
 def parse_transfer_date(value: str) -> str:
@@ -844,7 +896,10 @@ async def close_account(account_id: str, current_user: SupabaseUser = Depends(ge
                 await supabase_client.update_rows(
                     "accounts",
                     {"is_default_internal_receive": True},
-                    filters={"id": f"eq.{replacement_rows[0]['id']}"},
+                    filters={
+                        "id": f"eq.{replacement_rows[0]['id']}",
+                        "user_id": f"eq.{current_user.id}",
+                    },
                 )
         return
 
@@ -1239,6 +1294,18 @@ async def create_payment(
             response_status=exc.status_code,
         )
         raise
+    except Exception as exc:
+        await finalize_idempotency_key(
+            user_id=current_user.id,
+            endpoint=idempotency_endpoint,
+            idempotency_key=idempotency_key,
+            response_body={"detail": "Unable to create payment at this time."},
+            response_status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Unable to create payment at this time.",
+        ) from exc
 
 
 @router.patch("/payments/{payment_id}", response_model=ScheduledPayment)
@@ -1507,6 +1574,18 @@ async def create_deposit_upload_urls(
     payload: CreateDepositUploadUrlsIn,
     current_user: SupabaseUser = Depends(get_current_user),
 ) -> DepositUploadUrls:
+    validate_check_image_upload_meta(
+        side="Front",
+        file_name=payload.frontFileName,
+        content_type=payload.frontContentType,
+        size_bytes=payload.frontFileSizeBytes,
+    )
+    validate_check_image_upload_meta(
+        side="Back",
+        file_name=payload.backFileName,
+        content_type=payload.backContentType,
+        size_bytes=payload.backFileSizeBytes,
+    )
     deposit_id = str(uuid4())
     front_name = sanitize_file_name(payload.frontFileName)
     back_name = sanitize_file_name(payload.backFileName)
@@ -1514,6 +1593,21 @@ async def create_deposit_upload_urls(
     back_path = f"{current_user.id}/{deposit_id}/back-{back_name}"
     front_target = await supabase_client.create_signed_upload_url("deposit-check-images", front_path)
     back_target = await supabase_client.create_signed_upload_url("deposit-check-images", back_path)
+    expires_at = datetime.now(timezone.utc) + timedelta(minutes=DEPOSIT_UPLOAD_SESSION_TTL_MINUTES)
+    await supabase_client.insert_row(
+        "deposit_upload_sessions",
+        {
+            "user_id": current_user.id,
+            "front_image_path": front_path,
+            "back_image_path": back_path,
+            "front_content_type": payload.frontContentType.strip().lower(),
+            "back_content_type": payload.backContentType.strip().lower(),
+            "front_size_bytes": payload.frontFileSizeBytes,
+            "back_size_bytes": payload.backFileSizeBytes,
+            "status": "reserved",
+            "expires_at": expires_at.isoformat(),
+        },
+    )
 
     return DepositUploadUrls(
         bucket="deposit-check-images",
@@ -1533,27 +1627,177 @@ async def create_deposit_upload_urls(
 @router.post("/deposits", response_model=Deposit, status_code=status.HTTP_201_CREATED)
 async def create_deposit(
     payload: CreateDepositIn,
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
     current_user: SupabaseUser = Depends(get_current_user),
 ) -> Deposit:
+    if not idempotency_key:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Idempotency-Key header is required.",
+        )
+
     await require_owned_account(payload.accountId, current_user.id, require_open=True)
-    await get_or_create_deposit_clearing_ledger_account()
+    legacy_type = (payload.depositType or "").lower()
+    method = (payload.depositMethod or ("atm" if legacy_type == "cash" else "check")).lower()
+    if method not in {"atm", "check"}:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Deposit method must be atm or check.")
+
+    upload_session_id: str | None = None
+    deposit_created = False
+    if method == "check":
+        if not payload.frontImagePath or not payload.backImagePath:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Check deposits require front and back check images.",
+            )
+        for image_path in [payload.frontImagePath, payload.backImagePath]:
+            if not image_path.startswith(f"{current_user.id}/"):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Deposit image paths must belong to the authenticated user.",
+                )
+        # Atomically reserve the upload session so concurrent requests cannot reuse it.
+        now_iso = datetime.now(timezone.utc).isoformat()
+        upload_sessions = await supabase_client.update_rows(
+            "deposit_upload_sessions",
+            {
+                "status": "consumed",
+                "consumed_at": now_iso,
+            },
+            filters={
+                "user_id": f"eq.{current_user.id}",
+                "front_image_path": f"eq.{payload.frontImagePath}",
+                "back_image_path": f"eq.{payload.backImagePath}",
+                "status": "eq.reserved",
+                "expires_at": f"gte.{now_iso}",
+                "deposit_id": "is.null",
+            },
+        )
+        if not upload_sessions:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Uploaded check images were missing, expired, or already used. Please upload again.",
+            )
+        upload_session_id = str(upload_sessions[0].get("id"))
+    elif payload.frontImagePath or payload.backImagePath:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="ATM deposits do not accept check image uploads.",
+        )
+
+    idempotency_endpoint = "/api/deposits"
+    idempotency_payload = {
+        "accountId": payload.accountId,
+        "amount": payload.amount,
+        "depositMethod": method,
+        "frontImagePath": payload.frontImagePath,
+        "backImagePath": payload.backImagePath,
+    }
+    replay = await get_idempotency_replay(
+        user_id=current_user.id,
+        endpoint=idempotency_endpoint,
+        idempotency_key=idempotency_key,
+        request_payload=idempotency_payload,
+    )
+    if replay is not None:
+        return Deposit.model_validate(replay)
+    await reserve_idempotency_key(
+        user_id=current_user.id,
+        endpoint=idempotency_endpoint,
+        idempotency_key=idempotency_key,
+        request_payload=idempotency_payload,
+    )
+
+    try:
+        result = await supabase_client.rpc(
+            "submit_customer_deposit",
+            {
+                "p_user_id": current_user.id,
+                "p_account_id": payload.accountId,
+                "p_amount_cents": amount_to_cents(payload.amount),
+                "p_deposit_method": method,
+                "p_front_image_path": payload.frontImagePath,
+                "p_back_image_path": payload.backImagePath,
+            },
+        )
+
+        created = result[0] if isinstance(result, list) else result
+        if not created:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Supabase did not return the created deposit row.",
+            )
+        deposit_created = True
+
+        if method == "check" and upload_session_id:
+            await supabase_client.update_rows(
+                "deposit_upload_sessions",
+                {
+                    "deposit_id": created.get("id"),
+                },
+                filters={
+                    "id": f"eq.{upload_session_id}",
+                    "status": "eq.consumed",
+                },
+            )
+
+        response = map_deposit(created)
+        await finalize_idempotency_key(
+            user_id=current_user.id,
+            endpoint=idempotency_endpoint,
+            idempotency_key=idempotency_key,
+            response_body=response.model_dump(),
+            response_status=status.HTTP_201_CREATED,
+        )
+        return response
+    except HTTPException as exc:
+        await finalize_idempotency_key(
+            user_id=current_user.id,
+            endpoint=idempotency_endpoint,
+            idempotency_key=idempotency_key,
+            response_body={"detail": exc.detail},
+            response_status=exc.status_code,
+        )
+        if method == "check" and upload_session_id and not deposit_created:
+            await supabase_client.update_rows(
+                "deposit_upload_sessions",
+                {
+                    "status": "reserved",
+                    "consumed_at": None,
+                },
+                filters={
+                    "id": f"eq.{upload_session_id}",
+                    "status": "eq.consumed",
+                    "deposit_id": "is.null",
+                },
+            )
+        raise
+
+
+@router.post("/withdrawals/atm", response_model=AtmWithdrawalResult, status_code=status.HTTP_201_CREATED)
+async def create_atm_withdrawal(
+    payload: CreateAtmWithdrawalIn,
+    current_user: SupabaseUser = Depends(get_current_user),
+) -> AtmWithdrawalResult:
     result = await supabase_client.rpc(
-        "submit_customer_deposit",
+        "submit_atm_withdrawal",
         {
             "p_user_id": current_user.id,
             "p_account_id": payload.accountId,
             "p_amount_cents": amount_to_cents(payload.amount),
-            "p_deposit_type": payload.depositType,
         },
     )
-
     created = result[0] if isinstance(result, list) else result
     if not created:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Supabase did not return the created deposit row.",
+            detail="Supabase did not return the created withdrawal row.",
         )
-    return map_deposit(created)
+    return AtmWithdrawalResult(
+        id=created.get("id") or "",
+        status="COMPLETED",
+        submittedAt=created.get("submitted_at") or created.get("created_at") or datetime.now(timezone.utc).isoformat(),
+    )
 
 
 @router.get("/notifications", response_model=list[NotificationItem])
