@@ -15,7 +15,6 @@ services:
       interval: 15s
       timeout: 5s
       retries: 10
-    container_name: banking-backend
 
   frontend:
     build:
@@ -26,7 +25,6 @@ services:
       - "5173:5173"
     env_file:
       - ./frontend/.env
-    container_name: banking-frontend
     depends_on:
       backend:
         condition: service_healthy
@@ -35,7 +33,6 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile
-    container_name: banking-seed
     env_file:
       - ./backend/.env
     environment:
@@ -53,7 +50,6 @@ services:
 
   scheduler:
     image: curlimages/curl:8.7.1
-    container_name: banking-scheduler
     depends_on:
       backend:
         condition: service_healthy

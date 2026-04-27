@@ -18,6 +18,7 @@ cp backend/.env.example backend/.env
 ```
 
 2. Fill required backend values in `backend/.env`:
+- `JWT_SECRET` (must not be default placeholder)
 - `SUPABASE_URL`
 - `SUPABASE_SERVICE_ROLE_KEY`
 - `TRANSFER_RUNNER_SECRET`
@@ -45,27 +46,68 @@ Services:
 
 The `seed` service runs automatically once and creates/updates demo data.
 
-## Tester Account (Seeded)
+## Fixed Tester Credentials (Seeded)
 
-By default, compose seeds this tester login:
+Use this exact account for QA/review:
 - Email: `demo.tester@example.com`
 - Password: `DemoPass123!`
 
 Seeded data includes:
-- Multiple accounts (checking/savings/credit) with balances
+- Checking/Savings/Credit accounts with balances
 - Payee and bill pay sample
 - Deposit sample
-- Transfer/external-transfer sample
-- A recipient account for member-transfer flow
+- External account
+- Member transfer plan with recipient user
 
-You can override seed credentials in `backend/.env`:
-- `DEMO_TEST_EMAIL`
-- `DEMO_TEST_PASSWORD`
-- `DEMO_RECIPIENT_EMAIL`
-- `DEMO_RECIPIENT_PASSWORD`
+You can disable seeding by setting `SEED_DEMO_DATA=false` in `backend/.env`.
 
-Disable seeding by setting:
-- `SEED_DEMO_DATA=false`
+## Tester Walkthrough Checklist
+
+1. Sign in as `demo.tester@example.com`
+2. Verify account cards render (checking/savings/credit)
+3. Open transaction history and confirm entries exist
+4. Create a transfer from checking to savings
+5. Create a bill payment to seeded payee
+6. Create an external transfer to seeded external account
+7. Open deposits and submit a new ATM/check deposit
+8. Open member transfers and confirm seeded plan exists
+
+## Clean-Clone Smoke Test
+
+This command validates reproducibility from a fresh clone using only documented `.env.example` setup values:
+
+```bash
+SMOKE_SUPABASE_URL=https://your-project.supabase.co \
+SMOKE_SUPABASE_SERVICE_ROLE_KEY=your-service-role-key \
+SMOKE_SUPABASE_ANON_KEY=your-anon-key \
+SMOKE_TRANSFER_RUNNER_SECRET=replace-with-long-random-secret \
+./scripts/clean_clone_smoke_test.sh
+```
+
+It clones to a temporary directory, builds/starts compose, validates health, validates seed completion, runs seeded API checks, and tears down.
+
+## Test Suites
+
+Frontend:
+```bash
+cd frontend
+npm ci
+npm test
+```
+
+Backend (unit + integration-if-configured):
+```bash
+cd backend
+python -m pip install -r requirements-dev.txt
+pytest -q tests
+```
+
+## CI Checks
+
+GitHub Actions workflow (`.github/workflows/ci.yml`) runs:
+- Backend tests
+- Frontend tests + production build
+- Docker compose config validation + image builds
 
 ## Common Commands
 
@@ -84,15 +126,6 @@ Tail logs:
 docker compose logs -f backend frontend seed scheduler
 ```
 
-## Test Suites
+## Release Process
 
-Frontend:
-```bash
-cd frontend
-npm test
-```
-
-Backend (inside backend container):
-```bash
-docker exec banking-backend python -m pytest -q /app/tests
-```
+Follow [`docs/RELEASE_CHECKLIST.md`](docs/RELEASE_CHECKLIST.md) before submitting.
