@@ -14,6 +14,5 @@ export const supabaseAnonKey = anonKey;
 
 // Temporary debug: log app_metadata (including roles) to the console on load.
 supabase.auth.getSession().then(({ data }) => {
-  // eslint-disable-next-line no-console
   console.log('supabase app_metadata', data.session?.user?.app_metadata);
 });

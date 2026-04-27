@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import type { Session, User as SupabaseUser } from '@supabase/supabase-js';
-import { SESSION_KEY, readStorage, writeStorage } from '../../lib/storage';
+import { BACKEND_BOOT_ID_KEY, SESSION_KEY, readStorage, writeStorage } from '../../lib/storage';
 import { authService } from '../../lib/mockApi';
 import { supabase } from '../../lib/supabaseClient';
 import { apiRequest } from '../../lib/apiClient';
@@ -42,7 +42,27 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     let active = true;
 
+    const enforceRestartLogout = async () => {
+      try {
+        const health = await apiRequest<{ bootId?: string }>('/health', { auth: false });
+        const currentBootId = typeof health.bootId === 'string' ? health.bootId.trim() : '';
+        if (!currentBootId) return;
+
+        const previousBootId = readStorage<string | null>(BACKEND_BOOT_ID_KEY, null);
+        if (previousBootId && previousBootId !== currentBootId) {
+          await supabase.auth.signOut({ scope: 'local' });
+          writeStorage(SESSION_KEY, null);
+          if (!active) return;
+          setUser(null);
+        }
+        writeStorage(BACKEND_BOOT_ID_KEY, currentBootId);
+      } catch {
+        // Ignore health check failures and keep default auth behavior.
+      }
+    };
+
     const syncSession = async () => {
+      await enforceRestartLogout();
       const { data } = await supabase.auth.getSession();
       if (!active) return;
 

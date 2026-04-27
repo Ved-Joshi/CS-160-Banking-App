@@ -14,6 +14,7 @@ import { ProtectedRoute } from './ProtectedRoute';
 import { AdminRoute } from './AdminRoute';
 import { AdminPage } from '../features/admin/AdminPage';
 import { AdminAccountsPage } from '../features/admin/AdminAccountsPage';
+import { AdminReportsPage } from '../features/admin/AdminReportsPage';
 
 export const router = createBrowserRouter([
   { path: '/', element: <WelcomePage /> },
@@ -49,6 +50,7 @@ export const router = createBrowserRouter([
     children: [
       { path: '/admin', element: <AdminPage /> },
       { path: '/admin/accounts', element: <AdminAccountsPage /> },
+      { path: '/admin/reports', element: <AdminReportsPage /> },
     ],
   },
 ]);
