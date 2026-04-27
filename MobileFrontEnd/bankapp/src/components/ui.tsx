@@ -127,7 +127,17 @@ export function Row({ title, subtitle, right, onPress }: { title: string; subtit
     </View>
   );
 
-  return onPress ? <Pressable onPress={onPress}>{body}</Pressable> : body;
+  return onPress ? (
+    <Pressable
+      onPress={onPress}
+      accessibilityRole="button"
+      style={({ pressed }) => [styles.rowPressable, pressed && styles.rowPressablePressed]}
+    >
+      {body}
+    </Pressable>
+  ) : (
+    body
+  );
 }
 
 const styles = StyleSheet.create({
@@ -185,6 +195,12 @@ const styles = StyleSheet.create({
     gap: 12,
     paddingVertical: 8,
   },
+  rowPressable: {
+    borderRadius: 14,
+    marginHorizontal: -6,
+    paddingHorizontal: 6,
+  },
+  rowPressablePressed: { backgroundColor: "rgba(16,35,59,0.06)" },
   rowTextWrap: { flex: 1, gap: 2 },
   rowTitle: { color: colors.text, fontWeight: "700" },
   rowSubtitle: { color: colors.muted, fontSize: 13 },

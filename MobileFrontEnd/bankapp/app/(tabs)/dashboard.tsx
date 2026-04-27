@@ -1,6 +1,6 @@
 import { useFocusEffect } from "@react-navigation/native";
 import { useRouter } from "expo-router";
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { StyleSheet, Text, View } from "react-native";
 import { Card, LinkButton, PageHeader, Screen, StatusChip } from "../../src/components/ui";
 import { formatCurrency, formatDate } from "../../src/lib/format";
@@ -13,13 +13,18 @@ const DASHBOARD_MIN_REFRESH_MS = 15_000;
 export default function DashboardScreen() {
   const router = useRouter();
   const { accounts, loading: accountsLoading, refresh: refreshAccounts } = useAccounts();
-  const { transactions, refresh: refreshTransactions } = useTransactions();
+  const { transactions, refresh: refreshTransactions } = useTransactions({ limit: 25 });
   const { payments, refresh: refreshPayments } = useBillPayments();
   const { deposits, refresh: refreshDeposits } = useDeposits();
   const { user } = useAuth();
   const [refreshing, setRefreshing] = useState(false);
   const refreshingRef = useRef(false);
   const lastRefreshMsRef = useRef(0);
+
+  useEffect(() => {
+    // Hooks already auto-fetch on mount; avoid immediately double-fetching via focus refresh.
+    lastRefreshMsRef.current = Date.now();
+  }, []);
 
   const onRefresh = useCallback(async () => {
     if (refreshingRef.current) return;

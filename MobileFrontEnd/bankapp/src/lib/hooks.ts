@@ -16,11 +16,16 @@ import type {
   ExternalTransferSubmissionResult,
 } from "../types";
 import * as api from "./api";
+import { buildUserCacheKey, loadCache, saveCache } from "./cache";
+
+const DASHBOARD_CACHE_TTL_MS = 10 * 60_000;
 
 export function useAccounts() {
   const [accounts, setAccounts] = useState<BankAccount[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const hydratedRef = useRef(false);
+  const cacheKeyRef = useRef<string | null>(null);
 
   const mountedRef = useRef(true);
   useEffect(() => {
@@ -30,12 +35,31 @@ export function useAccounts() {
     };
   }, []);
 
+  useEffect(() => {
+    void (async () => {
+      const userId = await api.getCacheUserId();
+      const key = buildUserCacheKey(userId, "accounts");
+      cacheKeyRef.current = key;
+      const cached = await loadCache<BankAccount[]>(key, DASHBOARD_CACHE_TTL_MS);
+      if (cached && mountedRef.current) {
+        setAccounts(cached);
+        hydratedRef.current = true;
+        setLoading(false);
+      }
+    })();
+  }, []);
+
   const refresh = useCallback(async () => {
     try {
-      setLoading(true);
+      if (!hydratedRef.current) setLoading(true);
       setError(null);
       const data = await api.fetchAccounts();
-      if (mountedRef.current) setAccounts(data);
+      if (mountedRef.current) {
+        setAccounts(data);
+        hydratedRef.current = true;
+      }
+      const cacheKey = cacheKeyRef.current;
+      if (cacheKey) void saveCache(cacheKey, data);
     } catch (err) {
       if (mountedRef.current) setError(err instanceof Error ? err.message : "Failed to load accounts");
     } finally {
@@ -122,10 +146,16 @@ export function useProfile() {
   return { profile, loading, error, refresh, update };
 }
 
-export function useTransactions(accountId?: string) {
+export function useTransactions(
+  accountIdOrOptions?: string | { accountId?: string; limit?: number }
+) {
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const hydratedRef = useRef(false);
+  const cacheKeyRef = useRef<string | null>(null);
+  const accountId = typeof accountIdOrOptions === "string" ? accountIdOrOptions : accountIdOrOptions?.accountId;
+  const limit = typeof accountIdOrOptions === "string" ? undefined : accountIdOrOptions?.limit;
 
   const mountedRef = useRef(true);
   useEffect(() => {
@@ -135,18 +165,37 @@ export function useTransactions(accountId?: string) {
     };
   }, []);
 
+  useEffect(() => {
+    void (async () => {
+      const userId = await api.getCacheUserId();
+      const key = buildUserCacheKey(userId, `transactions:${accountId ?? "all"}:limit:${limit ?? "default"}`);
+      cacheKeyRef.current = key;
+      const cached = await loadCache<Transaction[]>(key, DASHBOARD_CACHE_TTL_MS);
+      if (cached && mountedRef.current) {
+        setTransactions(cached);
+        hydratedRef.current = true;
+        setLoading(false);
+      }
+    })();
+  }, [accountId, limit]);
+
   const refresh = useCallback(async () => {
     try {
-      setLoading(true);
+      if (!hydratedRef.current) setLoading(true);
       setError(null);
-      const data = await api.fetchTransactions(accountId);
-      if (mountedRef.current) setTransactions(data);
+      const data = await api.fetchTransactions({ accountId, limit });
+      if (mountedRef.current) {
+        setTransactions(data);
+        hydratedRef.current = true;
+      }
+      const cacheKey = cacheKeyRef.current;
+      if (cacheKey) void saveCache(cacheKey, data);
     } catch (err) {
       if (mountedRef.current) setError(err instanceof Error ? err.message : "Failed to load transactions");
     } finally {
       if (mountedRef.current) setLoading(false);
     }
-  }, [accountId]);
+  }, [accountId, limit]);
 
   useEffect(() => {
     void refresh();
@@ -263,6 +312,8 @@ export function useBillPayments() {
   const [payments, setPayments] = useState<ScheduledPayment[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const hydratedRef = useRef(false);
+  const cacheKeyRef = useRef<string | null>(null);
 
   const mountedRef = useRef(true);
   useEffect(() => {
@@ -272,12 +323,31 @@ export function useBillPayments() {
     };
   }, []);
 
+  useEffect(() => {
+    void (async () => {
+      const userId = await api.getCacheUserId();
+      const key = buildUserCacheKey(userId, "bill-payments");
+      cacheKeyRef.current = key;
+      const cached = await loadCache<ScheduledPayment[]>(key, DASHBOARD_CACHE_TTL_MS);
+      if (cached && mountedRef.current) {
+        setPayments(cached);
+        hydratedRef.current = true;
+        setLoading(false);
+      }
+    })();
+  }, []);
+
   const refresh = useCallback(async () => {
     try {
-      setLoading(true);
+      if (!hydratedRef.current) setLoading(true);
       setError(null);
       const data = await api.fetchBillPayments();
-      if (mountedRef.current) setPayments(data);
+      if (mountedRef.current) {
+        setPayments(data);
+        hydratedRef.current = true;
+      }
+      const cacheKey = cacheKeyRef.current;
+      if (cacheKey) void saveCache(cacheKey, data);
     } catch (err) {
       if (mountedRef.current) setError(err instanceof Error ? err.message : "Failed to load bill payments");
     } finally {
@@ -371,6 +441,8 @@ export function useDeposits() {
   const [deposits, setDeposits] = useState<Deposit[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const hydratedRef = useRef(false);
+  const cacheKeyRef = useRef<string | null>(null);
 
   const mountedRef = useRef(true);
   useEffect(() => {
@@ -380,12 +452,31 @@ export function useDeposits() {
     };
   }, []);
 
+  useEffect(() => {
+    void (async () => {
+      const userId = await api.getCacheUserId();
+      const key = buildUserCacheKey(userId, "deposits");
+      cacheKeyRef.current = key;
+      const cached = await loadCache<Deposit[]>(key, DASHBOARD_CACHE_TTL_MS);
+      if (cached && mountedRef.current) {
+        setDeposits(cached);
+        hydratedRef.current = true;
+        setLoading(false);
+      }
+    })();
+  }, []);
+
   const refresh = useCallback(async () => {
     try {
-      setLoading(true);
+      if (!hydratedRef.current) setLoading(true);
       setError(null);
       const data = await api.fetchDeposits();
-      if (mountedRef.current) setDeposits(data);
+      if (mountedRef.current) {
+        setDeposits(data);
+        hydratedRef.current = true;
+      }
+      const cacheKey = cacheKeyRef.current;
+      if (cacheKey) void saveCache(cacheKey, data);
     } catch (err) {
       if (mountedRef.current) setError(err instanceof Error ? err.message : "Failed to load deposits");
     } finally {

@@ -1,3 +1,4 @@
+import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import { useMemo, useState } from "react";
 import { Alert, Modal, Pressable, Text, View } from "react-native";
@@ -156,7 +157,13 @@ export default function BillPayScreen() {
                   key={p.id}
                   title={p.name}
                   subtitle={`${p.category} • ${p.accountMask}`}
-                  right={p.id === payeeId ? <Text style={{ fontWeight: "800" }}>Selected</Text> : undefined}
+                  right={
+                    p.id === payeeId ? (
+                      <Ionicons name="checkmark-circle" size={20} color="#1f6b47" />
+                    ) : (
+                      <Ionicons name="chevron-forward" size={18} color="#6B7280" />
+                    )
+                  }
                   onPress={() => setPayeeId(p.id)}
                 />
               ))
@@ -171,7 +178,13 @@ export default function BillPayScreen() {
                   key={a.id}
                   title={a.nickname}
                   subtitle={`${a.type} ${a.maskedNumber} • Available ${formatCurrency(a.balances.availableBalance)}`}
-                  right={a.id === accountId ? <Text style={{ fontWeight: "800" }}>Selected</Text> : undefined}
+                  right={
+                    a.id === accountId ? (
+                      <Ionicons name="checkmark-circle" size={20} color="#1f6b47" />
+                    ) : (
+                      <Ionicons name="chevron-forward" size={18} color="#6B7280" />
+                    )
+                  }
                   onPress={() => setAccountId(a.id)}
                 />
               ))

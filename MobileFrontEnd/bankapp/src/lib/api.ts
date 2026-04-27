@@ -60,6 +60,11 @@ function resolveApiUrl(): string {
 
 const API_URL = resolveApiUrl();
 
+const SESSION_CACHE_MS = 2_000;
+let cachedSessionToken: string | null = null;
+let cachedSessionUserId: string | null = null;
+let cachedSessionAtMs = 0;
+
 function createIdempotencyKey(): string {
   if (typeof globalThis.crypto?.randomUUID === "function") return globalThis.crypto.randomUUID();
   return `mobile-${Date.now()}-${Math.random().toString(16).slice(2)}-${Math.random().toString(16).slice(2)}`;
@@ -73,21 +78,52 @@ async function readApiErrorMessage(response: Response, fallback: string): Promis
     const detail = data?.detail ?? data?.message ?? data;
     if (typeof detail === "string") return detail;
     if (typeof detail?.message === "string") return detail.message;
+    const message = typeof detail?.message === "string" ? detail.message : typeof data?.message === "string" ? data.message : null;
+    const reasons = Array.isArray(detail?.reasons) ? detail.reasons.filter((r: any) => typeof r === "string" && r.trim()) : [];
+    if (message && reasons.length) {
+      return `${message}\n${reasons.map((r: string) => `• ${r}`).join("\n")}`;
+    }
     return JSON.stringify(detail);
   } catch {
     return text;
   }
 }
 
-// Helper to get authorization header with session token
-async function getAuthHeader(): Promise<{ Authorization: string }> {
+async function getCachedSessionInfo(): Promise<{ accessToken: string; userId: string }> {
+  const now = Date.now();
+  if (cachedSessionToken && cachedSessionUserId && now - cachedSessionAtMs < SESSION_CACHE_MS) {
+    return { accessToken: cachedSessionToken, userId: cachedSessionUserId };
+  }
+
   const { data, error } = await supabase.auth.getSession();
-  if (error || !data.session?.access_token) {
+  if (error || !data.session?.access_token || !data.session.user?.id) {
+    cachedSessionToken = null;
+    cachedSessionUserId = null;
+    cachedSessionAtMs = now;
     throw new Error("No valid session. Please log in.");
   }
+
+  cachedSessionToken = data.session.access_token;
+  cachedSessionUserId = data.session.user.id;
+  cachedSessionAtMs = now;
+  return { accessToken: cachedSessionToken, userId: cachedSessionUserId };
+}
+
+// Helper to get authorization header with session token
+async function getAuthHeader(): Promise<{ Authorization: string }> {
+  const { accessToken } = await getCachedSessionInfo();
   return {
-    Authorization: `Bearer ${data.session.access_token}`,
+    Authorization: `Bearer ${accessToken}`,
   };
+}
+
+export async function getCacheUserId(): Promise<string | null> {
+  try {
+    const info = await getCachedSessionInfo();
+    return info.userId;
+  } catch {
+    return null;
+  }
 }
 
 // ============= ACCOUNTS =============
@@ -179,10 +215,19 @@ export async function updateProfile(input: UpdateCustomerProfileInput): Promise<
 }
 
 // ============= TRANSACTIONS =============
-export async function fetchTransactions(accountId?: string): Promise<Transaction[]> {
+export async function fetchTransactions(
+  accountIdOrOptions?: string | { accountId?: string; limit?: number }
+): Promise<Transaction[]> {
   const headers = await getAuthHeader();
-  const params = accountId ? `?account_id=${accountId}` : "";
-  const response = await fetch(`${API_URL}/api/transactions${params}`, { headers });
+  const accountId = typeof accountIdOrOptions === "string" ? accountIdOrOptions : accountIdOrOptions?.accountId;
+  const limit = typeof accountIdOrOptions === "string" ? undefined : accountIdOrOptions?.limit;
+
+  const params = new URLSearchParams();
+  if (accountId) params.append("account_id", accountId);
+  if (limit !== undefined) params.append("limit", limit.toString());
+  const query = params.toString();
+
+  const response = await fetch(`${API_URL}/api/transactions${query ? `?${query}` : ""}`, { headers });
   if (!response.ok) throw new Error("Failed to fetch transactions");
   
   const data = await response.json();
