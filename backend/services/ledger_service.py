@@ -177,6 +177,21 @@ async def get_or_create_deposit_clearing_ledger_account() -> dict:
     )
 
 
+async def get_or_create_bank_vault_cash_ledger_account() -> dict:
+    """
+    Ensure the bank-owned cash ledger account exists.
+
+    ATM withdrawals post against bank vault cash, so the backend checks this
+    account exists before calling the withdrawal RPC.
+    """
+    return await _get_or_create_bank_ledger_account(
+        ledger_code="BANK_VAULT_CASH",
+        name="Bank Vault Cash",
+        account_class="asset",
+        normal_balance="debit",
+    )
+
+
 async def ensure_ledger_accounts_for_transfer(
     from_account: dict,
     to_account: dict,
