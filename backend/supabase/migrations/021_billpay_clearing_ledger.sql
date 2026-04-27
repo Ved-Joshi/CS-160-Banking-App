@@ -224,7 +224,8 @@ begin
     type,
     title,
     body,
-    created_at
+    created_at,
+    bill_payment_id
   )
   values (
     p_user_id,
@@ -234,7 +235,8 @@ begin
       'Your bill payment of $%s has completed.',
       to_char((p_amount_cents::numeric / 100.0), 'FM999999990.00')
     ),
-    effective_ts
+    effective_ts,
+    payment_row.id
   );
 
   return query
