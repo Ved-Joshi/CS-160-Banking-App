@@ -59,18 +59,28 @@ echo "Starting frontend on http://localhost:5173"
 FRONTEND_PID=$!
 
 if [[ -n "$RUNNER_SECRET" ]]; then
-  echo "Starting internal scheduler runner loop (60s interval)"
+echo "Starting internal scheduler runner loop (check deposits every 10s; upload cleanup + others every 60s)"
   (
+    tick=0
     while true; do
-      curl -fsS -X POST "http://localhost:8000/internal/jobs/process-transfer-plans?limit=50" \
+      curl -fsS -X POST "http://localhost:8000/internal/jobs/process-pending-check-deposits?limit=50" \
         -H "X-Runner-Secret: $RUNNER_SECRET" >/dev/null || true
-      curl -fsS -X POST "http://localhost:8000/internal/jobs/process-member-transfer-plans?limit=50" \
-        -H "X-Runner-Secret: $RUNNER_SECRET" >/dev/null || true
-      curl -fsS -X POST "http://localhost:8000/internal/jobs/process-external-transfers?limit=50" \
-        -H "X-Runner-Secret: $RUNNER_SECRET" >/dev/null || true
-      curl -fsS -X POST "http://localhost:8000/internal/jobs/process-bill-payments?limit=50" \
-        -H "X-Runner-Secret: $RUNNER_SECRET" >/dev/null || true
-      sleep 60
+
+      if [[ "$tick" -eq 0 ]]; then
+        curl -fsS -X POST "http://localhost:8000/internal/jobs/cleanup-orphaned-deposit-uploads?limit=100" \
+          -H "X-Runner-Secret: $RUNNER_SECRET" >/dev/null || true
+        curl -fsS -X POST "http://localhost:8000/internal/jobs/process-transfer-plans?limit=50" \
+          -H "X-Runner-Secret: $RUNNER_SECRET" >/dev/null || true
+        curl -fsS -X POST "http://localhost:8000/internal/jobs/process-member-transfer-plans?limit=50" \
+          -H "X-Runner-Secret: $RUNNER_SECRET" >/dev/null || true
+        curl -fsS -X POST "http://localhost:8000/internal/jobs/process-external-transfers?limit=50" \
+          -H "X-Runner-Secret: $RUNNER_SECRET" >/dev/null || true
+        curl -fsS -X POST "http://localhost:8000/internal/jobs/process-bill-payments?limit=50" \
+          -H "X-Runner-Secret: $RUNNER_SECRET" >/dev/null || true
+      fi
+
+      tick=$(( (tick + 1) % 6 ))
+      sleep 10
     done
   ) &
   SCHEDULER_PID=$!

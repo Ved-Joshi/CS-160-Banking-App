@@ -425,7 +425,7 @@ async def _set_payment_failure_notification(
                 "body": body,
             },
         )
-    except HTTPException:
+    except HTTPException as exc:
         if exc.status_code == status.HTTP_409_CONFLICT:
             return
         return

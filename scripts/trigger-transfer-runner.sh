@@ -24,8 +24,12 @@ LEGACY_RESPONSE="$(curl -sS -X POST "$RUNNER_BASE/process-transfer-plans?limit=1
 MEMBER_RESPONSE="$(curl -sS -X POST "$RUNNER_BASE/process-member-transfer-plans?limit=100" -H "X-Runner-Secret: $SECRET")"
 EXTERNAL_RESPONSE="$(curl -sS -X POST "$RUNNER_BASE/process-external-transfers?limit=100" -H "X-Runner-Secret: $SECRET")"
 BILL_PAY_RESPONSE="$(curl -sS -X POST "$RUNNER_BASE/process-bill-payments?limit=100" -H "X-Runner-Secret: $SECRET")"
+CHECK_DEPOSIT_RESPONSE="$(curl -sS -X POST "$RUNNER_BASE/process-pending-check-deposits?limit=100" -H "X-Runner-Secret: $SECRET")"
+UPLOAD_CLEANUP_RESPONSE="$(curl -sS -X POST "$RUNNER_BASE/cleanup-orphaned-deposit-uploads?limit=100" -H "X-Runner-Secret: $SECRET")"
 
 echo "[$(NOW)] process-transfer-plans: $LEGACY_RESPONSE"
 echo "[$(NOW)] process-member-transfer-plans: $MEMBER_RESPONSE"
 echo "[$(NOW)] process-external-transfers: $EXTERNAL_RESPONSE"
 echo "[$(NOW)] process-bill-payments: $BILL_PAY_RESPONSE"
+echo "[$(NOW)] process-pending-check-deposits: $CHECK_DEPOSIT_RESPONSE"
+echo "[$(NOW)] cleanup-orphaned-deposit-uploads: $UPLOAD_CLEANUP_RESPONSE"

@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Header, HTTPException, status
 
 from config import settings
+from services.deposit_service import cleanup_expired_deposit_uploads, process_due_check_deposits
 from services.payment_service import process_due_bill_payments
 from services.transfer_service import (
     process_due_external_transfers,
@@ -64,3 +65,23 @@ async def run_due_external_transfers(
     _authorize_runner(x_runner_secret)
     bounded_limit = max(1, min(limit, 250))
     return await process_due_external_transfers(batch_size=bounded_limit)
+
+
+@router.post("/process-pending-check-deposits")
+async def run_due_check_deposits(
+    x_runner_secret: str | None = Header(default=None),
+    limit: int = 50,
+) -> dict[str, int]:
+    _authorize_runner(x_runner_secret)
+    bounded_limit = max(1, min(limit, 250))
+    return await process_due_check_deposits(batch_size=bounded_limit)
+
+
+@router.post("/cleanup-orphaned-deposit-uploads")
+async def run_orphaned_deposit_upload_cleanup(
+    x_runner_secret: str | None = Header(default=None),
+    limit: int = 100,
+) -> dict[str, int]:
+    _authorize_runner(x_runner_secret)
+    bounded_limit = max(1, min(limit, 500))
+    return await cleanup_expired_deposit_uploads(batch_size=bounded_limit)
