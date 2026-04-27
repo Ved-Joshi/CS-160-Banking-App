@@ -7,6 +7,7 @@ from routers.admin import router as admin_router
 from routers.me_admin import router as me_admin_router
 from routers import accounts
 from routers.internal_jobs import router as internal_jobs_router
+from utils.rate_limit import GlobalRateLimitMiddleware
 
 
 app = FastAPI(
@@ -22,6 +23,12 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+)
+
+app.add_middleware(
+    GlobalRateLimitMiddleware,
+    requests_per_window=settings.RATE_LIMIT_REQUESTS_PER_WINDOW,
+    window_seconds=settings.RATE_LIMIT_WINDOW_SECONDS,
 )
 
 def custom_openapi():
