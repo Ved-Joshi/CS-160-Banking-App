@@ -3,6 +3,7 @@ import type {
   AtmSearchInput,
   AtmSearchResponse,
   BankAccount,
+  CreateAtmWithdrawalInput,
   CreateBankAccountInput,
   CreateDepositInput,
   CreateDepositUploadUrlsInput,
@@ -20,6 +21,7 @@ import type {
   UpdateScheduledPaymentInput,
   CustomerProfile,
   Deposit,
+  AtmWithdrawalResult,
   DepositUploadUrls,
   MemberTransferPlan,
   MemberTransferRecipient,
@@ -154,21 +156,28 @@ export const depositsService = {
       body: input,
     });
   },
-  create(
-    input: CreateDepositInput & {
-      frontImagePath?: string;
-      backImagePath?: string;
-      depositType?: CreateDepositInput['depositType'];
-    },
-  ): Promise<Deposit> {
+  create(input: CreateDepositInput): Promise<Deposit> {
     const payload: CreateDepositInput = {
       accountId: input.accountId,
       amount: input.amount,
-      depositType: input.depositType ?? 'check',
+      depositMethod: input.depositMethod,
+      depositType: input.depositType,
+      frontImagePath: input.frontImagePath,
+      backImagePath: input.backImagePath,
     };
     return apiRequest('/api/deposits', {
       method: 'POST',
       body: payload,
+      headers: { 'Idempotency-Key': createIdempotencyKey() },
+    });
+  },
+};
+
+export const withdrawalsService = {
+  submitAtm(input: CreateAtmWithdrawalInput): Promise<AtmWithdrawalResult> {
+    return apiRequest<AtmWithdrawalResult>('/api/withdrawals/atm', {
+      method: 'POST',
+      body: input,
     });
   },
 };

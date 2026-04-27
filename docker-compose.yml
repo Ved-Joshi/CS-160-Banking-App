@@ -49,10 +49,16 @@ services:
           echo "TRANSFER_RUNNER_SECRET is not set; scheduler is idle."
           tail -f /dev/null
         fi
+        tick=0
         while true; do
-          curl -fsS -X POST "http://backend:8000/internal/jobs/process-transfer-plans?limit=50" -H "X-Runner-Secret: $$TRANSFER_RUNNER_SECRET" >/dev/null || true
-          curl -fsS -X POST "http://backend:8000/internal/jobs/process-member-transfer-plans?limit=50" -H "X-Runner-Secret: $$TRANSFER_RUNNER_SECRET" >/dev/null || true
-          curl -fsS -X POST "http://backend:8000/internal/jobs/process-external-transfers?limit=50" -H "X-Runner-Secret: $$TRANSFER_RUNNER_SECRET" >/dev/null || true
-          curl -fsS -X POST "http://backend:8000/internal/jobs/process-bill-payments?limit=50" -H "X-Runner-Secret: $$TRANSFER_RUNNER_SECRET" >/dev/null || true
-          sleep 60
+          curl -fsS -X POST "http://backend:8000/internal/jobs/process-pending-check-deposits?limit=50" -H "X-Runner-Secret: $$TRANSFER_RUNNER_SECRET" >/dev/null || true
+          if [ $$((tick % 6)) -eq 0 ]; then
+            curl -fsS -X POST "http://backend:8000/internal/jobs/cleanup-orphaned-deposit-uploads?limit=100" -H "X-Runner-Secret: $$TRANSFER_RUNNER_SECRET" >/dev/null || true
+            curl -fsS -X POST "http://backend:8000/internal/jobs/process-transfer-plans?limit=50" -H "X-Runner-Secret: $$TRANSFER_RUNNER_SECRET" >/dev/null || true
+            curl -fsS -X POST "http://backend:8000/internal/jobs/process-member-transfer-plans?limit=50" -H "X-Runner-Secret: $$TRANSFER_RUNNER_SECRET" >/dev/null || true
+            curl -fsS -X POST "http://backend:8000/internal/jobs/process-external-transfers?limit=50" -H "X-Runner-Secret: $$TRANSFER_RUNNER_SECRET" >/dev/null || true
+            curl -fsS -X POST "http://backend:8000/internal/jobs/process-bill-payments?limit=50" -H "X-Runner-Secret: $$TRANSFER_RUNNER_SECRET" >/dev/null || true
+          fi
+          tick=$$((tick + 1))
+          sleep 10
         done
