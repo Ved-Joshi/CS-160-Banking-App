@@ -89,7 +89,6 @@ export const authService = {
         state: input.state,
         zip_code: input.zipCode,
         date_of_birth: input.dateOfBirth,
-        tax_identifier_raw: input.taxId,
       }),
     });
 

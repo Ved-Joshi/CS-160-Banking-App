@@ -71,7 +71,6 @@ export interface RegistrationInput {
   dateOfBirth: string;
   password: string;
   passwordConfirmation: string;
-  taxId: string;
 }
 
 export interface BalanceSummary {

@@ -13,7 +13,6 @@ type RegistrationPayload = {
   state: string;
   zip_code: string;
   date_of_birth: string;
-  tax_identifier_raw: string;
 };
 
 const FUNCTION_VERSION = "2026-03-23-1";
@@ -27,7 +26,6 @@ const REQUIRED_FIELDS: (keyof RegistrationPayload)[] = [
   "state",
   "zip_code",
   "date_of_birth",
-  "tax_identifier_raw",
 ];
 const ALLOWED_FIELDS = new Set<string>([
   "email",
@@ -41,7 +39,6 @@ const ALLOWED_FIELDS = new Set<string>([
   "state",
   "zip_code",
   "date_of_birth",
-  "tax_identifier_raw",
 ]);
 
 const corsHeaders = {
@@ -55,14 +52,6 @@ const json = (status: number, body: Record<string, unknown>) =>
     status,
     headers: { "Content-Type": "application/json", ...corsHeaders },
   });
-
-const getEnv = (key: string) => {
-  const value = Deno.env.get(key);
-  if (!value) {
-    throw new Error(`Missing ${key}`);
-  }
-  return value;
-};
 
 const getEnvAny = (keys: string[]) => {
   for (const key of keys) {
@@ -104,33 +93,9 @@ const isAdult = (dob: string) => {
   return date <= cutoff;
 };
 
-const stripDigits = (value: string) => value.replace(/\D/g, "");
 const normalizeOptionalName = (value?: string | null) => {
   const normalized = value?.trim() ?? "";
   return normalized === "" ? null : normalized;
-};
-
-const base64Encode = (bytes: Uint8Array) =>
-  btoa(String.fromCharCode(...bytes));
-
-const encryptTaxId = async (raw: string, keyB64: string) => {
-  const keyBytes = Uint8Array.from(atob(keyB64), (c) => c.charCodeAt(0));
-  if (keyBytes.length !== 32) {
-    throw new Error("ENCRYPTION_KEY_B64 must be 32 bytes (base64)");
-  }
-  const key = await crypto.subtle.importKey(
-    "raw",
-    keyBytes,
-    "AES-GCM",
-    false,
-    ["encrypt"],
-  );
-  const iv = crypto.getRandomValues(new Uint8Array(12));
-  const plaintext = new TextEncoder().encode(raw);
-  const ciphertext = new Uint8Array(
-    await crypto.subtle.encrypt({ name: "AES-GCM", iv }, key, plaintext),
-  );
-  return `${base64Encode(iv)}.${base64Encode(ciphertext)}`;
 };
 
 serve(async (req) => {
@@ -166,7 +131,6 @@ serve(async (req) => {
   const state = normalizeState(payload.state);
   const phone = normalizePhone(payload.mobile_phone_e164);
   const zip = normalizeZip(payload.zip_code);
-  const taxDigits = stripDigits(payload.tax_identifier_raw);
 
   if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
     return json(400, { ok: false, error: "Invalid email" });
@@ -183,9 +147,6 @@ serve(async (req) => {
   if (!isAdult(payload.date_of_birth)) {
     return json(400, { ok: false, error: "User must be at least 18" });
   }
-  if (taxDigits.length !== 9) {
-    return json(400, { ok: false, error: "Invalid tax identifier" });
-  }
 
   const token = req.headers.get("Authorization")?.replace("Bearer ", "");
   if (!token) {
@@ -194,11 +155,9 @@ serve(async (req) => {
 
   let supabaseUrl: string;
   let serviceRoleKey: string;
-  let encryptionKey: string;
   try {
     supabaseUrl = getEnvAny(["SB_URL", "SUPABASE_URL"]);
     serviceRoleKey = getEnvAny(["SB_SERVICE_ROLE_KEY", "SUPABASE_SERVICE_ROLE_KEY"]);
-    encryptionKey = getEnv("REGISTRATION_ENCRYPTION_KEY_B64");
   } catch (err) {
     return json(500, { ok: false, error: (err as Error).message });
   }
@@ -226,8 +185,6 @@ serve(async (req) => {
     return json(409, { ok: false, error: "Profile already exists" });
   }
 
-  const taxCiphertext = await encryptTaxId(taxDigits, encryptionKey);
-  const taxLast4 = taxDigits.slice(-4);
   // MFA is disabled for this build; bypass any multi-factor enrollment requirement.
   const allowSkipMfa = true;
 
@@ -257,20 +214,6 @@ serve(async (req) => {
       return json(409, { ok: false, error: "Phone already exists" });
     }
     return json(400, { ok: false, error: profileError.message });
-  }
-
-  const { error: privateError } = await supabaseAdmin
-    .from("customer_private")
-    .insert({
-      user_id: user.id,
-      tax_identifier_ciphertext: taxCiphertext,
-      tax_identifier_last4: taxLast4,
-      encryption_key_version: 1,
-    });
-
-  if (privateError) {
-    await supabaseAdmin.from("profiles").delete().eq("id", user.id);
-    return json(400, { ok: false, error: privateError.message });
   }
 
   return json(200, { ok: true, profile: profileRows });
