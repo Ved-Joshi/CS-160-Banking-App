@@ -8,7 +8,7 @@ import { Button, Card, Dialog, EmptyState, Field, InlineAlert, PageHeader, Statu
 import { accountsService, transactionsService } from '../../lib/bankingApi';
 import { formatCurrency, formatDate } from '../../lib/format';
 import { queryKeys } from '../../lib/queryKeys';
-import type { AccountType } from '../../types/banking';
+import type { AccountType, BankAccount } from '../../types/banking';
 
 const createAccountSchema = z.object({
   nickname: z.string().min(2, 'Nickname must be at least 2 characters.').max(80),
@@ -80,6 +80,20 @@ export function AccountsPage() {
   const navigationState = location.state as AccountsNavigationState;
   const [banner] = useState<BannerState>(() => buildAccountsBanner(navigationState));
   const [highlightedAccountId] = useState<string | null>(() => navigationState?.createdAccountId ?? null);
+  const [closeTarget, setCloseTarget] = useState<BankAccount | null>(null);
+  const [closeError, setCloseError] = useState<string | null>(null);
+  const queryClient = useQueryClient();
+  const closeAccount = useMutation({
+    mutationFn: accountsService.close,
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ['accounts'] });
+      setCloseTarget(null);
+      setCloseError(null);
+    },
+    onError: (error) => {
+      setCloseError(error instanceof Error ? error.message : 'Unable to close account.');
+    },
+  });
   const {
     data: accounts = [],
     error: accountsError,
@@ -115,6 +129,83 @@ export function AccountsPage() {
           {accountsError instanceof Error ? accountsError.message : 'Something went wrong while loading your accounts.'}
         </InlineAlert>
       ) : null}
+      <Dialog
+        actions={(
+          <>
+            <Button
+              onClick={() => {
+                if (closeAccount.isPending) return;
+                setCloseTarget(null);
+                setCloseError(null);
+              }}
+              type="button"
+              variant="secondary"
+            >
+              Cancel
+            </Button>
+            <Button
+              disabled={closeAccount.isPending || !closeTarget?.canClose}
+              onClick={() => {
+                if (!closeTarget) return;
+                void closeAccount.mutateAsync(closeTarget.id);
+              }}
+              type="button"
+              variant="destructive"
+            >
+              {closeAccount.isPending ? 'Closing account...' : 'Confirm close'}
+            </Button>
+          </>
+        )}
+        description={
+          closeTarget?.canClose
+            ? 'This removes the account from your active dashboard. You will keep the historical record, but the account can no longer be used for new activity.'
+            : 'This account cannot be closed yet. Review the blocking reason below.'
+        }
+        onClose={() => {
+          if (closeAccount.isPending) return;
+          setCloseTarget(null);
+          setCloseError(null);
+        }}
+        open={Boolean(closeTarget)}
+        title={closeTarget ? `Close ${closeTarget.nickname}?` : 'Close account'}
+      >
+        {closeTarget ? (
+          <div className="stack-sm">
+            {closeError ? (
+              <InlineAlert title="Unable to close account" tone="warning">
+                {closeError}
+              </InlineAlert>
+            ) : null}
+            {!closeTarget.canClose ? (
+              <InlineAlert title="Account not eligible for closure" tone="warning">
+                {closeTarget.closeReasons[0] ?? 'This account still has blocking activity.'}
+              </InlineAlert>
+            ) : null}
+            <div className="summary-row">
+              <div className="summary-row__primary">
+                <strong>{closeTarget.nickname}</strong>
+                <span className="muted">{closeTarget.type} • {closeTarget.maskedNumber}</span>
+              </div>
+            </div>
+            <div className="summary-row">
+              <div className="summary-row__primary">
+                <strong>Available balance</strong>
+              </div>
+              <div className="summary-row__secondary">
+                <strong>{formatCurrency(closeTarget.balances.availableBalance)}</strong>
+              </div>
+            </div>
+            <div className="summary-row">
+              <div className="summary-row__primary">
+                <strong>Current balance</strong>
+              </div>
+              <div className="summary-row__secondary">
+                <strong>{formatCurrency(closeTarget.balances.currentBalance)}</strong>
+              </div>
+            </div>
+          </div>
+        ) : null}
+      </Dialog>
       {accountsLoading ? (
         <div className="grid-three">
           {Array.from({ length: 3 }).map((_, index) => (
@@ -165,9 +256,22 @@ export function AccountsPage() {
                 </dl>
                 <div className="account-card__footer">
                   <span className="muted">Opened {formatDate(account.openedAt)}</span>
-                  <Link className="text-link account-card__link" to={`/app/accounts/${account.id}`}>
-                    View activity
-                  </Link>
+                  <div className="account-card__actions">
+                    <Link className="text-link account-card__link" to={`/app/accounts/${account.id}`}>
+                      Manage
+                    </Link>
+                    <Button
+                      onClick={() => {
+                        setCloseError(null);
+                        setCloseTarget(account);
+                      }}
+                      type="button"
+                      variant="ghost"
+                      disabled={!account.canClose}
+                    >
+                      {account.canClose ? 'Close account' : 'Close unavailable'}
+                    </Button>
+                  </div>
                 </div>
               </div>
             </Card>
