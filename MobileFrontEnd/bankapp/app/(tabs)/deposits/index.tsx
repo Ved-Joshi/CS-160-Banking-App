@@ -1,5 +1,5 @@
 import { useRouter } from "expo-router";
-import { useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { Alert, Text, View } from "react-native";
 import { Button, Card, Field, PageHeader, Row, Screen, StatusChip } from "../../../src/components/ui";
 import { formatCurrency, formatDateTime } from "../../../src/lib/format";
@@ -37,8 +37,10 @@ async function getUploadMeta(uri: string, fallbackFileName: string) {
 export default function DepositsScreen() {
   const router = useRouter();
   const { accounts, loading: accountsLoading, refresh: refreshAccounts } = useAccounts();
-  const { deposits, loading: depositsLoading, submitDeposit, error: depositError } = useDeposits();
+  const { deposits, loading: depositsLoading, submitDeposit, error: depositError, refresh: refreshDeposits } = useDeposits();
   const { submit: submitWithdrawal, loading: withdrawalLoading, error: withdrawalError } = useAtmWithdrawals();
+  const [refreshing, setRefreshing] = useState(false);
+  const refreshingRef = useRef(false);
 
   const [activeTab, setActiveTab] = useState<"deposit" | "withdraw">("deposit");
 
@@ -57,6 +59,18 @@ export default function DepositsScreen() {
   const eligibleAccounts = accounts.filter(
     (a) => a.status === "Open" && (a.type === "Checking" || a.type === "Savings")
   );
+
+  const onRefresh = useCallback(async () => {
+    if (refreshingRef.current || submitting || withdrawing) return;
+    refreshingRef.current = true;
+    setRefreshing(true);
+    try {
+      await Promise.all([refreshAccounts(), refreshDeposits()]);
+    } finally {
+      setRefreshing(false);
+      refreshingRef.current = false;
+    }
+  }, [refreshAccounts, refreshDeposits, submitting, withdrawing]);
 
   const handleSubmitDeposit = async () => {
     if (!accountId || !amount) {
@@ -157,7 +171,7 @@ export default function DepositsScreen() {
   };
 
   return (
-    <Screen>
+    <Screen refreshing={refreshing} onRefresh={onRefresh}>
       <PageHeader
         title="Money In/Out"
         eyebrow="ATM banking"

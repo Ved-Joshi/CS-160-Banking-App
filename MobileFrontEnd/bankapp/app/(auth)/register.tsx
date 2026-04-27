@@ -8,6 +8,7 @@ import { colors } from "../../src/theme/colors";
 export default function RegisterScreen() {
   const router = useRouter();
   const { isAuthenticated, register } = useAuth();
+  const [submitting, setSubmitting] = useState(false);
   const [firstName, setFirstName] = useState("");
   const [middleName, setMiddleName] = useState("");
   const [lastName, setLastName] = useState("");
@@ -19,48 +20,47 @@ export default function RegisterScreen() {
   const [state, setState] = useState("");
   const [zipCode, setZipCode] = useState("");
   const [dateOfBirth, setDateOfBirth] = useState("");
-  const [taxId, setTaxId] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
 
-  if (isAuthenticated) {
+  if (isAuthenticated && !submitting) {
     return <Redirect href="/dashboard" />;
   }
 
   const onRegister = async () => {
+    setSubmitting(true);
     const phoneDigits = mobilePhone.replace(/\D/g, "");
-    const taxDigits = taxId.replace(/\D/g, "");
     const dob = new Date(dateOfBirth);
     const today = new Date();
     const adultCutoff = new Date(today.getFullYear() - 18, today.getMonth(), today.getDate());
 
     if (firstName.trim().length < 2 || lastName.trim().length < 2) {
       setError("Enter first and last name.");
+      setSubmitting(false);
       return;
     }
 
     if (!email.includes("@") || password.length < 8) {
       setError("Use a valid email and at least 8 characters for password.");
+      setSubmitting(false);
       return;
     }
 
     if (!/^[0-9]{10,15}$/.test(phoneDigits)) {
       setError("Enter a valid phone number.");
+      setSubmitting(false);
       return;
     }
 
     if (!streetAddress.trim() || !city.trim() || !/^[A-Z]{2}$/.test(state.trim().toUpperCase()) || !/^\d{5}(?:-\d{4})?$/.test(zipCode.trim())) {
       setError("Provide a valid address, city, state, and ZIP code.");
+      setSubmitting(false);
       return;
     }
 
     if (!dateOfBirth || Number.isNaN(dob.getTime()) || dob > adultCutoff) {
       setError("You must be at least 18 years old.");
-      return;
-    }
-
-    if (taxDigits.length !== 9) {
-      setError("Enter a valid 9-digit SSN or TIN.");
+      setSubmitting(false);
       return;
     }
 
@@ -76,16 +76,17 @@ export default function RegisterScreen() {
       state: state.trim().toUpperCase(),
       zipCode: zipCode.trim(),
       dateOfBirth: dateOfBirth.trim(),
-      taxId: taxDigits,
       password,
     });
 
     if (message) {
       setError(message);
+      setSubmitting(false);
       return;
     }
 
     setError("");
+    setSubmitting(false);
     router.replace("/dashboard");
   };
 
@@ -125,9 +126,8 @@ export default function RegisterScreen() {
           </View>
         </View>
         <Field label="Date of birth" placeholder="YYYY-MM-DD" value={dateOfBirth} onChangeText={setDateOfBirth} />
-        <Field label="SSN / Tax ID" placeholder="123-45-6789" value={taxId} onChangeText={setTaxId} />
         <Field label="Password" placeholder="At least 8 characters" value={password} onChangeText={setPassword} secureTextEntry />
-        <Button label="Create access" onPress={onRegister} />
+        <Button label={submitting ? "Creating access..." : "Create access"} onPress={onRegister} disabled={submitting} />
         <LinkButton label="Already enrolled? Sign in" onPress={() => router.push("/login")} />
       </Card>
     </Screen>

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Alert, Modal, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { Button, Card, Field, PageHeader, Row, Screen } from "../../src/components/ui";
 import { useAccounts, useExternalAccounts, useExternalTransfers, useMemberTransfers, useTransfers } from "../../src/lib/hooks";
@@ -131,6 +131,8 @@ export default function TransfersScreen() {
   const [externalRunTime, setExternalRunTime] = useState("09:00");
   const [externalEndDate, setExternalEndDate] = useState("");
   const [externalSubmitted, setExternalSubmitted] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const refreshingRef = useRef(false);
 
   const openAccounts = useMemo(() => accounts.filter((account) => account.status === "Open"), [accounts]);
   const checkingAccounts = useMemo(
@@ -298,14 +300,30 @@ export default function TransfersScreen() {
     }
   };
 
-  const handleLoadMemberPlans = async () => {
+  const handleLoadMemberPlans = useCallback(async () => {
     try {
       const plans = await fetchMemberPlans();
       setMemberPlans(Array.isArray(plans) ? plans : []);
     } catch (err) {
       Alert.alert("Error", err instanceof Error ? err.message : memberError || "Failed to load transfer plans");
     }
-  };
+  }, [fetchMemberPlans, memberError]);
+
+  const onRefresh = useCallback(async () => {
+    if (refreshingRef.current) return;
+    refreshingRef.current = true;
+    setRefreshing(true);
+    try {
+      await Promise.all([
+        refreshAccounts(),
+        refreshExternalAccounts(),
+        memberPlans.length ? handleLoadMemberPlans() : Promise.resolve(),
+      ]);
+    } finally {
+      setRefreshing(false);
+      refreshingRef.current = false;
+    }
+  }, [handleLoadMemberPlans, memberPlans.length, refreshAccounts, refreshExternalAccounts]);
 
   const handleCancelMemberPlan = async (planId: string) => {
     try {
@@ -437,7 +455,7 @@ export default function TransfersScreen() {
   };
 
   return (
-    <Screen>
+    <Screen refreshing={refreshing} onRefresh={onRefresh}>
       <PageHeader
         title="Transfers"
         eyebrow="Move money"

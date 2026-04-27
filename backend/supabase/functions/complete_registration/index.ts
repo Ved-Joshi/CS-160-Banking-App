@@ -183,7 +183,6 @@ serve(async (req) => {
     return json(409, { ok: false, error: "Profile already exists" });
   }
 
-  // MFA is disabled for this build; bypass any multi-factor enrollment requirement.
   const allowSkipMfa = true;
 
   const { error: profileError, data: profileRows } = await supabaseAdmin
@@ -202,7 +201,6 @@ serve(async (req) => {
       zip_code: zip,
       date_of_birth: payload.date_of_birth,
       onboarding_status: allowSkipMfa ? "active" : "mfa_pending",
-      mfa_required: !allowSkipMfa,
     })
     .select("id, email, first_name, middle_name, last_name, onboarding_status")
     .single();

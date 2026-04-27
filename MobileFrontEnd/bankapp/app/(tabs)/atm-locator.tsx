@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { Alert, Linking, Text, View } from "react-native";
 import { Button, Card, Field, PageHeader, Row, Screen, StatusChip } from "../../src/components/ui";
 import { searchATMs } from "../../src/lib/hooks";
@@ -39,6 +39,8 @@ export default function AtmLocatorScreen() {
   const [center, setCenter] = useState<AtmSearchCenter | null>(null);
   const [atms, setAtms] = useState<AtmLocation[]>([]);
   const [loading, setLoading] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const refreshingRef = useRef(false);
   const [locationState, setLocationState] = useState<"idle" | "requesting" | "ready" | "denied" | "unsupported" | "error">("idle");
 
   const filteredAtms = useMemo(() => {
@@ -47,7 +49,7 @@ export default function AtmLocatorScreen() {
     return atms.filter((atm) => atm.features.some((f) => f.toLowerCase().includes(feature)));
   }, [atms, featureFilter]);
 
-  const handleSearch = async () => {
+  const handleSearch = useCallback(async () => {
     const radiusMiles = clampInt(Number.parseInt(radiusText, 10) || 10, 1, 25);
     const limit = clampInt(Number.parseInt(limitText, 10) || 20, 1, 50);
 
@@ -82,7 +84,19 @@ export default function AtmLocatorScreen() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [limitText, lngText, mode, openNow, query, radiusText, latText]);
+
+  const onRefresh = useCallback(async () => {
+    if (refreshingRef.current || loading || (!center && !atms.length)) return;
+    refreshingRef.current = true;
+    setRefreshing(true);
+    try {
+      await handleSearch();
+    } finally {
+      setRefreshing(false);
+      refreshingRef.current = false;
+    }
+  }, [atms.length, center, loading, handleSearch]);
 
   const handleUseMyLocation = async () => {
     setLocationState("requesting");
@@ -118,7 +132,7 @@ export default function AtmLocatorScreen() {
   };
 
   return (
-    <Screen>
+    <Screen refreshing={refreshing} onRefresh={onRefresh}>
       <PageHeader
         title="ATM Locator"
         eyebrow="Partner network"
@@ -143,18 +157,6 @@ export default function AtmLocatorScreen() {
               disabled={loading}
             />
           </View>
-        </View>
-
-        <View style={{ marginTop: 10 }}>
-          <Button
-            label={locationState === "requesting" ? "Requesting location..." : "Use my location"}
-            variant="secondary"
-            onPress={handleUseMyLocation}
-            disabled={loading || locationState === "requesting"}
-          />
-          {locationState === "denied" ? (
-            <Text style={{ color: "#6B7280" }}>Location permission denied.</Text>
-          ) : null}
         </View>
 
         {mode === "query" ? (

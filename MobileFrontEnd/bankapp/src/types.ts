@@ -30,7 +30,6 @@ export interface RegistrationInput {
   state?: string;
   zipCode?: string;
   dateOfBirth?: string;
-  taxId?: string;
 }
 
 export interface CustomerProfile {

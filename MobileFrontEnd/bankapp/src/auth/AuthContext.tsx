@@ -16,6 +16,24 @@ type AuthContextValue = {
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
 
+async function readRegistrationError(response: Response): Promise<string> {
+  const raw = await response.text();
+  if (!raw) {
+    return response.statusText || "Unable to finish registration.";
+  }
+
+  try {
+    const payload = JSON.parse(raw) as Record<string, unknown>;
+    const detail = payload.error ?? payload.message ?? payload.detail ?? payload;
+    if (typeof detail === "string") {
+      return detail;
+    }
+    return JSON.stringify(detail);
+  } catch {
+    return raw;
+  }
+}
+
 function mapUser(user: SupabaseUser | null): User {
   if (!user) {
     throw new Error("Unable to find an authenticated Supabase user.");
@@ -104,7 +122,6 @@ export function AuthProvider({ children }: PropsWithChildren) {
         const state = input.state?.trim().toUpperCase() ?? "";
         const zipCode = input.zipCode?.trim() ?? "";
         const dateOfBirth = input.dateOfBirth?.trim() ?? "";
-        const taxId = input.taxId?.replace(/\D/g, "") ?? "";
 
         if (firstName.length < 2 || lastName.length < 2) {
           return "Enter first and last name.";
@@ -133,10 +150,6 @@ export function AuthProvider({ children }: PropsWithChildren) {
           return "You must be at least 18 years old.";
         }
 
-        if (taxId.length !== 9) {
-          return "Enter a valid 9-digit SSN or TIN.";
-        }
-
         const { data, error } = await supabase.auth.signUp({
           email,
           password,
@@ -153,7 +166,6 @@ export function AuthProvider({ children }: PropsWithChildren) {
               state,
               zipCode,
               dateOfBirth,
-              taxIdLast4: taxId.slice(-4),
             },
           },
         });
@@ -187,15 +199,14 @@ export function AuthProvider({ children }: PropsWithChildren) {
             state,
             zip_code: zipCode,
             date_of_birth: dateOfBirth,
-            tax_identifier_raw: taxId,
           }),
         });
 
         if (!completeResponse.ok) {
-          const payload = await completeResponse.json().catch(() => null);
-          return (
-            payload?.error || payload?.message || completeResponse.statusText || "Unable to finish registration."
-          );
+          const message = await readRegistrationError(completeResponse);
+          await supabase.auth.signOut();
+          setUser(null);
+          return `Registration completed in auth, but profile setup failed: ${message}`;
         }
 
         try {

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { useRouter } from "expo-router";
 import { Alert, Text } from "react-native";
 import { useAuth } from "../../src/auth/AuthContext";
@@ -10,7 +10,9 @@ import { useProfile } from "../../src/lib/hooks";
 export default function SettingsScreen() {
   const router = useRouter();
   const { signOut, user } = useAuth();
-  const { profile, loading: profileLoading, update } = useProfile();
+  const { profile, loading: profileLoading, update, refresh } = useProfile();
+  const [refreshing, setRefreshing] = useState(false);
+  const refreshingRef = useRef(false);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState({
     firstName: "",
@@ -28,6 +30,18 @@ export default function SettingsScreen() {
   const displayEmail = profile?.email || user?.email || "-";
   const displayPhone = profile?.phone || "-";
   const displayMemberSince = profile?.memberSince || "-";
+
+  const onRefresh = useCallback(async () => {
+    if (refreshingRef.current || editing) return;
+    refreshingRef.current = true;
+    setRefreshing(true);
+    try {
+      await refresh();
+    } finally {
+      setRefreshing(false);
+      refreshingRef.current = false;
+    }
+  }, [editing, refresh]);
 
   const handleStartEdit = () => {
     setDraft({
@@ -80,7 +94,7 @@ export default function SettingsScreen() {
   };
 
   return (
-    <Screen>
+    <Screen refreshing={refreshing} onRefresh={onRefresh}>
       <PageHeader title="Settings" eyebrow="Profile and security" subtitle="Review your profile details and manage your security preferences." />
       <Card>
         <Text style={{ fontWeight: "800", fontSize: 18 }}>Profile</Text>

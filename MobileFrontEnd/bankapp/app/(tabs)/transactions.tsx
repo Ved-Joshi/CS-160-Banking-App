@@ -1,17 +1,48 @@
-import { useMemo, useState } from "react";
+import { useFocusEffect } from "@react-navigation/native";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Text } from "react-native";
 import { Card, PageHeader, Row, Screen, SelectField, StatusChip } from "../../src/components/ui";
 import { formatCurrency, formatDate } from "../../src/lib/format";
 import { useTransactions, useAccounts } from "../../src/lib/hooks";
 import type { TransactionStatus, TransactionType } from "../../src/types";
 
+const TRANSACTIONS_MIN_REFRESH_MS = 15_000;
+
 export default function TransactionsScreen() {
   const [accountId, setAccountId] = useState<string | null>(null);
   const [type, setType] = useState<TransactionType | null>(null);
   const [status, setStatus] = useState<TransactionStatus | null>(null);
-  
-  const { accounts } = useAccounts();
-  const { transactions, loading } = useTransactions();
+  const [refreshing, setRefreshing] = useState(false);
+  const refreshingRef = useRef(false);
+  const lastRefreshMsRef = useRef(0);
+
+  const { accounts, refresh: refreshAccounts } = useAccounts();
+  const { transactions, loading, refresh: refreshTransactions } = useTransactions();
+
+  useEffect(() => {
+    lastRefreshMsRef.current = Date.now();
+  }, []);
+
+  const onRefresh = useCallback(async () => {
+    if (refreshingRef.current) return;
+    refreshingRef.current = true;
+    setRefreshing(true);
+    try {
+      await Promise.all([refreshAccounts(), refreshTransactions()]);
+      lastRefreshMsRef.current = Date.now();
+    } finally {
+      setRefreshing(false);
+      refreshingRef.current = false;
+    }
+  }, [refreshAccounts, refreshTransactions]);
+
+  useFocusEffect(
+    useCallback(() => {
+      const now = Date.now();
+      if (now - lastRefreshMsRef.current < TRANSACTIONS_MIN_REFRESH_MS) return;
+      void onRefresh();
+    }, [onRefresh])
+  );
 
   const accountOptions = useMemo(
     () => [
@@ -46,7 +77,7 @@ export default function TransactionsScreen() {
   );
 
   return (
-    <Screen>
+    <Screen refreshing={refreshing} onRefresh={onRefresh}>
       <PageHeader title="Transactions" eyebrow="Activity history" subtitle="Filter and review posted, pending, and failed account activity." />
       <Card>
         <SelectField label="Account" value={accountId} options={accountOptions} onChange={setAccountId} />

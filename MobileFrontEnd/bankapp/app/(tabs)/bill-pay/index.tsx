@@ -1,6 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { Alert, Modal, Pressable, Text, View } from "react-native";
 import { Button, Card, Field, LinkButton, PageHeader, Row, Screen, StatusChip } from "../../../src/components/ui";
 import { formatCurrency, formatDate } from "../../../src/lib/format";
@@ -11,9 +11,11 @@ const CADENCE_OPTIONS: ScheduledPayment["cadence"][] = ["Once", "Daily", "Weekly
 
 export default function BillPayScreen() {
   const router = useRouter();
-  const { payees, loading: payeesLoading } = usePayees();
-  const { payments, loading: paymentsLoading, createPayment, cancelPayment, retryPayment, updatePayment, error: paymentError } = useBillPayments();
-  const { accounts } = useAccounts();
+  const { payees, loading: payeesLoading, refresh: refreshPayees } = usePayees();
+  const { payments, loading: paymentsLoading, createPayment, cancelPayment, retryPayment, updatePayment, error: paymentError, refresh: refreshPayments } = useBillPayments();
+  const { accounts, refresh: refreshAccounts } = useAccounts();
+  const [refreshing, setRefreshing] = useState(false);
+  const refreshingRef = useRef(false);
 
   const [payeeId, setPayeeId] = useState("");
   const [accountId, setAccountId] = useState("");
@@ -27,6 +29,18 @@ export default function BillPayScreen() {
   const [editDeliverBy, setEditDeliverBy] = useState(new Date().toISOString().slice(0, 10));
 
   const openAccounts = useMemo(() => accounts.filter((a) => a.status === "Open"), [accounts]);
+
+  const onRefresh = useCallback(async () => {
+    if (refreshingRef.current) return;
+    refreshingRef.current = true;
+    setRefreshing(true);
+    try {
+      await Promise.all([refreshPayees(), refreshPayments(), refreshAccounts()]);
+    } finally {
+      setRefreshing(false);
+      refreshingRef.current = false;
+    }
+  }, [refreshAccounts, refreshPayees, refreshPayments]);
 
   const startEdit = (payment: ScheduledPayment) => {
     setEditingId(payment.id);
@@ -92,7 +106,7 @@ export default function BillPayScreen() {
   };
 
   return (
-    <Screen>
+    <Screen refreshing={refreshing} onRefresh={onRefresh}>
       <PageHeader
         title="Bill Pay"
         eyebrow="Scheduled payments"

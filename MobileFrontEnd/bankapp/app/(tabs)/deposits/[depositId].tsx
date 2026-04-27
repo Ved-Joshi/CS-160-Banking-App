@@ -1,5 +1,5 @@
 import { useLocalSearchParams } from "expo-router";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Text } from "react-native";
 import { Card, PageHeader, Row, Screen, StatusChip } from "../../../src/components/ui";
 import { formatCurrency, formatDateTime } from "../../../src/lib/format";
@@ -9,8 +9,22 @@ export default function DepositDetailScreen() {
   const { depositId } = useLocalSearchParams<{ depositId: string }>();
   const { deposits, loading, getDeposit } = useDeposits();
   const [loadingSingle, setLoadingSingle] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const refreshingRef = useRef(false);
   
   const deposit = useMemo(() => deposits.find((item) => item.id === depositId), [deposits, depositId]);
+
+  const onRefresh = useCallback(async () => {
+    if (!depositId || refreshingRef.current) return;
+    refreshingRef.current = true;
+    setRefreshing(true);
+    try {
+      await getDeposit(String(depositId));
+    } finally {
+      setRefreshing(false);
+      refreshingRef.current = false;
+    }
+  }, [depositId, getDeposit]);
 
   useEffect(() => {
     if (!depositId || deposit) return;
@@ -32,7 +46,7 @@ export default function DepositDetailScreen() {
 
   if (!deposit) {
     return (
-      <Screen>
+      <Screen refreshing={refreshing} onRefresh={onRefresh}>
         <Card>
           <Text style={{ fontWeight: "800" }}>Deposit not found</Text>
           <Text>The requested deposit could not be located.</Text>
@@ -42,7 +56,7 @@ export default function DepositDetailScreen() {
   }
 
   return (
-    <Screen>
+    <Screen refreshing={refreshing} onRefresh={onRefresh}>
       <PageHeader title={`Deposit ${deposit.id}`} eyebrow="Deposit tracking" subtitle="Follow review status and image submission details." />
       <Card>
         <Row title="Amount" right={<Text>{formatCurrency(deposit.amount)}</Text>} />

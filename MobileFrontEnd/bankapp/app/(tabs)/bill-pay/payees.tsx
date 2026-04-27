@@ -1,16 +1,30 @@
 import { Alert, Text } from "react-native";
 import { Button, Card, Field, PageHeader, Screen } from "../../../src/components/ui";
 import { usePayees } from "../../../src/lib/hooks";
-import { useState } from "react";
+import { useCallback, useRef, useState } from "react";
 
 export default function PayeesScreen() {
-  const { payees, loading, createPayee, error } = usePayees();
+  const { payees, loading, createPayee, error, refresh } = usePayees();
   const [name, setName] = useState("");
   const [category, setCategory] = useState("Utilities");
   const [routingNumber, setRoutingNumber] = useState("");
   const [accountNumber, setAccountNumber] = useState("");
   const [confirmAccountNumber, setConfirmAccountNumber] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const refreshingRef = useRef(false);
+
+  const onRefresh = useCallback(async () => {
+    if (refreshingRef.current || submitting) return;
+    refreshingRef.current = true;
+    setRefreshing(true);
+    try {
+      await refresh();
+    } finally {
+      setRefreshing(false);
+      refreshingRef.current = false;
+    }
+  }, [refresh, submitting]);
 
   const handleAddPayee = async () => {
     const payload = {
@@ -47,7 +61,7 @@ export default function PayeesScreen() {
   };
 
   return (
-    <Screen>
+    <Screen refreshing={refreshing} onRefresh={onRefresh}>
       <PageHeader title="Payees" eyebrow="Billing relationships" subtitle="Reference payees available for scheduled payments." />
       <Card>
         <Text style={{ fontWeight: "800", fontSize: 18 }}>Add payee</Text>
