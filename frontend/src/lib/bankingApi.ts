@@ -2,6 +2,7 @@ import type {
   AtmLocation,
   AtmSearchInput,
   AtmSearchResponse,
+  AdminAccountReportResponse,
   BankAccount,
   CreateAtmWithdrawalInput,
   CreateBankAccountInput,
@@ -88,6 +89,34 @@ export const accountsService = {
   close(accountId: string): Promise<void> {
     return apiRequest(`/api/accounts/${accountId}/close`, {
       method: 'POST',
+    });
+  },
+};
+
+export const adminReportsService = {
+  accountReport(filters: {
+    search?: string;
+    minBalance?: number;
+    maxBalance?: number;
+    zipCode?: string;
+    city?: string;
+    state?: string;
+    accountType?: string;
+    status?: string;
+    limit?: number;
+  } = {}): Promise<AdminAccountReportResponse> {
+    return apiRequest<AdminAccountReportResponse>('/api/admin/reports/accounts', {
+      query: {
+        search: filters.search,
+        min_balance: filters.minBalance,
+        max_balance: filters.maxBalance,
+        zip_code: filters.zipCode,
+        city: filters.city,
+        state: filters.state,
+        account_type: filters.accountType,
+        status: filters.status,
+        limit: filters.limit,
+      },
     });
   },
 };

@@ -1,4 +1,5 @@
 export const SESSION_KEY = 'sj-state-session';
+export const BACKEND_BOOT_ID_KEY = 'sj-backend-boot-id';
 
 export function readStorage<T>(key: string, fallback: T): T {
   const value = window.localStorage.getItem(key);

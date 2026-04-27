@@ -71,7 +71,6 @@ export interface RegistrationInput {
   dateOfBirth: string;
   password: string;
   passwordConfirmation: string;
-  taxId: string;
 }
 
 export interface BalanceSummary {
@@ -104,6 +103,37 @@ export interface BankAccount {
 export interface CreateBankAccountInput {
   nickname: string;
   type: AccountType;
+}
+
+export interface AdminAccountReportRow {
+  accountId: string;
+  customerId: string;
+  customerName: string;
+  customerEmail: string;
+  zipCode: string;
+  city: string;
+  state: string;
+  accountNickname: string;
+  accountType: AccountType;
+  accountStatus: 'Open' | 'Restricted';
+  openedAt: string;
+  currentBalance: number;
+  availableBalance: number;
+  maskedNumber: string;
+}
+
+export interface AdminAccountReportSummary {
+  totalAccounts: number;
+  distinctCustomers: number;
+  openAccounts: number;
+  restrictedAccounts: number;
+  totalCurrentBalance: number;
+  averageCurrentBalance: number;
+}
+
+export interface AdminAccountReportResponse {
+  rows: AdminAccountReportRow[];
+  summary: AdminAccountReportSummary;
 }
 
 export interface Transaction {

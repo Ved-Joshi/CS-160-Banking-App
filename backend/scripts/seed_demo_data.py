@@ -19,6 +19,8 @@ DEMO_TEST_EMAIL = os.getenv("DEMO_TEST_EMAIL", "demo.tester@example.com").strip(
 DEMO_TEST_PASSWORD = os.getenv("DEMO_TEST_PASSWORD", "DemoPass123!").strip()
 DEMO_RECIPIENT_EMAIL = os.getenv("DEMO_RECIPIENT_EMAIL", "demo.recipient@example.com").strip().lower()
 DEMO_RECIPIENT_PASSWORD = os.getenv("DEMO_RECIPIENT_PASSWORD", "DemoPass123!").strip()
+DEMO_MEMBER_TARGET_EMAIL = os.getenv("DEMO_MEMBER_TARGET_EMAIL", "behumble1907@gmail.com").strip().lower()
+DEMO_MEMBER_TARGET_PASSWORD = os.getenv("DEMO_MEMBER_TARGET_PASSWORD", "DemoPass123!").strip()
 
 
 @dataclass
@@ -69,8 +71,21 @@ def _create_or_login_user(client: httpx.Client, email: str, password: str) -> De
             headers=_admin_headers(),
             json={"email": email, "password": password, "email_confirm": True},
         )
-        if create_response.status_code >= 400 and "already been registered" not in create_response.text:
-            raise RuntimeError(f"Unable to create auth user {email}: {create_response.status_code} {create_response.text}")
+        if create_response.status_code >= 400:
+            create_error = create_response.text.lower()
+            if "already been registered" not in create_error and "already exists" not in create_error:
+                raise RuntimeError(
+                    f"Unable to create auth user {email}: {create_response.status_code} {create_response.text}"
+                )
+            user_id = _find_auth_user_id_by_email(client, email)
+            if not user_id:
+                raise RuntimeError(f"Auth user {email} exists but could not be fetched via admin API.")
+            update_response = client.put(
+                f"{SUPABASE_URL}/auth/v1/admin/users/{user_id}",
+                headers=_admin_headers(),
+                json={"password": password, "email_confirm": True},
+            )
+            update_response.raise_for_status()
 
         token_response = client.post(
             f"{SUPABASE_URL}/auth/v1/token?grant_type=password",
@@ -85,6 +100,21 @@ def _create_or_login_user(client: httpx.Client, email: str, password: str) -> De
     if not access_token or not user.get("id"):
         raise RuntimeError(f"Unable to obtain auth token for {email}.")
     return DemoUser(user_id=user["id"], email=email, password=password, access_token=access_token)
+
+
+def _find_auth_user_id_by_email(client: httpx.Client, email: str) -> str | None:
+    response = client.get(
+        f"{SUPABASE_URL}/auth/v1/admin/users",
+        headers=_admin_headers(),
+        params={"page": 1, "per_page": 1000},
+    )
+    response.raise_for_status()
+    payload = response.json()
+    users = payload.get("users", []) if isinstance(payload, dict) else []
+    for user in users:
+        if str(user.get("email") or "").strip().lower() == email:
+            return str(user.get("id"))
+    return None
 
 
 def _ensure_profile(client: httpx.Client, user: DemoUser) -> None:
@@ -215,19 +245,28 @@ def _set_demo_balances(client: httpx.Client, user_id: str, accounts: list[dict[s
 
 def _ensure_payee(client: httpx.Client, user: DemoUser) -> list[dict[str, Any]]:
     payees = _api_get(client, "/api/payees", user.access_token)
-    if not payees:
+    payee_names = {(payee.get("name") or "").strip().lower() for payee in payees}
+    to_create: list[tuple[str, str]] = []
+    if "city utilities" not in payee_names:
+        to_create.append(("City Utilities", "Utilities"))
+    if "acme internet" not in payee_names:
+        to_create.append(("Acme Internet", "Internet"))
+
+    for idx, (name, category) in enumerate(to_create):
+        acct_num = f"{1234567890 + idx}"
         _api_post(
             client,
             "/api/payees",
             user.access_token,
             {
-                "name": "City Utilities",
-                "category": "Utilities",
+                "name": name,
+                "category": category,
                 "routingNumber": "021000021",
-                "accountNumber": "1234567890",
-                "confirmAccountNumber": "1234567890",
+                "accountNumber": acct_num,
+                "confirmAccountNumber": acct_num,
             },
         )
+    if to_create:
         payees = _api_get(client, "/api/payees", user.access_token)
     return payees
 
@@ -262,9 +301,31 @@ def _seed_money_flows(
 ) -> None:
     checking = next((acct for acct in accounts if acct.get("type") == "Checking"), accounts[0])
     savings = next((acct for acct in accounts if acct.get("type") == "Savings"), None)
+    credit = next((acct for acct in accounts if acct.get("type") == "Credit"), None)
+
+    transactions = _api_get(client, "/api/transactions?limit=250", user.access_token)
+    if not isinstance(transactions, list):
+        transactions = []
+
+    def tx_count(*, tx_type: str | None = None, account_id: str | None = None, description_has: str | None = None) -> int:
+        count = 0
+        for tx in transactions:
+            if tx_type and tx.get("type") != tx_type:
+                continue
+            if account_id and tx.get("accountId") != account_id:
+                continue
+            if description_has and description_has.lower() not in str(tx.get("description", "")).lower():
+                continue
+            count += 1
+        return count
+
+    def refresh_transactions() -> None:
+        nonlocal transactions
+        latest = _api_get(client, "/api/transactions?limit=250", user.access_token)
+        transactions = latest if isinstance(latest, list) else []
 
     deposits = _api_get(client, "/api/deposits", user.access_token)
-    if not deposits:
+    if len(deposits) < 2:
         _api_post(
             client,
             "/api/deposits",
@@ -272,9 +333,27 @@ def _seed_money_flows(
             {"accountId": checking["id"], "amount": 25, "depositMethod": "atm"},
             idempotent=True,
         )
+    if savings and len(deposits) < 3:
+        _api_post(
+            client,
+            "/api/deposits",
+            user.access_token,
+            {"accountId": savings["id"], "amount": 40, "depositMethod": "atm"},
+            idempotent=True,
+        )
+    refresh_transactions()
 
+    daily_exists = False
+    monthly_exists = False
     payments = _api_get(client, "/api/payments", user.access_token)
-    if not payments and payees:
+    for payment in payments:
+        cadence = str(payment.get("cadence") or "").lower()
+        if cadence == "daily":
+            daily_exists = True
+        if cadence == "monthly":
+            monthly_exists = True
+
+    if payees and not monthly_exists:
         _api_post(
             client,
             "/api/payments",
@@ -288,10 +367,25 @@ def _seed_money_flows(
             },
             idempotent=True,
         )
+    if payees and not daily_exists:
+        daily_payee = payees[1] if len(payees) > 1 else payees[0]
+        _api_post(
+            client,
+            "/api/payments",
+            user.access_token,
+            {
+                "payeeId": daily_payee["id"],
+                "accountId": checking["id"],
+                "amount": 8.5,
+                "cadence": "Daily",
+                "deliverBy": date.today().isoformat(),
+            },
+            idempotent=True,
+        )
+    refresh_transactions()
 
     if savings:
-        transactions = _api_get(client, "/api/transactions?limit=5", user.access_token)
-        if not transactions:
+        if tx_count(tx_type="Transfer", account_id=checking["id"]) < 2:
             _api_post(
                 client,
                 "/api/transfers",
@@ -299,11 +393,58 @@ def _seed_money_flows(
                 {
                     "fromAccountId": checking["id"],
                     "toAccountId": savings["id"],
-                    "amount": 15,
+                    "amount": 25,
                     "transferDate": date.today().isoformat(),
-                    "memo": "Initial demo transfer",
+                    "memo": "Seed: Checking to savings",
                 },
             )
+            refresh_transactions()
+        if tx_count(tx_type="Transfer", account_id=savings["id"]) < 2:
+            _api_post(
+                client,
+                "/api/transfers",
+                user.access_token,
+                {
+                    "fromAccountId": savings["id"],
+                    "toAccountId": checking["id"],
+                    "amount": 10,
+                    "transferDate": date.today().isoformat(),
+                    "memo": "Seed: Savings to checking",
+                },
+            )
+            refresh_transactions()
+
+    if credit and tx_count(tx_type="Transfer", account_id=credit["id"]) < 1:
+        _api_post(
+            client,
+            "/api/transfers",
+            user.access_token,
+            {
+                "fromAccountId": checking["id"],
+                "toAccountId": credit["id"],
+                "amount": 30,
+                "transferDate": date.today().isoformat(),
+                "memo": "Seed: Credit payment transfer",
+            },
+        )
+        refresh_transactions()
+
+    if tx_count(tx_type="ATM", account_id=checking["id"]) < 2:
+        _api_post(
+            client,
+            "/api/withdrawals/atm",
+            user.access_token,
+            {"accountId": checking["id"], "amount": 20},
+        )
+        refresh_transactions()
+    if savings and tx_count(tx_type="ATM", account_id=savings["id"]) < 1:
+        _api_post(
+            client,
+            "/api/withdrawals/atm",
+            user.access_token,
+            {"accountId": savings["id"], "amount": 15},
+        )
+        refresh_transactions()
 
     if external_accounts:
         external_transfers = _api_get(client, "/api/external-transfers", user.access_token)
@@ -323,37 +464,70 @@ def _seed_money_flows(
             )
 
 
-def _ensure_member_transfer_data(client: httpx.Client, sender: DemoUser) -> None:
-    recipient = _create_or_login_user(client, DEMO_RECIPIENT_EMAIL, DEMO_RECIPIENT_PASSWORD)
+def _ensure_member_target(client: httpx.Client, email: str, password: str) -> DemoUser:
+    recipient = _create_or_login_user(client, email, password)
     _ensure_profile(client, recipient)
     recipient_accounts = _ensure_accounts(client, recipient)
     _set_demo_balances(client, recipient.user_id, recipient_accounts)
+    return recipient
+
+
+def _ensure_member_transfer_data(client: httpx.Client, sender: DemoUser) -> None:
+    recipient = _ensure_member_target(client, DEMO_RECIPIENT_EMAIL, DEMO_RECIPIENT_PASSWORD)
+    behumble_target = _ensure_member_target(client, DEMO_MEMBER_TARGET_EMAIL, DEMO_MEMBER_TARGET_PASSWORD)
 
     existing_member_plans = _api_get(client, "/api/member-transfers/plans", sender.access_token)
-    if existing_member_plans:
-        return
+    existing_plan_recipient_emails = {
+        str(plan.get("recipientEmail") or "").strip().lower()
+        for plan in existing_member_plans
+        if isinstance(plan, dict)
+    }
     sender_accounts = _ensure_accounts(client, sender)
     sender_checking_id = next(
         (acct["id"] for acct in sender_accounts if acct.get("type") == "Checking"),
         sender_accounts[0]["id"],
     )
 
-    _api_post(
-        client,
-        "/api/member-transfers",
-        sender.access_token,
-        {
-            "fromAccountId": sender_checking_id,
-            "recipientEmail": recipient.email,
-            "amount": 10,
-            "scheduleMode": "SCHEDULED",
-            "cadence": "Once",
-            "startDate": (date.today() + timedelta(days=1)).isoformat(),
-            "runTime": "09:30",
-            "timezone": "America/Los_Angeles",
-            "memo": "Demo member transfer",
-        },
+    if recipient.email not in existing_plan_recipient_emails:
+        _api_post(
+            client,
+            "/api/member-transfers",
+            sender.access_token,
+            {
+                "fromAccountId": sender_checking_id,
+                "recipientEmail": recipient.email,
+                "amount": 10,
+                "scheduleMode": "SCHEDULED",
+                "cadence": "Once",
+                "startDate": (date.today() + timedelta(days=1)).isoformat(),
+                "runTime": "09:30",
+                "timezone": "America/Los_Angeles",
+                "memo": "Demo member transfer plan",
+            },
+        )
+
+    # Immediate member transfer so transaction history shows activity with behumble account.
+    transactions = _api_get(client, "/api/transactions?type=Transfer&limit=250", sender.access_token)
+    if not isinstance(transactions, list):
+        transactions = []
+    behumble_seen = any(
+        DEMO_MEMBER_TARGET_EMAIL in str(tx.get("description", "")).lower()
+        for tx in transactions
     )
+    if not behumble_seen:
+        _api_post(
+            client,
+            "/api/member-transfers",
+            sender.access_token,
+            {
+                "fromAccountId": sender_checking_id,
+                "recipientEmail": behumble_target.email,
+                "amount": 18,
+                "scheduleMode": "NOW",
+                "transferDate": date.today().isoformat(),
+                "memo": f"Seed transfer to {behumble_target.email}",
+            },
+        )
 
 
 def main() -> int:
