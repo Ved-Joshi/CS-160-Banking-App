@@ -1,6 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.openapi.utils import get_openapi
+from uuid import uuid4
 from config import settings
 from routers.banking_read import router as banking_read_router
 from routers.admin import router as admin_router
@@ -15,6 +16,8 @@ app = FastAPI(
     version="1.0.0",
     debug=settings.DEBUG,
 )
+
+APP_BOOT_ID = uuid4().hex
 
 app.add_middleware(
     CORSMiddleware,
@@ -59,7 +62,7 @@ app.include_router(internal_jobs_router)
 
 @app.get("/health")
 async def health():
-    return {"status": "healthy"}
+    return {"status": "healthy", "bootId": APP_BOOT_ID}
 
 @app.get("/")
 async def root():

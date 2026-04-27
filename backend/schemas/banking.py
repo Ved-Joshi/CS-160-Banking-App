@@ -40,6 +40,37 @@ class BankAccount(BaseModel):
     isDefaultInternalReceive: bool = False
 
 
+class AdminAccountReportRow(BaseModel):
+    accountId: str
+    customerId: str
+    customerName: str
+    customerEmail: str
+    zipCode: str
+    city: str
+    state: str
+    accountNickname: str
+    accountType: AccountType
+    accountStatus: Literal["Open", "Restricted"]
+    openedAt: str
+    currentBalance: float
+    availableBalance: float
+    maskedNumber: str
+
+
+class AdminAccountReportSummary(BaseModel):
+    totalAccounts: int
+    distinctCustomers: int
+    openAccounts: int
+    restrictedAccounts: int
+    totalCurrentBalance: float
+    averageCurrentBalance: float
+
+
+class AdminAccountReportResponse(BaseModel):
+    rows: list[AdminAccountReportRow]
+    summary: AdminAccountReportSummary
+
+
 class CreateBankAccountIn(BaseModel):
     nickname: str = Field(min_length=2, max_length=80)
     type: AccountType
