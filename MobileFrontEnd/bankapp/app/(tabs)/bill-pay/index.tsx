@@ -1,6 +1,6 @@
 import { useRouter } from "expo-router";
 import { useMemo, useState } from "react";
-import { Alert, Text, View } from "react-native";
+import { Alert, Modal, Pressable, Text, View } from "react-native";
 import { Button, Card, Field, LinkButton, PageHeader, Row, Screen, StatusChip } from "../../../src/components/ui";
 import { formatCurrency, formatDate } from "../../../src/lib/format";
 import { useAccounts, useBillPayments, usePayees } from "../../../src/lib/hooks";
@@ -11,7 +11,7 @@ const CADENCE_OPTIONS: ScheduledPayment["cadence"][] = ["Once", "Daily", "Weekly
 export default function BillPayScreen() {
   const router = useRouter();
   const { payees, loading: payeesLoading } = usePayees();
-  const { payments, loading: paymentsLoading, createPayment, cancelPayment, retryPayment, error: paymentError } = useBillPayments();
+  const { payments, loading: paymentsLoading, createPayment, cancelPayment, retryPayment, updatePayment, error: paymentError } = useBillPayments();
   const { accounts } = useAccounts();
 
   const [payeeId, setPayeeId] = useState("");
@@ -19,8 +19,50 @@ export default function BillPayScreen() {
   const [amount, setAmount] = useState("");
   const [cadence, setCadence] = useState<ScheduledPayment["cadence"]>("Monthly");
   const [deliverBy, setDeliverBy] = useState(new Date().toISOString().slice(0, 10));
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editPayeeId, setEditPayeeId] = useState("");
+  const [editAmount, setEditAmount] = useState("");
+  const [editCadence, setEditCadence] = useState<ScheduledPayment["cadence"]>("Monthly");
+  const [editDeliverBy, setEditDeliverBy] = useState(new Date().toISOString().slice(0, 10));
 
   const openAccounts = useMemo(() => accounts.filter((a) => a.status === "Open"), [accounts]);
+
+  const startEdit = (payment: ScheduledPayment) => {
+    setEditingId(payment.id);
+    setEditPayeeId(payment.payeeId);
+    setEditAmount(String(payment.amount));
+    setEditCadence(payment.cadence);
+    setEditDeliverBy(payment.deliverBy.slice(0, 10));
+  };
+
+  const handleSaveEdit = async () => {
+    if (!editingId) return;
+    const parsedAmount = Number.parseFloat(editAmount);
+    if (!Number.isFinite(parsedAmount) || parsedAmount <= 0) {
+      Alert.alert("Error", "Enter a valid amount greater than 0");
+      return;
+    }
+    if (!editPayeeId) {
+      Alert.alert("Error", "Select a payee");
+      return;
+    }
+    if (!CADENCE_OPTIONS.includes(editCadence)) {
+      Alert.alert("Error", "Choose a valid cadence.");
+      return;
+    }
+    try {
+      await updatePayment(editingId, {
+        payeeId: editPayeeId,
+        amount: parsedAmount,
+        cadence: editCadence,
+        deliverBy: editDeliverBy,
+      });
+      setEditingId(null);
+      Alert.alert("Saved", "Payment updated.");
+    } catch (err) {
+      Alert.alert("Error", err instanceof Error ? err.message : paymentError || "Failed to update payment");
+    }
+  };
 
   const handleSchedulePayment = async () => {
     if (!payeeId || !accountId || !amount) {
@@ -63,6 +105,44 @@ export default function BillPayScreen() {
         </Card>
       ) : (
         <>
+          <Modal transparent animationType="fade" visible={Boolean(editingId)} onRequestClose={() => setEditingId(null)}>
+            <View style={{ flex: 1, justifyContent: "center", padding: 18, backgroundColor: "rgba(16, 35, 59, 0.45)" }}>
+              <Pressable style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0 }} onPress={() => setEditingId(null)} />
+              <View style={{ backgroundColor: "#fff", borderRadius: 24, borderWidth: 1, borderColor: "rgba(177, 17, 31, 0.25)", padding: 18, gap: 10 }}>
+                <Text style={{ fontSize: 20, fontWeight: "800" }}>Edit payment</Text>
+
+                <Text style={{ fontWeight: "700" }}>Payee</Text>
+                {payees.map((p) => (
+                  <Row
+                    key={p.id}
+                    title={p.name}
+                    subtitle={`${p.category} • ${p.accountMask}`}
+                    right={p.id === editPayeeId ? <Text style={{ fontWeight: "800" }}>Selected</Text> : undefined}
+                    onPress={() => setEditPayeeId(p.id)}
+                  />
+                ))}
+
+                <Field label="Amount" value={editAmount} onChangeText={setEditAmount} placeholder="0.00" />
+                <Text style={{ fontWeight: "700" }}>Cadence</Text>
+                <View style={{ flexDirection: "row", gap: 10, flexWrap: "wrap" }}>
+                  {CADENCE_OPTIONS.map((option) => (
+                    <View key={option} style={{ minWidth: 120 }}>
+                      <Button
+                        label={option}
+                        variant={editCadence === option ? "primary" : "secondary"}
+                        onPress={() => setEditCadence(option)}
+                        disabled={paymentsLoading}
+                      />
+                    </View>
+                  ))}
+                </View>
+                <Field label="Deliver by (YYYY-MM-DD)" value={editDeliverBy} onChangeText={setEditDeliverBy} />
+                <Button label="Save changes" onPress={handleSaveEdit} disabled={paymentsLoading} />
+                <Button label="Cancel" variant="secondary" onPress={() => setEditingId(null)} disabled={paymentsLoading} />
+              </View>
+            </View>
+          </Modal>
+
           <Card>
             <Text style={{ fontWeight: "800", fontSize: 18 }}>Schedule payment</Text>
             <Text style={{ color: "#6B7280" }}>Tap a payee and source account to select.</Text>
@@ -139,6 +219,15 @@ export default function BillPayScreen() {
                     From: {accounts.find((a) => a.id === payment.accountId)?.nickname ?? payment.accountId}
                   </Text>
                   <View style={{ flexDirection: "row", gap: 10 }}>
+                    {payment.status !== "CANCELLED" ? (
+                      <View style={{ flex: 1 }}>
+                        <Button
+                          label="Edit"
+                          variant="secondary"
+                          onPress={() => startEdit(payment)}
+                        />
+                      </View>
+                    ) : null}
                     {(payment.status === "SCHEDULED" || payment.status === "FAILED") ? (
                       <View style={{ flex: 1 }}>
                         <Button
@@ -179,4 +268,3 @@ export default function BillPayScreen() {
     </Screen>
   );
 }
-

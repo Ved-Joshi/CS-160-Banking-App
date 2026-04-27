@@ -345,7 +345,26 @@ export function useBillPayments() {
     }
   }, []);
 
-  return { payments, loading, error, refresh, createPayment, cancelPayment, retryPayment };
+  const updatePayment = useCallback(
+    async (paymentId: string, payload: Parameters<typeof api.updateBillPayment>[1]) => {
+      try {
+        setLoading(true);
+        setError(null);
+        const updated = await api.updateBillPayment(paymentId, payload);
+        setPayments((prev) => prev.map((p) => (p.id === paymentId ? updated : p)));
+        return updated;
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "Failed to update payment";
+        setError(message);
+        throw err;
+      } finally {
+        setLoading(false);
+      }
+    },
+    []
+  );
+
+  return { payments, loading, error, refresh, createPayment, cancelPayment, retryPayment, updatePayment };
 }
 
 export function useDeposits() {
@@ -397,7 +416,26 @@ export function useDeposits() {
     []
   );
 
-  return { deposits, loading, error, refresh, submitDeposit };
+  const getDeposit = useCallback(async (depositId: string) => {
+    try {
+      setLoading(true);
+      setError(null);
+      const deposit = await api.fetchDeposit(depositId);
+      setDeposits((prev) => {
+        const next = prev.filter((d) => d.id !== depositId);
+        return [deposit, ...next];
+      });
+      return deposit;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Failed to fetch deposit";
+      setError(message);
+      throw err;
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  return { deposits, loading, error, refresh, submitDeposit, getDeposit };
 }
 
 export async function searchATMs(params: api.AtmSearchParams = {}): Promise<AtmSearchResponse> {

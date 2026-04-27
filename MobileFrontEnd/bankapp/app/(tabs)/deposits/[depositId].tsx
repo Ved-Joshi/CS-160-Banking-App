@@ -1,5 +1,5 @@
 import { useLocalSearchParams } from "expo-router";
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Text } from "react-native";
 import { Card, PageHeader, Row, Screen, StatusChip } from "../../../src/components/ui";
 import { formatCurrency, formatDateTime } from "../../../src/lib/format";
@@ -7,11 +7,20 @@ import { useDeposits } from "../../../src/lib/hooks";
 
 export default function DepositDetailScreen() {
   const { depositId } = useLocalSearchParams<{ depositId: string }>();
-  const { deposits, loading } = useDeposits();
+  const { deposits, loading, getDeposit } = useDeposits();
+  const [loadingSingle, setLoadingSingle] = useState(false);
   
   const deposit = useMemo(() => deposits.find((item) => item.id === depositId), [deposits, depositId]);
 
-  if (loading) {
+  useEffect(() => {
+    if (!depositId || deposit) return;
+    setLoadingSingle(true);
+    getDeposit(String(depositId))
+      .catch(() => null)
+      .finally(() => setLoadingSingle(false));
+  }, [deposit, depositId, getDeposit]);
+
+  if (loading || loadingSingle) {
     return (
       <Screen>
         <Card>

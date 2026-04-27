@@ -584,6 +584,36 @@ export async function retryBillPayment(paymentId: string): Promise<ScheduledPaym
   };
 }
 
+export async function updateBillPayment(
+  paymentId: string,
+  payload: {
+    payeeId?: string;
+    amount?: number;
+    cadence?: ScheduledPayment["cadence"];
+    deliverBy?: string;
+  }
+): Promise<ScheduledPayment> {
+  const headers = await getAuthHeader();
+  const response = await fetch(`${API_URL}/api/payments/${encodeURIComponent(paymentId)}`, {
+    method: "PATCH",
+    headers: { ...headers, "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!response.ok) throw new Error(await readApiErrorMessage(response, "Failed to update bill payment"));
+  const payment = (await response.json()) as any;
+  return {
+    id: String(payment?.id ?? ""),
+    payeeId: String(payment?.payeeId ?? ""),
+    payeeName: String(payment?.payeeName ?? "Unknown"),
+    accountId: String(payment?.accountId ?? ""),
+    amount: Number(payment?.amount ?? 0),
+    cadence: (String(payment?.cadence ?? "Once") as ScheduledPayment["cadence"]),
+    deliverBy: String(payment?.deliverBy ?? ""),
+    status: (String(payment?.status ?? "SCHEDULED") as ScheduledPayment["status"]),
+    failureReason: typeof payment?.failureReason === "string" ? payment.failureReason : null,
+  };
+}
+
 // ============= DEPOSITS =============
 export async function getDepositUploadUrls(input: CreateDepositUploadUrlsInput): Promise<DepositUploadUrls> {
   const headers = await getAuthHeader();
@@ -659,6 +689,13 @@ export async function fetchDeposits(): Promise<Deposit[]> {
   const data = await response.json();
   if (!Array.isArray(data)) return [];
   return data.map(normalizeDeposit);
+}
+
+export async function fetchDeposit(depositId: string): Promise<Deposit> {
+  const headers = await getAuthHeader();
+  const response = await fetch(`${API_URL}/api/deposits/${encodeURIComponent(depositId)}`, { headers });
+  if (!response.ok) throw new Error(await readApiErrorMessage(response, "Failed to fetch deposit"));
+  return normalizeDeposit(await response.json());
 }
 
 // ============= ATM LOCATOR =============
