@@ -9,6 +9,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from fastapi import HTTPException, status
 
 from config import settings
+from services.ledger_service import get_or_create_billpay_clearing_ledger_account
 from utils.supabase import SupabaseUser, supabase_client
 
 STALE_PROCESSING_TIMEOUT_MINUTES = 10
@@ -87,6 +88,10 @@ async def execute_payment_for_user(payment_id: str, current_user: SupabaseUser) 
     # Check balance BEFORE calling RPC - return error without mutation
     if available_balance_cents < amount_cents:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Insufficient balance.")
+
+    # Ensure the bank-owned bill pay clearing ledger exists before the RPC
+    # writes the journal and balanced postings.
+    await get_or_create_billpay_clearing_ledger_account()
 
     # Call transactional RPC: all mutations happen atomically in Postgres
     # The RPC uses FOR UPDATE to lock the account, validates state, and performs
@@ -452,6 +457,7 @@ async def attempt_payment_run(payment: dict) -> tuple[bool, str | None]:
         return False, "Insufficient balance."
 
     try:
+        await get_or_create_billpay_clearing_ledger_account()
         await supabase_client.rpc(
             "submit_bill_payment",
             {
