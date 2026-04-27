@@ -267,6 +267,7 @@ export default function DepositsScreen() {
                     title={account.nickname}
                     subtitle={`${account.type} ${account.maskedNumber} • Available ${formatCurrency(account.balances.availableBalance)}`}
                     right={account.id === withdrawAccountId ? <Text style={{ fontWeight: "800" }}>Selected</Text> : undefined}
+                    elevated
                     onPress={() => setWithdrawAccountId(account.id)}
                   />
                 ))
@@ -301,4 +302,3 @@ export default function DepositsScreen() {
     </Screen>
   );
 }
-

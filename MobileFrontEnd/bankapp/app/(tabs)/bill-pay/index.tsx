@@ -164,6 +164,7 @@ export default function BillPayScreen() {
                       <Ionicons name="chevron-forward" size={18} color="#6B7280" />
                     )
                   }
+                  elevated
                   onPress={() => setPayeeId(p.id)}
                 />
               ))
@@ -185,6 +186,7 @@ export default function BillPayScreen() {
                       <Ionicons name="chevron-forward" size={18} color="#6B7280" />
                     )
                   }
+                  elevated
                   onPress={() => setAccountId(a.id)}
                 />
               ))

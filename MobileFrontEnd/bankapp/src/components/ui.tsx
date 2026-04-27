@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
-import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { useState } from "react";
+import { Modal, Pressable, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { colors } from "../theme/colors";
 
@@ -85,6 +86,75 @@ export function Field({
   );
 }
 
+export function SelectField<T extends string>({
+  label,
+  value,
+  options,
+  onChange,
+  placeholder = "Select…",
+  disabled = false,
+}: {
+  label: string;
+  value: T | null;
+  options: { label: string; value: T | null }[];
+  onChange: (v: T | null) => void;
+  placeholder?: string;
+  disabled?: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const selected = options.find((o) => o.value === value);
+
+  return (
+    <View style={styles.field}>
+      <Text style={styles.label}>{label}</Text>
+      <Pressable
+        onPress={() => {
+          if (disabled) return;
+          setOpen(true);
+        }}
+        accessibilityRole="button"
+        style={({ pressed }) => [
+          styles.selectTrigger,
+          disabled && styles.inputDisabled,
+          pressed && !disabled && styles.selectPressed,
+        ]}
+      >
+        <Text style={[styles.selectValue, !selected && styles.selectPlaceholder]} numberOfLines={1}>
+          {selected?.label ?? placeholder}
+        </Text>
+        <Text style={styles.selectChevron}>›</Text>
+      </Pressable>
+
+      <Modal transparent animationType="fade" visible={open} onRequestClose={() => setOpen(false)}>
+        <View style={styles.selectOverlay}>
+          <Pressable style={styles.selectOverlay} onPress={() => setOpen(false)} />
+          <View style={styles.selectSheet}>
+            <Text style={styles.selectTitle}>{label}</Text>
+            <ScrollView style={{ maxHeight: 320 }} contentContainerStyle={{ paddingVertical: 6 }}>
+              {options.map((opt) => {
+                const isSelected = opt.value === value;
+                return (
+                  <Pressable
+                    key={`${label}:${String(opt.value)}`}
+                    onPress={() => {
+                      onChange(opt.value);
+                      setOpen(false);
+                    }}
+                    style={({ pressed }) => [styles.selectOption, pressed && styles.selectOptionPressed]}
+                  >
+                    <Text style={[styles.selectOptionLabel, isSelected && styles.selectOptionSelected]}>{opt.label}</Text>
+                    {isSelected ? <Text style={styles.selectOptionSelected}>Selected</Text> : null}
+                  </Pressable>
+                );
+              })}
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
+    </View>
+  );
+}
+
 export function Button({ label, onPress, variant = "primary", disabled = false }: { label: string; onPress: () => void; variant?: "primary" | "secondary"; disabled?: boolean }) {
   return (
     <Pressable style={({ pressed }) => [styles.button, variant === "primary" ? styles.buttonPrimary : styles.buttonSecondary, pressed && styles.buttonPressed, disabled && styles.buttonDisabled]} onPress={onPress} disabled={disabled}>
@@ -116,7 +186,19 @@ export function StatusChip({ status }: { status: string }) {
   );
 }
 
-export function Row({ title, subtitle, right, onPress }: { title: string; subtitle?: string; right?: ReactNode; onPress?: () => void }) {
+export function Row({
+  title,
+  subtitle,
+  right,
+  onPress,
+  elevated = false,
+}: {
+  title: string;
+  subtitle?: string;
+  right?: ReactNode;
+  onPress?: () => void;
+  elevated?: boolean;
+}) {
   const body = (
     <View style={styles.row}>
       <View style={styles.rowTextWrap}>
@@ -131,7 +213,11 @@ export function Row({ title, subtitle, right, onPress }: { title: string; subtit
     <Pressable
       onPress={onPress}
       accessibilityRole="button"
-      style={({ pressed }) => [styles.rowPressable, pressed && styles.rowPressablePressed]}
+      style={({ pressed }) => [
+        styles.rowPressable,
+        elevated && styles.rowPressableElevated,
+        pressed && styles.rowPressablePressed,
+      ]}
     >
       {body}
     </Pressable>
@@ -175,6 +261,44 @@ const styles = StyleSheet.create({
     color: colors.text,
   },
   inputDisabled: { backgroundColor: colors.surface, color: colors.muted },
+  selectTrigger: {
+    borderColor: colors.line,
+    borderWidth: 1,
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    backgroundColor: colors.white,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12,
+  },
+  selectPressed: { backgroundColor: "rgba(16,35,59,0.04)" },
+  selectValue: { color: colors.text, flex: 1 },
+  selectPlaceholder: { color: colors.muted },
+  selectChevron: { color: colors.muted, fontSize: 18, fontWeight: "800" },
+  selectOverlay: { flex: 1, justifyContent: "center", padding: 18, backgroundColor: "rgba(16, 35, 59, 0.45)" },
+  selectSheet: {
+    backgroundColor: colors.white,
+    borderRadius: 24,
+    borderWidth: 1,
+    borderColor: "rgba(177, 17, 31, 0.25)",
+    padding: 16,
+    gap: 10,
+  },
+  selectTitle: { fontSize: 18, fontWeight: "800", color: colors.text },
+  selectOption: {
+    paddingVertical: 10,
+    paddingHorizontal: 10,
+    borderRadius: 14,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12,
+  },
+  selectOptionPressed: { backgroundColor: "rgba(16,35,59,0.06)" },
+  selectOptionLabel: { color: colors.text, fontWeight: "700", flex: 1 },
+  selectOptionSelected: { color: colors.red700, fontWeight: "800" },
   button: { borderRadius: 999, paddingVertical: 12, paddingHorizontal: 18, alignItems: "center" },
   buttonPrimary: { backgroundColor: colors.red700 },
   buttonSecondary: { backgroundColor: "rgba(16,35,59,0.08)" },
@@ -199,6 +323,20 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     marginHorizontal: -6,
     paddingHorizontal: 6,
+  },
+  rowPressableElevated: {
+    marginHorizontal: 0,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    backgroundColor: colors.white,
+    borderWidth: 1,
+    borderColor: "rgba(212,221,232,0.9)",
+    shadowColor: "#000",
+    shadowOpacity: 0.08,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 3 },
+    elevation: 2,
+    marginTop: 8,
   },
   rowPressablePressed: { backgroundColor: "rgba(16,35,59,0.06)" },
   rowTextWrap: { flex: 1, gap: 2 },

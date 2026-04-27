@@ -114,7 +114,7 @@ export default function SettingsScreen() {
       <Card>
         <Text style={{ fontWeight: "800", fontSize: 18 }}>Security</Text>
         <Button label="Reset password" variant="secondary" onPress={() => router.push("/reset-password")} />
-        <Button label="Notification preferences" variant="secondary" onPress={() => router.push("/notifications")} />
+        <Button label="Notification preferences" variant="secondary" onPress={() => router.push("/(tabs)/notifications")} />
       </Card>
       <Button
         label="Sign out"
