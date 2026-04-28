@@ -58,7 +58,13 @@ def _auth_headers(access_token: str) -> dict[str, str]:
     }
 
 
-def _create_or_login_user(client: httpx.Client, email: str, password: str) -> DemoUser:
+def _create_or_login_user(
+    client: httpx.Client,
+    email: str,
+    password: str,
+    *,
+    allow_existing_password_reset: bool = False,
+) -> DemoUser:
     token_response = client.post(
         f"{SUPABASE_URL}/auth/v1/token?grant_type=password",
         headers={"apikey": SUPABASE_SERVICE_ROLE_KEY, "Content-Type": "application/json"},
@@ -77,15 +83,20 @@ def _create_or_login_user(client: httpx.Client, email: str, password: str) -> De
                 raise RuntimeError(
                     f"Unable to create auth user {email}: {create_response.status_code} {create_response.text}"
                 )
-            user_id = _find_auth_user_id_by_email(client, email)
-            if not user_id:
-                raise RuntimeError(f"Auth user {email} exists but could not be fetched via admin API.")
-            update_response = client.put(
-                f"{SUPABASE_URL}/auth/v1/admin/users/{user_id}",
-                headers=_admin_headers(),
-                json={"password": password, "email_confirm": True},
-            )
-            update_response.raise_for_status()
+            if allow_existing_password_reset:
+                user_id = _find_auth_user_id_by_email(client, email)
+                if not user_id:
+                    raise RuntimeError(f"Auth user {email} exists but could not be fetched via admin API.")
+                update_response = client.put(
+                    f"{SUPABASE_URL}/auth/v1/admin/users/{user_id}",
+                    headers=_admin_headers(),
+                    json={"password": password, "email_confirm": True},
+                )
+                update_response.raise_for_status()
+            else:
+                raise RuntimeError(
+                    f"Auth user {email} already exists with a different password; refusing to reset credentials."
+                )
 
         token_response = client.post(
             f"{SUPABASE_URL}/auth/v1/token?grant_type=password",
@@ -464,8 +475,19 @@ def _seed_money_flows(
             )
 
 
-def _ensure_member_target(client: httpx.Client, email: str, password: str) -> DemoUser:
-    recipient = _create_or_login_user(client, email, password)
+def _ensure_member_target(
+    client: httpx.Client,
+    email: str,
+    password: str,
+    *,
+    allow_existing_password_reset: bool = False,
+) -> DemoUser:
+    recipient = _create_or_login_user(
+        client,
+        email,
+        password,
+        allow_existing_password_reset=allow_existing_password_reset,
+    )
     _ensure_profile(client, recipient)
     recipient_accounts = _ensure_accounts(client, recipient)
     _set_demo_balances(client, recipient.user_id, recipient_accounts)
@@ -473,8 +495,12 @@ def _ensure_member_target(client: httpx.Client, email: str, password: str) -> De
 
 
 def _ensure_member_transfer_data(client: httpx.Client, sender: DemoUser) -> None:
-    recipient = _ensure_member_target(client, DEMO_RECIPIENT_EMAIL, DEMO_RECIPIENT_PASSWORD)
-    behumble_target = _ensure_member_target(client, DEMO_MEMBER_TARGET_EMAIL, DEMO_MEMBER_TARGET_PASSWORD)
+    recipient = _ensure_member_target(
+        client,
+        DEMO_RECIPIENT_EMAIL,
+        DEMO_RECIPIENT_PASSWORD,
+        allow_existing_password_reset=True,
+    )
 
     existing_member_plans = _api_get(client, "/api/member-transfers/plans", sender.access_token)
     existing_plan_recipient_emails = {
@@ -515,19 +541,23 @@ def _ensure_member_transfer_data(client: httpx.Client, sender: DemoUser) -> None
         for tx in transactions
     )
     if not behumble_seen:
-        _api_post(
-            client,
-            "/api/member-transfers",
-            sender.access_token,
-            {
-                "fromAccountId": sender_checking_id,
-                "recipientEmail": behumble_target.email,
-                "amount": 18,
-                "scheduleMode": "NOW",
-                "transferDate": date.today().isoformat(),
-                "memo": f"Seed transfer to {behumble_target.email}",
-            },
-        )
+        try:
+            _api_post(
+                client,
+                "/api/member-transfers",
+                sender.access_token,
+                {
+                    "fromAccountId": sender_checking_id,
+                    "recipientEmail": DEMO_MEMBER_TARGET_EMAIL,
+                    "amount": 18,
+                    "scheduleMode": "NOW",
+                    "transferDate": date.today().isoformat(),
+                    "memo": f"Seed transfer to {DEMO_MEMBER_TARGET_EMAIL}",
+                },
+            )
+        except Exception:
+            # Avoid mutating or forcing credentials for real users; skip if recipient is unavailable.
+            pass
 
 
 def main() -> int:
@@ -537,7 +567,12 @@ def main() -> int:
 
     _require_env()
     with httpx.Client(timeout=25) as client:
-        demo_user = _create_or_login_user(client, DEMO_TEST_EMAIL, DEMO_TEST_PASSWORD)
+        demo_user = _create_or_login_user(
+            client,
+            DEMO_TEST_EMAIL,
+            DEMO_TEST_PASSWORD,
+            allow_existing_password_reset=True,
+        )
         _ensure_profile(client, demo_user)
         accounts = _ensure_accounts(client, demo_user)
         _set_demo_balances(client, demo_user.user_id, accounts)
