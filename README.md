@@ -51,6 +51,10 @@ cp frontend/.env.example frontend/.env
 - `VITE_API_URL=http://localhost:8000`
 - `VITE_GOOGLE_MAPS_API_KEY` (required for ATM Locator map/search on web)
 
+5. Mobile env is same as frontend, replace vite prefix with expo (use same key)
+- `EXPO_PUBLIC_SUPABASE_URL`
+- `EXPO_PUBLIC_SUPABASE_ANON_KEY `
+
 #### Get Required API Keys
 
 - Stripe API keys (`STRIPE_SECRET_KEY`, `STRIPE_PUBLISHABLE_KEY`):
