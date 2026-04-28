@@ -10,7 +10,7 @@ import {
   profileService,
   transfersService,
 } from '../../lib/bankingApi';
-import { formatCurrency, formatDate, formatDateTimeInTimezone } from '../../lib/format';
+import { formatCurrency, formatDate, formatDateTimeInTimezone, localDateInputValue, utcDateInputValue } from '../../lib/format';
 import { queryKeys } from '../../lib/queryKeys';
 import type {
   ExternalAccount,
@@ -85,14 +85,6 @@ function getBrowserTimezone(): string {
   } catch {
     return 'UTC';
   }
-}
-
-function getLocalToday(): string {
-  const now = new Date();
-  const year = now.getFullYear();
-  const month = String(now.getMonth() + 1).padStart(2, '0');
-  const day = String(now.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
 }
 
 function normalizeEmail(value: string): string {
@@ -189,7 +181,8 @@ export function TransfersPage() {
   const queryClient = useQueryClient();
   const [searchParams] = useSearchParams();
   const preferredFromAccountId = searchParams.get('fromAccountId') ?? '';
-  const today = getLocalToday();
+  const localToday = localDateInputValue();
+  const transferToday = utcDateInputValue();
   const browserTimezone = getBrowserTimezone();
   const [mode, setMode] = useState<TransferMode>('SELF');
   const [review, setReview] = useState<ReviewState | null>(null);
@@ -215,7 +208,7 @@ export function TransfersPage() {
   const [editPlanForm, setEditPlanForm] = useState({
     memo: '',
     cadence: 'Once' as TransferCadence,
-    startDate: today,
+    startDate: localToday,
     runTime: '09:00',
     endDate: '',
   });
@@ -224,16 +217,16 @@ export function TransfersPage() {
     fromAccountId: '',
     toAccountId: '',
     memo: '',
-    transferDate: today,
+    transferDate: transferToday,
   });
   const [memberForm, setMemberForm] = useState({
     fromAccountId: '',
     recipientEmail: '',
     memo: '',
-    transferDate: today,
+    transferDate: transferToday,
     scheduleMode: 'NOW' as TransferScheduleMode,
     cadence: 'Once' as TransferCadence,
-    startDate: today,
+    startDate: localToday,
     runTime: '09:00',
     endDate: '',
     timezone: '',
@@ -242,10 +235,10 @@ export function TransfersPage() {
     fromAccountId: '',
     externalAccountId: '',
     memo: '',
-    transferDate: today,
+    transferDate: transferToday,
     scheduleMode: 'NOW' as TransferScheduleMode,
     cadence: 'Once' as TransferCadence,
-    startDate: today,
+    startDate: localToday,
     runTime: '09:00',
     endDate: '',
     timezone: '',
@@ -679,10 +672,14 @@ export function TransfersPage() {
 
   const openSelfReview = () => {
     const amount = buildAmount(selfAmountDigits);
+    const transferDate = utcDateInputValue();
     if (accounts.length < 2) throw new Error('You need at least two accounts to transfer between your own accounts.');
     if (!selfFromAccountId || !selfToAccountId) throw new Error('Choose both accounts.');
     if (selfFromAccountId === selfToAccountId) throw new Error('Choose two different accounts.');
     if (amount <= 0) throw new Error('Enter an amount greater than zero.');
+    if (selfForm.transferDate !== transferDate) {
+      setSelfForm((current) => ({ ...current, transferDate }));
+    }
     setReview({
       kind: 'SELF',
       payload: {
@@ -690,13 +687,14 @@ export function TransfersPage() {
         toAccountId: selfToAccountId,
         amount,
         memo: selfForm.memo || undefined,
-        transferDate: selfForm.transferDate,
+        transferDate,
       },
     });
   };
 
   const openMemberReview = async () => {
     const amount = buildAmount(memberAmountDigits);
+    const transferDate = utcDateInputValue();
     if (!checkingAccounts.length) throw new Error('A checking account is required for member transfers.');
     if (!memberFromAccountId) throw new Error('Choose a funding account.');
     const normalizedRecipientEmail = normalizeEmail(memberForm.recipientEmail);
@@ -708,6 +706,9 @@ export function TransfersPage() {
       ? memberRecipient
       : await resolveRecipientMutation.mutateAsync(normalizedRecipientEmail);
     setMemberRecipient(resolvedRecipient);
+    if (memberForm.scheduleMode === 'NOW' && memberForm.transferDate !== transferDate) {
+      setMemberForm((current) => ({ ...current, transferDate }));
+    }
     setReview({
       kind: 'MEMBER',
       payload: {
@@ -716,7 +717,7 @@ export function TransfersPage() {
         amount,
         memo: memberForm.memo || undefined,
         scheduleMode: memberForm.scheduleMode,
-        transferDate: memberForm.scheduleMode === 'NOW' ? memberForm.transferDate : undefined,
+        transferDate: memberForm.scheduleMode === 'NOW' ? transferDate : undefined,
         cadence: memberForm.scheduleMode === 'SCHEDULED' ? memberForm.cadence : undefined,
         startDate: memberForm.scheduleMode === 'SCHEDULED' ? memberForm.startDate : undefined,
         runTime: memberForm.scheduleMode === 'SCHEDULED' ? memberForm.runTime : undefined,
@@ -729,10 +730,14 @@ export function TransfersPage() {
 
   const openExternalReview = () => {
     const amount = buildAmount(externalAmountDigits);
+    const transferDate = utcDateInputValue();
     if (!checkingAccounts.length) throw new Error('A checking account is required for external transfers.');
     if (!externalFromAccountId || !selectedExternalAccountId) throw new Error('Choose both accounts.');
     if (amount <= 0) throw new Error('Enter an amount greater than zero.');
     validateSchedule(externalForm.scheduleMode, externalForm.startDate, externalForm.runTime, externalForm.endDate, externalTimezone);
+    if (externalForm.scheduleMode === 'NOW' && externalForm.transferDate !== transferDate) {
+      setExternalForm((current) => ({ ...current, transferDate }));
+    }
     setReview({
       kind: 'EXTERNAL',
       payload: {
@@ -741,7 +746,7 @@ export function TransfersPage() {
         amount,
         memo: externalForm.memo || undefined,
         scheduleMode: externalForm.scheduleMode,
-        transferDate: externalForm.scheduleMode === 'NOW' ? externalForm.transferDate : undefined,
+        transferDate: externalForm.scheduleMode === 'NOW' ? transferDate : undefined,
         cadence: externalForm.scheduleMode === 'SCHEDULED' ? externalForm.cadence : undefined,
         startDate: externalForm.scheduleMode === 'SCHEDULED' ? externalForm.startDate : undefined,
         runTime: externalForm.scheduleMode === 'SCHEDULED' ? externalForm.runTime : undefined,

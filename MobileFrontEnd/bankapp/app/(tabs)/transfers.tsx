@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Alert, Modal, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
-import { Button, Card, Field, PageHeader, Row, Screen } from "../../src/components/ui";
+import { Button, Card, Field, PageHeader, Row, Screen, SelectField } from "../../src/components/ui";
 import { useAccounts, useExternalAccounts, useExternalTransfers, useMemberTransfers, useTransfers } from "../../src/lib/hooks";
+import { localDateInputValue, pacificDateInputValue, utcDateInputValue } from "../../src/lib/format";
 import { colors } from "../../src/theme/colors";
 import type { TransferCadence, TransferScheduleMode, MemberTransferRecipient, ExternalAccountType } from "../../src/types";
 
@@ -86,13 +87,14 @@ export default function TransfersScreen() {
       return "UTC";
     }
   }, []);
+  const pacificToday = useMemo(() => pacificDateInputValue(), []);
 
   // Internal transfer state
   const [fromAccountId, setFromAccountId] = useState("");
   const [toAccountId, setToAccountId] = useState("");
   const [amount, setAmount] = useState("");
   const [memo, setMemo] = useState("");
-  const [transferDate, setTransferDate] = useState(new Date().toISOString().slice(0, 10));
+  const [transferDate] = useState(utcDateInputValue());
   const [submitted, setSubmitted] = useState(false);
   const [picking, setPicking] = useState<null | "from" | "to">(null);
 
@@ -103,9 +105,9 @@ export default function TransfersScreen() {
   const [memberAmount, setMemberAmount] = useState("");
   const [memberMemo, setMemberMemo] = useState("");
   const [scheduleMode, setScheduleMode] = useState<TransferScheduleMode>("NOW");
-  const [memberTransferDate, setMemberTransferDate] = useState(new Date().toISOString().slice(0, 10));
+  const [memberTransferDate] = useState(utcDateInputValue());
   const [cadence, setCadence] = useState<TransferCadence>("Once");
-  const [startDate, setStartDate] = useState(new Date().toISOString().slice(0, 10));
+  const [startDate, setStartDate] = useState(localDateInputValue());
   const [runTime, setRunTime] = useState("09:00");
   const [endDate, setEndDate] = useState("");
   const [memberSubmitted, setMemberSubmitted] = useState(false);
@@ -125,9 +127,9 @@ export default function TransfersScreen() {
   const [externalAmount, setExternalAmount] = useState("");
   const [externalMemo, setExternalMemo] = useState("");
   const [externalScheduleMode, setExternalScheduleMode] = useState<TransferScheduleMode>("NOW");
-  const [externalTransferDate, setExternalTransferDate] = useState(new Date().toISOString().slice(0, 10));
+  const [externalTransferDate, setExternalTransferDate] = useState(localDateInputValue());
   const [externalCadence, setExternalCadence] = useState<TransferCadence>("Once");
-  const [externalStartDate, setExternalStartDate] = useState(new Date().toISOString().slice(0, 10));
+  const [externalStartDate, setExternalStartDate] = useState(localDateInputValue());
   const [externalRunTime, setExternalRunTime] = useState("09:00");
   const [externalEndDate, setExternalEndDate] = useState("");
   const [externalSubmitted, setExternalSubmitted] = useState(false);
@@ -517,7 +519,23 @@ export default function TransfersScreen() {
                     />
                     <Field label="Amount" value={amount} onChangeText={setAmount} />
                     <Field label="Memo" value={memo} onChangeText={setMemo} />
-                    <Field label="Transfer date" value={transferDate} onChangeText={setTransferDate} />
+                    <View
+                      style={{
+                        borderWidth: 1,
+                        borderColor: colors.line,
+                        borderRadius: 16,
+                        paddingHorizontal: 14,
+                        paddingVertical: 12,
+                        backgroundColor: colors.white,
+                        gap: 4,
+                      }}
+                    >
+                      <Text style={{ fontWeight: "700", color: colors.text }}>Transfer date</Text>
+                      <Text style={{ color: colors.text, fontSize: 16 }}>{pacificToday}</Text>
+                      <Text style={{ color: colors.muted, fontSize: 12 }}>
+                        Internal transfers are processed on the same day only. Displayed in Pacific Time.
+                      </Text>
+                    </View>
                     <Button
                       label="Submit transfer"
                       onPress={handleInternalSubmit}
@@ -530,7 +548,7 @@ export default function TransfersScreen() {
                     <Text>From: {fromAccount?.nickname || "Select account"}</Text>
                     <Text>To: {toAccount?.nickname || "Select account"}</Text>
                     <Text>Amount: {amount || "0.00"}</Text>
-                    <Text>Date: {transferDate}</Text>
+                    <Text>Date: {pacificToday}</Text>
                     {submitted ? (
                       <Text style={{ fontWeight: "700" }}>Transfer submitted.</Text>
                     ) : (
@@ -609,11 +627,34 @@ export default function TransfersScreen() {
                     />
 
                     {scheduleMode === "NOW" ? (
-                      <Field label="Transfer date" value={memberTransferDate} onChangeText={setMemberTransferDate} />
+                      <View
+                        style={{
+                          borderWidth: 1,
+                          borderColor: colors.line,
+                          borderRadius: 16,
+                          paddingHorizontal: 14,
+                          paddingVertical: 12,
+                          backgroundColor: colors.white,
+                          gap: 4,
+                        }}
+                      >
+                        <Text style={{ fontWeight: "700", color: colors.text }}>Transfer date</Text>
+                        <Text style={{ color: colors.text, fontSize: 16 }}>{pacificToday}</Text>
+                        <Text style={{ color: colors.muted, fontSize: 12 }}>
+                          Immediate member transfers are processed on the same day only. Displayed in Pacific Time.
+                        </Text>
+                      </View>
                     ) : (
                       <>
                         <Text style={{ marginTop: 12, fontWeight: "600", color: colors.text }}>Recurring schedule</Text>
-                        <Field label="Cadence" value={cadence} onChangeText={(val) => setCadence(val as TransferCadence)} />
+                        <SelectField
+                          label="Cadence"
+                          value={cadence}
+                          options={CADENCE_OPTIONS.map((option) => ({ label: option, value: option }))}
+                          onChange={(value) => {
+                            if (value) setCadence(value);
+                          }}
+                        />
                         <Field label="Start date" value={startDate} onChangeText={setStartDate} />
                         <Field label="Run time (HH:MM)" value={runTime} onChangeText={setRunTime} placeholder="09:00" />
                         <Field label="End date (optional)" value={endDate} onChangeText={setEndDate} />
@@ -635,7 +676,7 @@ export default function TransfersScreen() {
                     <Text>To: {recipient?.displayName || "Resolve recipient"}</Text>
                     <Text>Amount: {memberAmount || "0.00"}</Text>
                     {scheduleMode === "NOW" ? (
-                      <Text>Date: {memberTransferDate}</Text>
+                      <Text>Date: {pacificToday}</Text>
                     ) : (
                       <>
                         <Text>Cadence: {cadence}</Text>
@@ -794,7 +835,14 @@ export default function TransfersScreen() {
                     ) : (
                       <>
                         <Text style={{ marginTop: 12, fontWeight: "600", color: colors.text }}>Recurring schedule</Text>
-                        <Field label="Cadence" value={externalCadence} onChangeText={(val) => setExternalCadence(val as TransferCadence)} />
+                        <SelectField
+                          label="Cadence"
+                          value={externalCadence}
+                          options={CADENCE_OPTIONS.map((option) => ({ label: option, value: option }))}
+                          onChange={(value) => {
+                            if (value) setExternalCadence(value);
+                          }}
+                        />
                         <Field label="Start date" value={externalStartDate} onChangeText={setExternalStartDate} />
                         <Field label="Run time (HH:MM)" value={externalRunTime} onChangeText={setExternalRunTime} placeholder="09:00" />
                         <Field label="End date (optional)" value={externalEndDate} onChangeText={setExternalEndDate} />
