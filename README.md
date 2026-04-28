@@ -5,7 +5,7 @@ Full-stack banking demo project with:
 - `docker-compose.yml`: local one-command runtime (backend, frontend, scheduler)
 
 ## User's Guide
-[Video Guide on Google drive](https://drive.google.com/file/d/1EBq6s4i2PR2fqF7sxJOw9Ar3orL5GZBz/view?usp=sharing)
+[Video Guide on Google drive](https://drive.google.com/file/d/1sIQDKlToZFf3rnXmo8NRXQaJP-vQ3NI_/view?usp=sharing)
 
 This guide covers:
 - Installation and configuration for the web app (Docker)
