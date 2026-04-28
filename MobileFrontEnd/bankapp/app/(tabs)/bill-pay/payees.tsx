@@ -1,6 +1,7 @@
 import { Alert, Text } from "react-native";
 import { Button, Card, Field, PageHeader, Screen } from "../../../src/components/ui";
 import { usePayees } from "../../../src/lib/hooks";
+import { isDigits } from "../../../src/lib/validation";
 import { useCallback, useRef, useState } from "react";
 
 export default function PayeesScreen() {
@@ -35,8 +36,15 @@ export default function PayeesScreen() {
       confirmAccountNumber: confirmAccountNumber.trim(),
     };
 
-    if (!payload.name || payload.routingNumber.length !== 9 || payload.accountNumber.length < 4) {
-      Alert.alert("Check details", "Enter payee name, routing number (9 digits), and account number.");
+    if (
+      !payload.name ||
+      payload.routingNumber.length !== 9 ||
+      !isDigits(payload.routingNumber) ||
+      payload.accountNumber.length < 4 ||
+      payload.accountNumber.length > 17 ||
+      !isDigits(payload.accountNumber)
+    ) {
+      Alert.alert("Check details", "Enter payee name, a 9-digit routing number, and a 4-17 digit account number.");
       return;
     }
 
