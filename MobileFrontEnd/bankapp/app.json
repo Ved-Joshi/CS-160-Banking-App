@@ -12,7 +12,8 @@
     },
     "android": {
       "edgeToEdgeEnabled": true,
-      "predictiveBackGestureEnabled": false
+      "predictiveBackGestureEnabled": false,
+      "package": "com.spheno.bankapp"
     },
     "web": {
       "output": "static"
@@ -25,7 +26,11 @@
       "reactCompiler": true
     },
     "extra": {
-      "apiUrl": "http://localhost:8000"
+      "apiUrl": "http://localhost:8000",
+      "router": {},
+      "eas": {
+        "projectId": "573dc692-c4f9-47e1-8b80-9d7f04c06289"
+      }
     }
   }
 }

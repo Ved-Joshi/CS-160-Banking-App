@@ -2,6 +2,7 @@ import Constants from "expo-constants";
 import * as FileSystem from "expo-file-system/legacy";
 import { Platform } from "react-native";
 import { supabase } from "./supabaseClient";
+import { utcDateInputValue } from "./format";
 import type {
   BankAccount,
   Transaction,
@@ -260,7 +261,7 @@ export async function createTransfer(
       toAccountId,
       amount,
       memo,
-      transferDate: transferDate || new Date().toISOString().split("T")[0],
+      transferDate: transferDate || utcDateInputValue(),
     }),
   });
   if (!response.ok) {

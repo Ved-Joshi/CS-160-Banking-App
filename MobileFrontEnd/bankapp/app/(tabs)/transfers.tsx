@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Alert, Modal, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
-import { Button, Card, Field, PageHeader, Row, Screen } from "../../src/components/ui";
+import { Button, Card, Field, PageHeader, Row, Screen, SelectField } from "../../src/components/ui";
 import { useAccounts, useExternalAccounts, useExternalTransfers, useMemberTransfers, useTransfers } from "../../src/lib/hooks";
+import { localDateInputValue, pacificDateInputValue, utcDateInputValue } from "../../src/lib/format";
+import { hasEnoughAvailableBalance, isDateInputValue, isDigits, isTimeInputValue, parseMoneyInput } from "../../src/lib/validation";
 import { colors } from "../../src/theme/colors";
 import type { TransferCadence, TransferScheduleMode, MemberTransferRecipient, ExternalAccountType } from "../../src/types";
 
@@ -53,6 +55,26 @@ function AccountPickerModal({
 }
 
 const CADENCE_OPTIONS: TransferCadence[] = ["Once", "Daily", "Weekly", "Biweekly", "Monthly"];
+const SCHEDULE_HOUR_OPTIONS = ["12", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11"] as const;
+type ScheduleHour = typeof SCHEDULE_HOUR_OPTIONS[number];
+type SchedulePeriod = "AM" | "PM";
+
+function toRunTime(hour: ScheduleHour, period: SchedulePeriod): string {
+  const numericHour = Number(hour);
+  const hour24 = period === "AM"
+    ? numericHour === 12 ? 0 : numericHour
+    : numericHour === 12 ? 12 : numericHour + 12;
+  return `${String(hour24).padStart(2, "0")}:00`;
+}
+
+function formatRunTimeLabel(runTime: string): string {
+  const [hourText, minuteText = "00"] = runTime.split(":");
+  const hour = Number(hourText);
+  if (!Number.isFinite(hour)) return runTime;
+  const period = hour >= 12 ? "PM" : "AM";
+  const hour12 = hour % 12 || 12;
+  return `${hour12}:${minuteText.padStart(2, "0")} ${period}`;
+}
 
 export default function TransfersScreen() {
   const { accounts, loading: accountsLoading, refresh: refreshAccounts } = useAccounts();
@@ -86,13 +108,14 @@ export default function TransfersScreen() {
       return "UTC";
     }
   }, []);
+  const pacificToday = useMemo(() => pacificDateInputValue(), []);
 
   // Internal transfer state
   const [fromAccountId, setFromAccountId] = useState("");
   const [toAccountId, setToAccountId] = useState("");
   const [amount, setAmount] = useState("");
   const [memo, setMemo] = useState("");
-  const [transferDate, setTransferDate] = useState(new Date().toISOString().slice(0, 10));
+  const [transferDate] = useState(utcDateInputValue());
   const [submitted, setSubmitted] = useState(false);
   const [picking, setPicking] = useState<null | "from" | "to">(null);
 
@@ -103,10 +126,11 @@ export default function TransfersScreen() {
   const [memberAmount, setMemberAmount] = useState("");
   const [memberMemo, setMemberMemo] = useState("");
   const [scheduleMode, setScheduleMode] = useState<TransferScheduleMode>("NOW");
-  const [memberTransferDate, setMemberTransferDate] = useState(new Date().toISOString().slice(0, 10));
+  const [memberTransferDate] = useState(utcDateInputValue());
   const [cadence, setCadence] = useState<TransferCadence>("Once");
-  const [startDate, setStartDate] = useState(new Date().toISOString().slice(0, 10));
-  const [runTime, setRunTime] = useState("09:00");
+  const [startDate, setStartDate] = useState(localDateInputValue());
+  const [runHour, setRunHour] = useState<ScheduleHour>("9");
+  const [runPeriod, setRunPeriod] = useState<SchedulePeriod>("AM");
   const [endDate, setEndDate] = useState("");
   const [memberSubmitted, setMemberSubmitted] = useState(false);
   const [memberPlans, setMemberPlans] = useState<any[]>([]);
@@ -125,16 +149,19 @@ export default function TransfersScreen() {
   const [externalAmount, setExternalAmount] = useState("");
   const [externalMemo, setExternalMemo] = useState("");
   const [externalScheduleMode, setExternalScheduleMode] = useState<TransferScheduleMode>("NOW");
-  const [externalTransferDate, setExternalTransferDate] = useState(new Date().toISOString().slice(0, 10));
+  const [externalTransferDate] = useState(utcDateInputValue());
   const [externalCadence, setExternalCadence] = useState<TransferCadence>("Once");
-  const [externalStartDate, setExternalStartDate] = useState(new Date().toISOString().slice(0, 10));
-  const [externalRunTime, setExternalRunTime] = useState("09:00");
+  const [externalStartDate, setExternalStartDate] = useState(localDateInputValue());
+  const [externalRunHour, setExternalRunHour] = useState<ScheduleHour>("9");
+  const [externalRunPeriod, setExternalRunPeriod] = useState<SchedulePeriod>("AM");
   const [externalEndDate, setExternalEndDate] = useState("");
   const [externalSubmitted, setExternalSubmitted] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const refreshingRef = useRef(false);
 
   const openAccounts = useMemo(() => accounts.filter((account) => account.status === "Open"), [accounts]);
+  const runTime = useMemo(() => toRunTime(runHour, runPeriod), [runHour, runPeriod]);
+  const externalRunTime = useMemo(() => toRunTime(externalRunHour, externalRunPeriod), [externalRunHour, externalRunPeriod]);
   const checkingAccounts = useMemo(
     () => openAccounts.filter((account) => account.type === "Checking"),
     [openAccounts]
@@ -158,6 +185,10 @@ export default function TransfersScreen() {
   const memberFromAccount = useMemo(
     () => checkingAccounts.find((account) => account.id === memberFromAccountId) ?? null,
     [checkingAccounts, memberFromAccountId]
+  );
+  const externalFromAccount = useMemo(
+    () => checkingAccounts.find((account) => account.id === externalFromAccountId) ?? null,
+    [checkingAccounts, externalFromAccountId]
   );
 
   // Initialize internal transfer from account
@@ -203,13 +234,15 @@ export default function TransfersScreen() {
   }, [externalAccounts, externalSelectedAccountId]);
 
   const handleResolveRecipient = async () => {
-    if (!recipientEmail.trim()) {
+    const normalizedRecipientEmail = recipientEmail.trim().toLowerCase();
+    if (!normalizedRecipientEmail) {
       Alert.alert("Error", "Please enter a recipient email");
       return;
     }
 
     try {
-      const resolvedRecipient = await resolveRecipient(recipientEmail);
+      const resolvedRecipient = await resolveRecipient(normalizedRecipientEmail);
+      setRecipientEmail(normalizedRecipientEmail);
       setRecipient(resolvedRecipient);
       Alert.alert("Success", `Found ${resolvedRecipient.displayName}`);
     } catch (err) {
@@ -223,9 +256,9 @@ export default function TransfersScreen() {
       return;
     }
 
-    const parsedAmount = Number(amount);
-    if (!Number.isFinite(parsedAmount) || parsedAmount <= 0) {
-      Alert.alert("Error", "Enter a valid transfer amount.");
+    const parsedAmount = parseMoneyInput(amount);
+    if (parsedAmount === null) {
+      Alert.alert("Error", "Enter a valid amount using dollars and cents, like 25 or 25.50.");
       return;
     }
 
@@ -236,6 +269,10 @@ export default function TransfersScreen() {
 
     if (!fromAccount) {
       Alert.alert("Error", "Internal transfers must be funded from a checking account.");
+      return;
+    }
+    if (!hasEnoughAvailableBalance(fromAccount.balances.availableBalance, parsedAmount)) {
+      Alert.alert("Insufficient funds", "The selected checking account does not have enough available balance.");
       return;
     }
 
@@ -257,17 +294,43 @@ export default function TransfersScreen() {
       return;
     }
 
-    const parsedAmount = Number(memberAmount);
-    if (!Number.isFinite(parsedAmount) || parsedAmount <= 0) {
-      Alert.alert("Error", "Enter a valid transfer amount.");
+    const parsedAmount = parseMoneyInput(memberAmount);
+    if (parsedAmount === null) {
+      Alert.alert("Error", "Enter a valid amount using dollars and cents, like 25 or 25.50.");
       return;
+    }
+    if (!memberFromAccount) {
+      Alert.alert("Error", "Member transfers must be funded from a checking account.");
+      return;
+    }
+    if (!hasEnoughAvailableBalance(memberFromAccount.balances.availableBalance, parsedAmount)) {
+      Alert.alert("Insufficient funds", "The selected checking account does not have enough available balance.");
+      return;
+    }
+    if (recipient.email.toLowerCase() !== recipientEmail.trim().toLowerCase()) {
+      Alert.alert("Resolve recipient", "Resolve the recipient again after changing the email address.");
+      return;
+    }
+    if (scheduleMode === "SCHEDULED") {
+      if (!isDateInputValue(startDate) || startDate < localDateInputValue()) {
+        Alert.alert("Error", "Start date must be today or later in YYYY-MM-DD format.");
+        return;
+      }
+      if (!isTimeInputValue(runTime)) {
+        Alert.alert("Error", "Run time must be in HH:MM format.");
+        return;
+      }
+      if (endDate && (!isDateInputValue(endDate) || endDate < startDate)) {
+        Alert.alert("Error", "End date must be on or after the start date.");
+        return;
+      }
     }
 
     try {
       if (scheduleMode === "NOW") {
         await createMemberTransfer(
           memberFromAccountId,
-          recipientEmail,
+          recipient.email,
           parsedAmount,
           memberMemo,
           "NOW",
@@ -276,7 +339,7 @@ export default function TransfersScreen() {
       } else {
         await createMemberTransfer(
           memberFromAccountId,
-          recipientEmail,
+          recipient.email,
           parsedAmount,
           memberMemo,
           "SCHEDULED",
@@ -284,7 +347,7 @@ export default function TransfersScreen() {
           cadence,
           startDate,
           runTime,
-          endDate,
+          endDate || undefined,
           deviceTimezone
         );
       }
@@ -359,10 +422,13 @@ export default function TransfersScreen() {
       payload.bankName.length < 2 ||
       payload.nickname.length < 2 ||
       payload.routingNumber.length !== 9 ||
+      !isDigits(payload.routingNumber) ||
       payload.accountNumber.length < 4 ||
+      payload.accountNumber.length > 17 ||
+      !isDigits(payload.accountNumber) ||
       payload.accountNumber !== payload.confirmAccountNumber
     ) {
-      Alert.alert("Check details", "Enter bank name, routing number (9 digits), and matching account numbers.");
+      Alert.alert("Check details", "Enter bank name, a 9-digit routing number, and matching 4-17 digit account numbers.");
       return;
     }
 
@@ -414,9 +480,35 @@ export default function TransfersScreen() {
       Alert.alert("Missing info", "Select a funding account, external account, and amount.");
       return;
     }
-    const parsedAmount = Number(externalAmount);
-    if (!Number.isFinite(parsedAmount) || parsedAmount <= 0) {
-      Alert.alert("Error", "Enter a valid transfer amount.");
+    const parsedAmount = parseMoneyInput(externalAmount);
+    if (parsedAmount === null) {
+      Alert.alert("Error", "Enter a valid amount using dollars and cents, like 25 or 25.50.");
+      return;
+    }
+    if (!externalFromAccount) {
+      Alert.alert("Error", "External transfers must be funded from a checking account.");
+      return;
+    }
+    if (!hasEnoughAvailableBalance(externalFromAccount.balances.availableBalance, parsedAmount)) {
+      Alert.alert("Insufficient funds", "The selected checking account does not have enough available balance.");
+      return;
+    }
+    if (externalScheduleMode === "SCHEDULED") {
+      if (!isDateInputValue(externalStartDate) || externalStartDate < localDateInputValue()) {
+        Alert.alert("Error", "Start date must be today or later in YYYY-MM-DD format.");
+        return;
+      }
+      if (!isTimeInputValue(externalRunTime)) {
+        Alert.alert("Error", "Run time must be in HH:MM format.");
+        return;
+      }
+      if (externalEndDate && (!isDateInputValue(externalEndDate) || externalEndDate < externalStartDate)) {
+        Alert.alert("Error", "End date must be on or after the start date.");
+        return;
+      }
+    }
+    if (externalScheduleMode === "NOW" && !isDateInputValue(externalTransferDate)) {
+      Alert.alert("Error", "Transfer date must be in YYYY-MM-DD format.");
       return;
     }
     try {
@@ -517,7 +609,23 @@ export default function TransfersScreen() {
                     />
                     <Field label="Amount" value={amount} onChangeText={setAmount} />
                     <Field label="Memo" value={memo} onChangeText={setMemo} />
-                    <Field label="Transfer date" value={transferDate} onChangeText={setTransferDate} />
+                    <View
+                      style={{
+                        borderWidth: 1,
+                        borderColor: colors.line,
+                        borderRadius: 16,
+                        paddingHorizontal: 14,
+                        paddingVertical: 12,
+                        backgroundColor: colors.white,
+                        gap: 4,
+                      }}
+                    >
+                      <Text style={{ fontWeight: "700", color: colors.text }}>Transfer date</Text>
+                      <Text style={{ color: colors.text, fontSize: 16 }}>{pacificToday}</Text>
+                      <Text style={{ color: colors.muted, fontSize: 12 }}>
+                        Internal transfers are processed on the same day only. Displayed in Pacific Time.
+                      </Text>
+                    </View>
                     <Button
                       label="Submit transfer"
                       onPress={handleInternalSubmit}
@@ -530,7 +638,7 @@ export default function TransfersScreen() {
                     <Text>From: {fromAccount?.nickname || "Select account"}</Text>
                     <Text>To: {toAccount?.nickname || "Select account"}</Text>
                     <Text>Amount: {amount || "0.00"}</Text>
-                    <Text>Date: {transferDate}</Text>
+                    <Text>Date: {pacificToday}</Text>
                     {submitted ? (
                       <Text style={{ fontWeight: "700" }}>Transfer submitted.</Text>
                     ) : (
@@ -609,13 +717,63 @@ export default function TransfersScreen() {
                     />
 
                     {scheduleMode === "NOW" ? (
-                      <Field label="Transfer date" value={memberTransferDate} onChangeText={setMemberTransferDate} />
+                      <View
+                        style={{
+                          borderWidth: 1,
+                          borderColor: colors.line,
+                          borderRadius: 16,
+                          paddingHorizontal: 14,
+                          paddingVertical: 12,
+                          backgroundColor: colors.white,
+                          gap: 4,
+                        }}
+                      >
+                        <Text style={{ fontWeight: "700", color: colors.text }}>Transfer date</Text>
+                        <Text style={{ color: colors.text, fontSize: 16 }}>{pacificToday}</Text>
+                        <Text style={{ color: colors.muted, fontSize: 12 }}>
+                          Immediate member transfers are processed on the same day only. Displayed in Pacific Time.
+                        </Text>
+                      </View>
                     ) : (
                       <>
                         <Text style={{ marginTop: 12, fontWeight: "600", color: colors.text }}>Recurring schedule</Text>
-                        <Field label="Cadence" value={cadence} onChangeText={(val) => setCadence(val as TransferCadence)} />
+                        <SelectField
+                          label="Cadence"
+                          value={cadence}
+                          options={CADENCE_OPTIONS.map((option) => ({ label: option, value: option }))}
+                          onChange={(value) => {
+                            if (value) setCadence(value);
+                          }}
+                        />
                         <Field label="Start date" value={startDate} onChangeText={setStartDate} />
-                        <Field label="Run time (HH:MM)" value={runTime} onChangeText={setRunTime} placeholder="09:00" />
+                        <View style={{ flexDirection: "row", gap: 10 }}>
+                          <View style={{ flex: 1 }}>
+                            <SelectField
+                              label="Run hour"
+                              value={runHour}
+                              options={SCHEDULE_HOUR_OPTIONS.map((option) => ({ label: option, value: option }))}
+                              onChange={(value) => {
+                                if (value) setRunHour(value);
+                              }}
+                            />
+                          </View>
+                          <View style={{ flex: 1 }}>
+                            <SelectField
+                              label="AM / PM"
+                              value={runPeriod}
+                              options={[
+                                { label: "AM", value: "AM" },
+                                { label: "PM", value: "PM" },
+                              ]}
+                              onChange={(value) => {
+                                if (value) setRunPeriod(value);
+                              }}
+                            />
+                          </View>
+                        </View>
+                        <Text style={{ color: colors.muted, fontSize: 12 }}>
+                          Runs at {formatRunTimeLabel(runTime)} {deviceTimezone}.
+                        </Text>
                         <Field label="End date (optional)" value={endDate} onChangeText={setEndDate} />
                       </>
                     )}
@@ -635,11 +793,12 @@ export default function TransfersScreen() {
                     <Text>To: {recipient?.displayName || "Resolve recipient"}</Text>
                     <Text>Amount: {memberAmount || "0.00"}</Text>
                     {scheduleMode === "NOW" ? (
-                      <Text>Date: {memberTransferDate}</Text>
+                      <Text>Date: {pacificToday}</Text>
                     ) : (
                       <>
                         <Text>Cadence: {cadence}</Text>
                         <Text>Start: {startDate}</Text>
+                        <Text>Run time: {formatRunTimeLabel(runTime)}</Text>
                         {endDate && <Text>End: {endDate}</Text>}
                       </>
                     )}
@@ -790,13 +949,63 @@ export default function TransfersScreen() {
                     />
 
                     {externalScheduleMode === "NOW" ? (
-                      <Field label="Transfer date" value={externalTransferDate} onChangeText={setExternalTransferDate} />
+                      <View
+                        style={{
+                          borderWidth: 1,
+                          borderColor: colors.line,
+                          borderRadius: 16,
+                          paddingHorizontal: 14,
+                          paddingVertical: 12,
+                          backgroundColor: colors.white,
+                          gap: 4,
+                        }}
+                      >
+                        <Text style={{ fontWeight: "700", color: colors.text }}>Transfer date</Text>
+                        <Text style={{ color: colors.text, fontSize: 16 }}>{pacificToday}</Text>
+                        <Text style={{ color: colors.muted, fontSize: 12 }}>
+                          Immediate external transfers are processed on the same day only. Displayed in Pacific Time.
+                        </Text>
+                      </View>
                     ) : (
                       <>
                         <Text style={{ marginTop: 12, fontWeight: "600", color: colors.text }}>Recurring schedule</Text>
-                        <Field label="Cadence" value={externalCadence} onChangeText={(val) => setExternalCadence(val as TransferCadence)} />
+                        <SelectField
+                          label="Cadence"
+                          value={externalCadence}
+                          options={CADENCE_OPTIONS.map((option) => ({ label: option, value: option }))}
+                          onChange={(value) => {
+                            if (value) setExternalCadence(value);
+                          }}
+                        />
                         <Field label="Start date" value={externalStartDate} onChangeText={setExternalStartDate} />
-                        <Field label="Run time (HH:MM)" value={externalRunTime} onChangeText={setExternalRunTime} placeholder="09:00" />
+                        <View style={{ flexDirection: "row", gap: 10 }}>
+                          <View style={{ flex: 1 }}>
+                            <SelectField
+                              label="Run hour"
+                              value={externalRunHour}
+                              options={SCHEDULE_HOUR_OPTIONS.map((option) => ({ label: option, value: option }))}
+                              onChange={(value) => {
+                                if (value) setExternalRunHour(value);
+                              }}
+                            />
+                          </View>
+                          <View style={{ flex: 1 }}>
+                            <SelectField
+                              label="AM / PM"
+                              value={externalRunPeriod}
+                              options={[
+                                { label: "AM", value: "AM" },
+                                { label: "PM", value: "PM" },
+                              ]}
+                              onChange={(value) => {
+                                if (value) setExternalRunPeriod(value);
+                              }}
+                            />
+                          </View>
+                        </View>
+                        <Text style={{ color: colors.muted, fontSize: 12 }}>
+                          Runs at {formatRunTimeLabel(externalRunTime)} {deviceTimezone}.
+                        </Text>
                         <Field label="End date (optional)" value={externalEndDate} onChangeText={setExternalEndDate} />
                         <Text style={{ color: colors.muted, fontSize: 12 }}>Timezone: {deviceTimezone}</Text>
                       </>
@@ -816,11 +1025,12 @@ export default function TransfersScreen() {
                     <Text>To: {externalAccounts.find((a) => a.id === externalSelectedAccountId)?.nickname || "Select external account"}</Text>
                     <Text>Amount: {externalAmount || "0.00"}</Text>
                     {externalScheduleMode === "NOW" ? (
-                      <Text>Date: {externalTransferDate}</Text>
+                      <Text>Date: {pacificToday}</Text>
                     ) : (
                       <>
                         <Text>Cadence: {externalCadence}</Text>
                         <Text>Start: {externalStartDate}</Text>
+                        <Text>Run time: {formatRunTimeLabel(externalRunTime)}</Text>
                         {externalEndDate && <Text>End: {externalEndDate}</Text>}
                       </>
                     )}

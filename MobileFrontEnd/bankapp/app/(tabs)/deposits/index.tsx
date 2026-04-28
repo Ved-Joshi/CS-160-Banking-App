@@ -3,6 +3,7 @@ import { useCallback, useRef, useState } from "react";
 import { Alert, Text, View } from "react-native";
 import { Button, Card, Field, PageHeader, Row, Screen, StatusChip } from "../../../src/components/ui";
 import { formatCurrency, formatDateTime } from "../../../src/lib/format";
+import { hasEnoughAvailableBalance, parseMoneyInput } from "../../../src/lib/validation";
 import { useAccounts, useAtmWithdrawals, useDeposits } from "../../../src/lib/hooks";
 import * as api from "../../../src/lib/api";
 import * as FileSystem from "expo-file-system/legacy";
@@ -25,13 +26,23 @@ function fileNameFromUri(uri: string, fallback: string): string {
 }
 
 async function getUploadMeta(uri: string, fallbackFileName: string) {
-  const info = await FileSystem.getInfoAsync(uri, { size: true });
+  const info = await FileSystem.getInfoAsync(uri);
   if (!info.exists) throw new Error("Image file was not found on device.");
   const fileName = fileNameFromUri(uri, fallbackFileName);
   const sizeBytes = typeof info.size === "number" ? info.size : 0;
   if (!sizeBytes) throw new Error("Unable to read image size.");
   const contentType = guessContentType(fileName);
   return { fileName, sizeBytes, contentType };
+}
+
+async function createRandomDepositFile(side: "front" | "back"): Promise<string> {
+  const baseUri = FileSystem.cacheDirectory ?? FileSystem.documentDirectory;
+  if (!baseUri) throw new Error("Unable to access local file storage.");
+  const suffix = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  const uri = `${baseUri}random-check-${side}-${suffix}.jpg`;
+  const placeholder = `Random ${side} check placeholder ${suffix}\n${"demo-check-file\n".repeat(120)}`;
+  await FileSystem.writeAsStringAsync(uri, placeholder);
+  return uri;
 }
 
 export default function DepositsScreen() {
@@ -59,6 +70,7 @@ export default function DepositsScreen() {
   const eligibleAccounts = accounts.filter(
     (a) => a.status === "Open" && (a.type === "Checking" || a.type === "Savings")
   );
+  const withdrawAccount = eligibleAccounts.find((account) => account.id === withdrawAccountId);
 
   const onRefresh = useCallback(async () => {
     if (refreshingRef.current || submitting || withdrawing) return;
@@ -78,14 +90,14 @@ export default function DepositsScreen() {
       return;
     }
 
-    const parsedAmount = Number.parseFloat(amount);
-    if (!Number.isFinite(parsedAmount) || parsedAmount <= 0) {
-      Alert.alert("Error", "Enter a valid amount greater than 0");
+    const parsedAmount = parseMoneyInput(amount);
+    if (parsedAmount === null) {
+      Alert.alert("Error", "Enter a valid amount using dollars and cents, like 25 or 25.50.");
       return;
     }
 
     if (depositMethod === "check" && (!frontImageUri || !backImageUri)) {
-      Alert.alert("Error", "Check deposits require a front and back image URI");
+      Alert.alert("Error", "Pick a random front and back file for the check deposit.");
       return;
     }
 
@@ -150,9 +162,17 @@ export default function DepositsScreen() {
       return;
     }
 
-    const parsedAmount = Number.parseFloat(withdrawAmount);
-    if (!Number.isFinite(parsedAmount) || parsedAmount <= 0) {
-      Alert.alert("Error", "Enter a valid amount greater than 0");
+    const parsedAmount = parseMoneyInput(withdrawAmount);
+    if (parsedAmount === null) {
+      Alert.alert("Error", "Enter a valid amount using dollars and cents, like 25 or 25.50.");
+      return;
+    }
+    if (!withdrawAccount) {
+      Alert.alert("Error", "Select an open checking or savings account.");
+      return;
+    }
+    if (!hasEnoughAvailableBalance(withdrawAccount.balances.availableBalance, parsedAmount)) {
+      Alert.alert("Insufficient funds", "The selected account does not have enough available balance.");
       return;
     }
 
@@ -167,6 +187,16 @@ export default function DepositsScreen() {
       Alert.alert("Error", message);
     } finally {
       setWithdrawing(false);
+    }
+  };
+
+  const handlePickRandomCheckFile = async (side: "front" | "back") => {
+    try {
+      const uri = await createRandomDepositFile(side);
+      if (side === "front") setFrontImageUri(uri);
+      else setBackImageUri(uri);
+    } catch (err) {
+      Alert.alert("Error", err instanceof Error ? err.message : "Unable to pick a random file.");
     }
   };
 
@@ -247,20 +277,32 @@ export default function DepositsScreen() {
 
               {depositMethod === "check" ? (
                 <>
-                  <Field
-                    label="Front image URI"
-                    value={frontImageUri}
-                    onChangeText={setFrontImageUri}
-                    placeholder="file:///.../front.jpg"
-                  />
-                  <Field
-                    label="Back image URI"
-                    value={backImageUri}
-                    onChangeText={setBackImageUri}
-                    placeholder="file:///.../back.jpg"
-                  />
+                  <View style={{ gap: 8 }}>
+                    <Button
+                      label={frontImageUri ? "Pick another front file" : "Pick random front file"}
+                      variant="secondary"
+                      onPress={() => handlePickRandomCheckFile("front")}
+                      disabled={submitting || depositsLoading}
+                    />
+                    {frontImageUri ? (
+                      <Text style={{ color: "#6B7280", fontSize: 12 }}>
+                        Front: {fileNameFromUri(frontImageUri, "front.jpg")}
+                      </Text>
+                    ) : null}
+                    <Button
+                      label={backImageUri ? "Pick another back file" : "Pick random back file"}
+                      variant="secondary"
+                      onPress={() => handlePickRandomCheckFile("back")}
+                      disabled={submitting || depositsLoading}
+                    />
+                    {backImageUri ? (
+                      <Text style={{ color: "#6B7280", fontSize: 12 }}>
+                        Back: {fileNameFromUri(backImageUri, "back.jpg")}
+                      </Text>
+                    ) : null}
+                  </View>
                   <Text style={{ color: "#6B7280" }}>
-                    Paste device file URIs for now. (Image picker/camera UI not wired yet.)
+                    Demo mode: these files are random placeholders and are not image-validated.
                   </Text>
                 </>
               ) : null}

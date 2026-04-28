@@ -3,8 +3,9 @@ import { useRouter } from "expo-router";
 import { useCallback, useMemo, useRef, useState } from "react";
 import { Alert, Modal, Pressable, Text, View } from "react-native";
 import { Button, Card, Field, LinkButton, PageHeader, Row, Screen, StatusChip } from "../../../src/components/ui";
-import { formatCurrency, formatDate } from "../../../src/lib/format";
+import { formatCurrency, formatDate, localDateInputValue } from "../../../src/lib/format";
 import { useAccounts, useBillPayments, usePayees } from "../../../src/lib/hooks";
+import { hasEnoughAvailableBalance, isOnOrAfterDate, parseMoneyInput } from "../../../src/lib/validation";
 import type { ScheduledPayment } from "../../../src/types";
 
 const CADENCE_OPTIONS: ScheduledPayment["cadence"][] = ["Once", "Daily", "Weekly", "Biweekly", "Monthly"];
@@ -21,14 +22,20 @@ export default function BillPayScreen() {
   const [accountId, setAccountId] = useState("");
   const [amount, setAmount] = useState("");
   const [cadence, setCadence] = useState<ScheduledPayment["cadence"]>("Monthly");
-  const [deliverBy, setDeliverBy] = useState(new Date().toISOString().slice(0, 10));
+  const [deliverBy, setDeliverBy] = useState(localDateInputValue());
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editPayeeId, setEditPayeeId] = useState("");
   const [editAmount, setEditAmount] = useState("");
   const [editCadence, setEditCadence] = useState<ScheduledPayment["cadence"]>("Monthly");
-  const [editDeliverBy, setEditDeliverBy] = useState(new Date().toISOString().slice(0, 10));
+  const [editDeliverBy, setEditDeliverBy] = useState(localDateInputValue());
 
   const openAccounts = useMemo(() => accounts.filter((a) => a.status === "Open"), [accounts]);
+  const selectedAccount = useMemo(() => openAccounts.find((account) => account.id === accountId), [accountId, openAccounts]);
+  const editingPayment = useMemo(() => payments.find((payment) => payment.id === editingId), [editingId, payments]);
+  const editingAccount = useMemo(
+    () => openAccounts.find((account) => account.id === editingPayment?.accountId),
+    [editingPayment?.accountId, openAccounts]
+  );
 
   const onRefresh = useCallback(async () => {
     if (refreshingRef.current) return;
@@ -52,13 +59,21 @@ export default function BillPayScreen() {
 
   const handleSaveEdit = async () => {
     if (!editingId) return;
-    const parsedAmount = Number.parseFloat(editAmount);
-    if (!Number.isFinite(parsedAmount) || parsedAmount <= 0) {
-      Alert.alert("Error", "Enter a valid amount greater than 0");
+    const parsedAmount = parseMoneyInput(editAmount);
+    if (parsedAmount === null) {
+      Alert.alert("Error", "Enter a valid amount using dollars and cents, like 25 or 25.50.");
       return;
     }
     if (!editPayeeId) {
       Alert.alert("Error", "Select a payee");
+      return;
+    }
+    if (!isOnOrAfterDate(editDeliverBy, localDateInputValue())) {
+      Alert.alert("Error", "Deliver by must be today or later in YYYY-MM-DD format.");
+      return;
+    }
+    if (editingAccount && !hasEnoughAvailableBalance(editingAccount.balances.availableBalance, parsedAmount)) {
+      Alert.alert("Insufficient funds", "The funding account does not have enough available balance.");
       return;
     }
     if (!CADENCE_OPTIONS.includes(editCadence)) {
@@ -85,12 +100,24 @@ export default function BillPayScreen() {
       return;
     }
 
-    const parsedAmount = Number.parseFloat(amount);
-    if (!Number.isFinite(parsedAmount) || parsedAmount <= 0) {
-      Alert.alert("Error", "Enter a valid amount greater than 0");
+    const parsedAmount = parseMoneyInput(amount);
+    if (parsedAmount === null) {
+      Alert.alert("Error", "Enter a valid amount using dollars and cents, like 25 or 25.50.");
       return;
     }
 
+    if (!selectedAccount) {
+      Alert.alert("Error", "Select an open funding account.");
+      return;
+    }
+    if (!hasEnoughAvailableBalance(selectedAccount.balances.availableBalance, parsedAmount)) {
+      Alert.alert("Insufficient funds", "The selected account does not have enough available balance.");
+      return;
+    }
+    if (!isOnOrAfterDate(deliverBy, localDateInputValue())) {
+      Alert.alert("Error", "Deliver by must be today or later in YYYY-MM-DD format.");
+      return;
+    }
     if (!CADENCE_OPTIONS.includes(cadence)) {
       Alert.alert("Error", "Choose a valid cadence.");
       return;
