@@ -3,7 +3,7 @@
 Full-stack banking demo project with:
 - `backend/`: FastAPI + Supabase REST/RPC integration
 - `frontend/`: React/Vite app
-- `docker-compose.yml`: local one-command runtime (backend, frontend, scheduler, demo seed)
+- `docker-compose.yml`: local one-command runtime (backend, frontend, scheduler)
 
 ## Prerequisites
 
@@ -44,48 +44,6 @@ Services:
 - Backend: [http://localhost:8000](http://localhost:8000)
 - Frontend: [http://localhost:5173](http://localhost:5173)
 
-The `seed` service runs automatically once and creates/updates demo data.
-
-## Fixed Tester Credentials (Seeded)
-
-Use this exact account for QA/review:
-- Email: `demo.tester@example.com`
-- Password: `DemoPass123!`
-
-Seeded data includes:
-- Checking/Savings/Credit accounts with balances
-- Payee and bill pay sample
-- Deposit sample
-- External account
-- Member transfer plan with recipient user
-
-You can disable seeding by setting `SEED_DEMO_DATA=false` in `backend/.env`.
-
-## Tester Walkthrough Checklist
-
-1. Sign in as `demo.tester@example.com`
-2. Verify account cards render (checking/savings/credit)
-3. Open transaction history and confirm entries exist
-4. Create a transfer from checking to savings
-5. Create a bill payment to seeded payee
-6. Create an external transfer to seeded external account
-7. Open deposits and submit a new ATM/check deposit
-8. Open member transfers and confirm seeded plan exists
-
-## Clean-Clone Smoke Test
-
-This command validates reproducibility from a fresh clone using only documented `.env.example` setup values:
-
-```bash
-SMOKE_SUPABASE_URL=https://your-project.supabase.co \
-SMOKE_SUPABASE_SERVICE_ROLE_KEY=your-service-role-key \
-SMOKE_SUPABASE_ANON_KEY=your-anon-key \
-SMOKE_TRANSFER_RUNNER_SECRET=replace-with-long-random-secret \
-./scripts/clean_clone_smoke_test.sh
-```
-
-It clones to a temporary directory, builds/starts compose, validates health, validates seed completion, runs seeded API checks, and tears down.
-
 ## Test Suites
 
 Frontend:
@@ -123,7 +81,7 @@ docker compose down
 
 Tail logs:
 ```bash
-docker compose logs -f backend frontend seed scheduler
+docker compose logs -f backend frontend scheduler
 ```
 
 ## Release Process

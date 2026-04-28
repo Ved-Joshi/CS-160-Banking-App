@@ -1,0 +1,24 @@
+Task,Priority,Owner,Status,Start date,End date,Milestone,Deliverable,Notes
+Initial web UI scaffold,High,Ved-Joshi,Done,2026-03-03,2026-03-03,M1 Foundation,React web shell + base pages,First frontend baseline commit
+Backend service bootstrap,High,Hazelette,Done,2026-03-04,2026-03-06,M1 Foundation,FastAPI backend skeleton + config + auth security modules,Includes JWT/password hashing foundations
+Supabase integration for auth and accounts,High,Anishka Chauhan,Done,2026-03-10,2026-03-10,M1 Foundation,Supabase connection + account creation/login wiring,Multiple same-day setup commits
+Database migrations and RLS hardening,High,Hazelette,Done,2026-03-16,2026-03-16,M2 Platform Hardening,Migrations + schema constraints + RLS policy patches,SQLite removed and Supabase-first architecture finalized
+Complete registration edge function,High,Hazelette,Done,2026-03-21,2026-03-23,M2 Platform Hardening,Registration edge function with profile provisioning,Later hardened payload validation and CORS support
+MFA flow integration and gating,Medium,Hazelette,Done,2026-03-23,2026-03-23,M2 Platform Hardening,MFA enroll/challenge + login gating and redirects,Subsequently relaxed/disabled for product flow changes
+Backend banking read APIs,High,Ved-Joshi,Done,2026-03-23,2026-03-23,M3 Core Banking APIs,Accounts/transactions/payments/deposits/notifications read endpoints,Enabled frontend migration off mocks
+Frontend migration to backend APIs,High,Ved-Joshi,Done,2026-03-23,2026-03-23,M3 Core Banking APIs,Dashboard + transactions + accounts integrated with live backend,Included empty-state handling
+Account creation/open-close workflows,High,Ved-Joshi,Done,2026-03-23,2026-04-08,M3 Core Banking APIs,Account open/close UX + backend validations,Refined via follow-up UX and bugfix commits
+Internal transfer engine with scheduling,High,Ved-Joshi,Done,2026-03-23,2026-04-17,M4 Money Movement,Immediate + scheduled + recurring internal transfers,Runner hardening and stale transfer recovery added
+ATM locator with Google Maps integration,Medium,Ved-Joshi,Done,2026-03-25,2026-03-25,M5 Customer Experience,Live ATM search + hours + caching + UI refinements,Series of focused UX improvements
+Dockerization + compose runtime,High,Anishka Chauhan,Done,2026-04-08,2026-04-24,M6 DevOps,Containerized frontend/backend + docker compose setup,Later fixes to compose/runtime behavior
+Admin panel implementation,Medium,Anishka Chauhan,Done,2026-04-08,2026-04-27,M7 Operations,Admin UI and account reporting screens,Delivered across multiple incremental commits
+Account/transfer module backend refactor,High,Hazelette,Done,2026-04-11,2026-04-22,M4 Money Movement,Service and router decomposition for accounts/transfers/transactions,Marked some legacy files for later cleanup
+Bill pay lifecycle and cadence support,High,Ved-Joshi,Done,2026-04-20,2026-04-23,M4 Money Movement,Bill pay create/retry/cancel + daily/weekly/monthly cadence support,Includes schedule-date alignment and retry-state fixes
+Member + external transfer flows,High,Ved-Joshi,Done,2026-04-22,2026-04-23,M4 Money Movement,Recipient resolution + external accounts + scheduled edit/retry,Validation hardening and timeline UX refinements included
+Ledger postings for bill pay/deposit/withdrawal,High,Hazelette,Done,2026-04-25,2026-04-27,M8 Ledger Integrity,Double-entry ledger integration for money-in/out and bill pay disbursement,Includes omitted notification/disbursement fixes
+Deposit upload hardening and withdrawal support,High,Ved-Joshi,Done,2026-04-26,2026-04-26,M4 Money Movement,Check upload session hardening + ATM deposit/withdrawal UX/API fixes,Addressed race/expiry and copy-text bugs
+Rate limiting, ownership checks, and test expansion,High,Ved-Joshi,Done,2026-04-26,2026-04-26,M2 Platform Hardening,Global API rate limiting + stronger access controls + comprehensive tests,Frontend + backend test coverage increased
+Demo seed expansion and QA onboarding,Medium,Ved-Joshi,Done,2026-04-26,2026-04-27,M9 Release Readiness,Seeded multi-account scenarios + Docker smoke docs + tester credentials,Added clean-clone smoke script and release checklist
+SSN removal from registration stack,High,Ved-Joshi,Done,2026-04-27,2026-04-27,M9 Release Readiness,Removed SSN from web flow, edge function, and DB storage path,Followed by function deployment and frontend rebuild
+Seed credential safety fix,High,Ved-Joshi,Done,2026-04-27,2026-04-27,M9 Release Readiness,Prevented seed script from resetting real member account passwords,Fixes invalid-credentials regression after password resets
+Mobile feature and UI stabilization,Medium,SphenOz,Done,2026-04-14,2026-04-27,M10 Mobile Track,Mobile pages + account flows + transfer/debug improvements,Delivered in parallel stream merged into main

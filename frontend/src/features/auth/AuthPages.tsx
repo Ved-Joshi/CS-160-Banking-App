@@ -360,9 +360,39 @@ export function ResetPasswordPage() {
   });
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data }) => {
-      setCanUpdate(Boolean(data.session));
-    });
+    const hydrateRecoverySession = async (): Promise<boolean> => {
+      const hashParams = new URLSearchParams(window.location.hash.replace(/^#/, ''));
+      const queryParams = new URLSearchParams(window.location.search);
+      const authCode = queryParams.get('code');
+      const accessToken = hashParams.get('access_token') ?? queryParams.get('access_token');
+      const refreshToken = hashParams.get('refresh_token') ?? queryParams.get('refresh_token');
+
+      if (authCode) {
+        const { error } = await supabase.auth.exchangeCodeForSession(authCode);
+        if (!error) {
+          setCanUpdate(true);
+          return true;
+        }
+      }
+
+      if (accessToken && refreshToken) {
+        const { error } = await supabase.auth.setSession({
+          access_token: accessToken,
+          refresh_token: refreshToken,
+        });
+        if (!error) {
+          setCanUpdate(true);
+          return true;
+        }
+      }
+
+      const { data } = await supabase.auth.getSession();
+      const hasSession = Boolean(data.session);
+      setCanUpdate(hasSession);
+      return hasSession;
+    };
+
+    void hydrateRecoverySession();
 
     const { data: listener } = supabase.auth.onAuthStateChange((event, ctx) => {
       if (event === 'PASSWORD_RECOVERY' || (event === 'SIGNED_IN' && ctx)) {
@@ -386,9 +416,37 @@ export function ResetPasswordPage() {
             className="stack-lg"
             onSubmit={updateForm.handleSubmit(async (values) => {
               setServerError('');
+              const ensureRecoverySession = async (): Promise<boolean> => {
+                const hashParams = new URLSearchParams(window.location.hash.replace(/^#/, ''));
+                const queryParams = new URLSearchParams(window.location.search);
+                const authCode = queryParams.get('code');
+                const accessToken = hashParams.get('access_token') ?? queryParams.get('access_token');
+                const refreshToken = hashParams.get('refresh_token') ?? queryParams.get('refresh_token');
+
+                if (authCode) {
+                  const { error } = await supabase.auth.exchangeCodeForSession(authCode);
+                  if (!error) return true;
+                }
+                if (accessToken && refreshToken) {
+                  const { error } = await supabase.auth.setSession({
+                    access_token: accessToken,
+                    refresh_token: refreshToken,
+                  });
+                  if (!error) return true;
+                }
+                const { data } = await supabase.auth.getSession();
+                return Boolean(data.session);
+              };
+
+              const hasSession = await ensureRecoverySession();
+              if (!hasSession) {
+                setServerError('Auth session missing. Please use the newest reset link from your email and try again.');
+                return;
+              }
+
               const { error } = await supabase.auth.updateUser({ password: values.password });
               if (error) {
-                updateForm.setError('password', { message: error.message });
+                setServerError(error.message);
                 return;
               }
               setSubmitted('updated');
@@ -397,6 +455,11 @@ export function ResetPasswordPage() {
             })}
           >
             <PageHeader title="Set new password" eyebrow="Password reset" subtitle="Choose a new password for your account." />
+            {serverError ? (
+              <InlineAlert title="Unable to reset password" tone="warning">
+                {serverError}
+              </InlineAlert>
+            ) : null}
             {submitted === 'updated' ? (
               <InlineAlert title="Password updated" tone="success">
                 Your password has been changed. You can now sign in with the new password.

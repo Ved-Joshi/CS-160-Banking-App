@@ -172,7 +172,7 @@ async def get_or_create_deposit_clearing_ledger_account() -> dict:
 
     Deposit write-through already runs in the SQL RPC, but the backend
     validates this clearing account exists before invoking the RPC so the
-    operation fails fast with a clearer error if seed data is missing.
+    operation fails fast with a clearer error if ledger setup is missing.
     """
     return await _get_or_create_bank_ledger_account(
         ledger_code="DEPOSIT_CLEARING",

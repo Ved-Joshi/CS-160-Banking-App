@@ -1197,6 +1197,15 @@ async def list_payments(current_user: SupabaseUser = Depends(get_current_user)) 
     return [map_payment(row) for row in rows]
 
 
+def _ensure_bill_payment_funds_or_raise(account: dict, amount_cents: int) -> None:
+    available_cents = int(account.get("available_balance_cents") or 0)
+    if amount_cents > available_cents:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Payment amount cannot exceed the account's available balance.",
+        )
+
+
 @router.post("/payments", response_model=ScheduledPayment, status_code=status.HTTP_201_CREATED)
 async def create_payment(
     payload: CreateScheduledPaymentIn,
@@ -1239,6 +1248,7 @@ async def create_payment(
     deliver_by = parse_deliver_by_with_timezone(payload.deliverBy, timezone_name)
     normalized_cadence = normalize_payment_cadence(payload.cadence)
     amount_cents = amount_to_cents(payload.amount)
+    _ensure_bill_payment_funds_or_raise(account, amount_cents)
 
     try:
         created = await supabase_client.insert_row(
@@ -1349,6 +1359,8 @@ async def update_payment(
     amount_value = payload.amount if payload.amount is not None else cents_to_amount(payment.get("amount_cents"))
     validate_payment_amount_or_raise(amount_value)
     amount_cents = amount_to_cents(amount_value)
+    account = await require_owned_account(str(payment["account_id"]), current_user.id, require_open=True)
+    _ensure_bill_payment_funds_or_raise(account, amount_cents)
 
     rows = await supabase_client.update_rows(
         "bill_payments",
