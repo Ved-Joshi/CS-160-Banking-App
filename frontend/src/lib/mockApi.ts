@@ -37,7 +37,8 @@ const normalizePhone = (phone: string) => {
 
 export const authService = {
   async login(email: string, password: string): Promise<{ user: User }> {
-    const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+    const normalizedEmail = email.trim().toLowerCase();
+    const { data, error } = await supabase.auth.signInWithPassword({ email: normalizedEmail, password });
     if (error) {
       throw new Error(error.message);
     }
@@ -117,7 +118,8 @@ export const authService = {
     return { user: mapUser(data.user) };
   },
   async requestReset(email: string): Promise<{ email: string }> {
-    const { error } = await supabase.auth.resetPasswordForEmail(email, {
+    const normalizedEmail = email.trim().toLowerCase();
+    const { error } = await supabase.auth.resetPasswordForEmail(normalizedEmail, {
       redirectTo: `${window.location.origin}/reset-password`,
     });
 
@@ -125,6 +127,6 @@ export const authService = {
       throw new Error(error.message);
     }
 
-    return { email };
+    return { email: normalizedEmail };
   },
 };

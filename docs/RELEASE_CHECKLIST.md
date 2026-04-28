@@ -37,11 +37,6 @@ docker compose up --build -d
 docker compose ps
 ```
 
-4. Confirm seed success:
-```bash
-docker compose logs --tail=50 seed
-```
-
 ## 3) Verify Test Suites
 
 1. Frontend:
@@ -54,26 +49,7 @@ cd frontend && npm ci && npm test && npm run build
 cd backend && python -m pip install -r requirements-dev.txt && pytest -q tests
 ```
 
-## 4) Run Fresh-Clone Repro Check
-
-Run:
-```bash
-SMOKE_SUPABASE_URL=<url> \
-SMOKE_SUPABASE_SERVICE_ROLE_KEY=<service-role-key> \
-SMOKE_SUPABASE_ANON_KEY=<anon-key> \
-SMOKE_TRANSFER_RUNNER_SECRET=<runner-secret> \
-./scripts/clean_clone_smoke_test.sh
-```
-
-## 5) Freeze Tester Credentials
-
-The project-level demo QA login is fixed:
-- `demo.tester@example.com`
-- `DemoPass123!`
-
-Do not rotate these in `docker-compose.yml` unless coordinated with all testers.
-
-## 6) Tag the Release
+## 4) Tag the Release
 
 After all checks pass on `main`:
 
