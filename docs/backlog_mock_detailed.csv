@@ -54,3 +54,5 @@ Expand demo seed data for fuller account coverage,Medium,Ved-Joshi,Done,2026-04-
 Remove SSN from registration flow end-to-end,High,Ved-Joshi,Done,2026-04-27,2026-04-27,M9 Compliance,SSN removed from frontend/edge function/storage path,Changed: SSN removed from frontend/edge function/storage path. Scope: Remove SSN from registration flow end-to-end.
 Protect demo member credentials in seed script,High,Ved-Joshi,Done,2026-04-27,2026-04-27,M8 Quality,Seed no longer overwrites real user passwords,Changed: Seed no longer overwrites real user passwords. Scope: Protect demo member credentials in seed script.
 Mobile feature expansion and bug fixes stream,Medium,SphenOz,Done,2026-04-14,2026-04-27,M10 Mobile,Mobile pages/accounts/transfers/debugging improvements,Changed: Mobile pages/accounts/transfers/debugging improvements. Scope: Mobile feature expansion and bug fixes stream.
+Implement Biometric Authentication,High,Jerry,Backlog,,,M9 Security,Biometric login support for mobile and web,
+Add Multi-Currency Support,Medium,Jerry,Backlog,,,M9 Features,Multi-currency accounts and transactions with exchange rates,

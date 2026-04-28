@@ -49,6 +49,13 @@ def _generate_valid_routing_number() -> str:
     return f"{prefix}{check_digit}"
 
 
+def mask_account_number(account_number: str) -> str:
+    """Mask account number for display, showing only the last 4 digits."""
+    if len(account_number) <= 4:
+        return account_number
+    return "*" * (len(account_number) - 4) + account_number[-4:]
+
+
 def _generate_account_number(length: int = 12) -> str:
     return "".join(str(random.randint(0, 9)) for _ in range(length))
 
