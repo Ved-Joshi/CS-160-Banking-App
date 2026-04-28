@@ -1,6 +1,7 @@
 # CS160 Banking App
 
 Full-stack banking demo project with:
+
 - `backend/`: FastAPI + Supabase REST/RPC integration
 - `frontend/`: React/Vite app
 - `docker-compose.yml`: local one-command runtime (backend, frontend, scheduler)
