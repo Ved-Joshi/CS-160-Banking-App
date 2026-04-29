@@ -62,6 +62,8 @@ pytest -q tests
 
 ## User Guide
 
+This project includes setup notes, test commands, and a user guide to help new contributors run and understand the banking app.
+
 ### Signing Up for an Account
 
 1. Open the app in your browser at [http://localhost:5173](http://localhost:5173) (or the deployed URL).
