@@ -42,6 +42,12 @@ To remove and rebuild after edits:
 docker-compose down -v
 ```
 
+## Admin Panel credentials 
+```
+email: admin.person@email.com
+password: adminpswrd
+```
+
 Update `backend/.env` and `frontend/.env` with your real Supabase/Stripe keys as needed.
 
 For local frontend-only development, create a `.env` file in `frontend/` with:
