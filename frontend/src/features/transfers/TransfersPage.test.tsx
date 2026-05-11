@@ -24,6 +24,7 @@ const mocks = vi.hoisted(() => ({
   externalCancelPlan: vi.fn(),
   externalUpdatePlan: vi.fn(),
   externalRetryPlan: vi.fn(),
+  listTransactions: vi.fn(),
 }));
 
 vi.mock('../../lib/bankingApi', () => ({
@@ -55,6 +56,9 @@ vi.mock('../../lib/bankingApi', () => ({
     cancelPlan: mocks.externalCancelPlan,
     updatePlan: mocks.externalUpdatePlan,
     retryPlan: mocks.externalRetryPlan,
+  },
+  transactionsService: {
+    list: mocks.listTransactions,
   },
 }));
 
@@ -92,6 +96,7 @@ describe('TransfersPage', () => {
     ]);
     mocks.externalListPlans.mockResolvedValue([]);
     mocks.externalListTransfers.mockResolvedValue([]);
+    mocks.listTransactions.mockResolvedValue([]);
   });
 
   it('submits an immediate self transfer and invalidates core queries', async () => {
@@ -256,6 +261,27 @@ describe('TransfersPage', () => {
         amount: 50,
       }));
       expect(screen.getByText('External transfer submitted')).toBeInTheDocument();
+    });
+  });
+
+  it('shows transfer-type transactions in timeline even when description does not contain transfer', async () => {
+    mocks.listTransactions.mockResolvedValue([
+      {
+        id: 'txn_1',
+        accountId: 'acct_checking',
+        description: 'Online payment',
+        amount: 42.5,
+        direction: 'debit',
+        status: 'COMPLETED',
+        type: 'Transfer',
+        postedAt: '2026-05-11T15:00:00Z',
+      },
+    ]);
+
+    renderPage();
+
+    await waitFor(() => {
+      expect(screen.getByText('Online payment')).toBeInTheDocument();
     });
   });
 });

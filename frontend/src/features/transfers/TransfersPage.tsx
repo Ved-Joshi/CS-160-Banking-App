@@ -8,6 +8,7 @@ import {
   externalTransfersService,
   memberTransfersService,
   profileService,
+  transactionsService,
   transfersService,
 } from '../../lib/bankingApi';
 import { formatCurrency, formatDate, formatDateTimeInTimezone, localDateInputValue, utcDateInputValue } from '../../lib/format';
@@ -262,6 +263,11 @@ export function TransfersPage() {
     queryFn: externalTransfersService.list,
     refetchInterval: TRANSFER_LIVE_REFRESH_MS,
   });
+  const { data: transactions = [] } = useQuery({
+    queryKey: queryKeys.transactions(),
+    queryFn: transactionsService.list,
+    refetchInterval: TRANSFER_LIVE_REFRESH_MS,
+  });
 
   const checkingAccounts = useMemo(
     () => accounts.filter((account) => account.type === 'Checking' && account.status === 'Open'),
@@ -348,6 +354,21 @@ export function TransfersPage() {
   const canEditPlan = (plan: ScheduledTransferRow) => plan.status === 'SCHEDULED';
   const timelineEvents = useMemo<TransferTimelineEvent[]>(
     () => [
+      ...transactions
+        .filter((transaction) => {
+          const description = transaction.description.toLowerCase();
+          return transaction.type === 'Transfer'
+            || description.includes('transfer')
+            || description.includes('zelle')
+            || description.includes('ach');
+        })
+        .map((transaction) => ({
+          id: `transaction-${transaction.id}`,
+          title: transaction.description,
+          detail: `${formatCurrency(transaction.amount)} • ${transaction.type}`,
+          status: transaction.status,
+          happenedAt: transaction.postedAt || new Date().toISOString(),
+        })),
       ...externalTransfers
         .filter((transfer) => transfer.status !== 'PROCESSING')
         .map((transfer) => ({
@@ -374,7 +395,7 @@ export function TransfersPage() {
     ]
       .sort((left, right) => new Date(right.happenedAt).getTime() - new Date(left.happenedAt).getTime())
       .slice(0, 5),
-    [externalPlans, externalTransfers, memberPlans],
+    [externalPlans, externalTransfers, memberPlans, transactions],
   );
   const scheduledRows = scheduledTransfers.map((plan) => [
     plan.title,
