@@ -64,6 +64,14 @@ def _is_admin(current_user: SupabaseUser) -> bool:
     return isinstance(roles, list) and "admin" in roles
 
 
+async def _is_admin_user_id(user_id: str) -> bool:
+    user_admin = await supabase_client.get_user_admin(user_id)
+    app_meta = user_admin.get("app_metadata") or {}
+    user_meta = user_admin.get("user_metadata") or {}
+    roles = app_meta.get("roles") or user_meta.get("roles") or []
+    return isinstance(roles, list) and "admin" in roles
+
+
 async def _get_account(account_id: str) -> dict:
     rows = await supabase_client.select_rows(
         "accounts",
@@ -317,6 +325,11 @@ async def resolve_member_recipient_for_user(current_user: SupabaseUser, recipien
     profile = rows[0]
     if profile["id"] == current_user.id:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Choose another member.")
+    if await _is_admin_user_id(profile["id"]):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Transfers to admin accounts are not allowed.",
+        )
 
     account_rows = await supabase_client.select_rows(
         "accounts",

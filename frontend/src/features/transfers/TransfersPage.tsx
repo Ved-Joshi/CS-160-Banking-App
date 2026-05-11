@@ -244,6 +244,11 @@ export function TransfersPage() {
     endDate: '',
     timezone: '',
   });
+  const isAdminRecipientError = Boolean(
+    errorMessage
+      && mode === 'MEMBER'
+      && errorMessage.toLowerCase().includes('admin account'),
+  );
 
   const { data: accounts = [] } = useQuery({ queryKey: queryKeys.accounts(), queryFn: accountsService.list });
   const { data: profile } = useQuery({ queryKey: ['profile'], queryFn: profileService.get });
@@ -914,6 +919,11 @@ export function TransfersPage() {
                     value={memberForm.recipientEmail}
                   />
                 </Field>
+                {isAdminRecipientError ? (
+                  <InlineAlert title="Recipient not allowed" tone="warning">
+                    Admin accounts cannot receive member transfers. Choose a non-admin recipient.
+                  </InlineAlert>
+                ) : null}
                 <Field label="Transfer mode">
                   <select aria-label="Transfer mode" onChange={(event) => setMemberForm((current) => ({ ...current, scheduleMode: event.target.value as TransferScheduleMode }))} value={memberForm.scheduleMode}>
                     <option value="NOW">Now</option>
