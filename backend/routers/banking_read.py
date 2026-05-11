@@ -104,6 +104,9 @@ ALLOWED_CHECK_IMAGE_MIME_TYPES = {
     "image/heif",
 }
 ALLOWED_CHECK_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".heic", ".heif"}
+ACCOUNT_OPENING_PROFILE_ERROR = (
+    "Your banking profile is not fully provisioned yet. Complete registration before opening an account."
+)
 
 
 def map_account_type(value: str) -> str:
@@ -627,6 +630,40 @@ def map_customer_profile(profile: dict, current_user: SupabaseUser) -> CustomerP
     )
 
 
+def is_duplicate_phone_conflict(exc: HTTPException) -> bool:
+    if exc.status_code != status.HTTP_409_CONFLICT:
+        return False
+    detail = str(exc.detail).lower()
+    return "profiles_mobile_unique" in detail or "mobile_phone_e164" in detail or "duplicate key value" in detail
+
+
+def is_profile_ready_for_account_creation(profile: dict) -> bool:
+    required_text_fields = (
+        "email",
+        "first_name",
+        "last_name",
+        "mobile_phone_e164",
+        "street_address",
+        "city",
+        "state",
+        "zip_code",
+        "date_of_birth",
+    )
+    for field in required_text_fields:
+        value = profile.get(field)
+        if value is None or str(value).strip() == "":
+            return False
+    return str(profile.get("onboarding_status") or "").strip().lower() == "active"
+
+
+def ensure_profile_ready_for_account_creation(profile: dict) -> None:
+    if not is_profile_ready_for_account_creation(profile):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=ACCOUNT_OPENING_PROFILE_ERROR,
+        )
+
+
 async def require_owned_account(account_id: str, user_id: str, *, require_open: bool = False) -> dict:
     filters = {
         "id": f"eq.{account_id}",
@@ -745,21 +782,29 @@ async def update_profile(
     payload: UpdateCustomerProfileIn,
     current_user: SupabaseUser = Depends(get_current_user),
 ) -> CustomerProfile:
-    updated_rows = await supabase_client.update_rows(
-        "profiles",
-        {
-            "first_name": payload.firstName.strip(),
-            "middle_name": payload.middleName.strip() if payload.middleName else None,
-            "last_name": payload.lastName.strip(),
-            "mobile_phone_e164": normalize_phone_e164(payload.phone),
-            "street_address": payload.streetAddress.strip(),
-            "apartment_unit": payload.apartmentUnit.strip() if payload.apartmentUnit else None,
-            "city": payload.city.strip(),
-            "state": payload.state.strip().upper(),
-            "zip_code": normalize_zip_code(payload.zipCode),
-        },
-        filters={"id": f"eq.{current_user.id}"},
-    )
+    try:
+        updated_rows = await supabase_client.update_rows(
+            "profiles",
+            {
+                "first_name": payload.firstName.strip(),
+                "middle_name": payload.middleName.strip() if payload.middleName else None,
+                "last_name": payload.lastName.strip(),
+                "mobile_phone_e164": normalize_phone_e164(payload.phone),
+                "street_address": payload.streetAddress.strip(),
+                "apartment_unit": payload.apartmentUnit.strip() if payload.apartmentUnit else None,
+                "city": payload.city.strip(),
+                "state": payload.state.strip().upper(),
+                "zip_code": normalize_zip_code(payload.zipCode),
+            },
+            filters={"id": f"eq.{current_user.id}"},
+        )
+    except HTTPException as exc:
+        if is_duplicate_phone_conflict(exc):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Phone already exists.",
+            ) from exc
+        raise
     if not updated_rows:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Profile not found.")
     return map_customer_profile(updated_rows[0], current_user)
@@ -822,8 +867,9 @@ async def create_account(
     if not profile_rows:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Your banking profile is not fully provisioned yet. Complete registration before opening an account.",
+            detail=ACCOUNT_OPENING_PROFILE_ERROR,
         )
+    ensure_profile_ready_for_account_creation(profile_rows[0])
 
     account_type = normalize_account_type(payload.type)
     routing_number, account_number = await generate_unique_account_identifiers()

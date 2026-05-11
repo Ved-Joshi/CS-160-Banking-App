@@ -1,5 +1,6 @@
 import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.99.0";
+import { isAdult, isAllowedDateOfBirth, MIN_DATE_OF_BIRTH } from "./validation.ts";
 
 type RegistrationPayload = {
   email: string;
@@ -79,18 +80,6 @@ const normalizePhone = (phone: string) => {
 };
 const normalizeZip = (zip: string) => zip.trim();
 
-const isAdult = (dob: string) => {
-  const date = new Date(dob);
-  if (Number.isNaN(date.getTime())) return false;
-  const today = new Date();
-  const cutoff = new Date(
-    today.getFullYear() - 18,
-    today.getMonth(),
-    today.getDate(),
-  );
-  return date <= cutoff;
-};
-
 const normalizeOptionalName = (value?: string | null) => {
   const normalized = value?.trim() ?? "";
   return normalized === "" ? null : normalized;
@@ -141,6 +130,12 @@ serve(async (req) => {
   }
   if (!/^[A-Z]{2}$/.test(state)) {
     return json(400, { ok: false, error: "Invalid state" });
+  }
+  if (!isAllowedDateOfBirth(payload.date_of_birth)) {
+    return json(400, {
+      ok: false,
+      error: `Date of birth must be on or after ${MIN_DATE_OF_BIRTH}`,
+    });
   }
   if (!isAdult(payload.date_of_birth)) {
     return json(400, { ok: false, error: "User must be at least 18" });
