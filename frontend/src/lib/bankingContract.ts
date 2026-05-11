@@ -86,7 +86,10 @@ export function normalizeAccount(input: unknown): BankAccount {
     type: normalizeAccountType(row.type ?? row.account_type),
     maskedNumber: normalizeMaskedAccount(maskedNumber),
     status: normalizeAccountStatus(row.status),
-    routingNumber: asString(row.routingNumber) || asString(row.routing_number) || 'N/A',
+    routingNumber:
+      normalizeAccountType(row.type ?? row.account_type) === 'Credit'
+        ? undefined
+        : asString(row.routingNumber) || asString(row.routing_number) || undefined,
     openedAt: asString(row.openedAt) || asString(row.opened_at) || asString(row.created_at),
     closeEligible,
     canClose,

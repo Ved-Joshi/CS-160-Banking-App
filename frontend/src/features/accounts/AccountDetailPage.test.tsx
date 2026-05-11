@@ -78,4 +78,30 @@ describe('AccountDetailPage', () => {
       expect(screen.getByText(/Account balance must be zero to close/)).toBeInTheDocument();
     });
   });
+
+  it('does not render routing details for credit accounts', async () => {
+    mocks.getAccount.mockResolvedValue({
+      id: 'acct_credit',
+      nickname: 'Travel Credit',
+      type: 'Credit',
+      maskedNumber: '•••• 1234',
+      status: 'Open',
+      routingNumber: undefined,
+      openedAt: '2026-01-01T00:00:00Z',
+      closeEligible: false,
+      canClose: false,
+      closeReasons: ['Balance remains outstanding.'],
+      balances: {
+        availableBalance: 100,
+        currentBalance: 100,
+      },
+    });
+    mocks.listTransactions.mockResolvedValue([]);
+
+    renderPage();
+
+    expect(await screen.findByText('Travel Credit')).toBeInTheDocument();
+    expect(screen.queryByText(/^Routing$/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Routing /)).not.toBeInTheDocument();
+  });
 });

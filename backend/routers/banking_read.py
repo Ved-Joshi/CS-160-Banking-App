@@ -49,6 +49,7 @@ from schemas.banking import (
 )
 from utils.google_maps import SearchCenter, geocode_query, search_chase_atms
 from utils.banking_numbers import (
+    generate_unique_account_number,
     generate_unique_account_identifiers,
     validate_account_number,
     validate_routing_number,
@@ -338,8 +339,10 @@ def map_account(
     pending_deposit_accounts: set[str] | None = None,
     blocked_payment_accounts: set[str] | None = None,
 ) -> BankAccount:
+    account_type = map_account_type(row.get("account_type", "checking"))
     nickname = row.get("nickname") or f"{map_account_type(row.get('account_type', 'checking'))} Account"
     last4 = row.get("account_last4") or "----"
+    routing_number = None if account_type == "Credit" else row.get("routing_number")
     close_reasons = build_close_reasons(
         row,
         pending_transaction_accounts=pending_transaction_accounts or set(),
@@ -350,10 +353,10 @@ def map_account(
     return BankAccount(
         id=row["id"],
         nickname=nickname,
-        type=map_account_type(row.get("account_type", "checking")),
+        type=account_type,
         maskedNumber=f"...{last4}",
         status=map_account_status(row.get("status", "open")),
-        routingNumber=row.get("routing_number") or "N/A",
+        routingNumber=routing_number,
         openedAt=row.get("opened_at") or row.get("created_at") or "",
         closeEligible=can_close,
         canClose=can_close,
@@ -872,7 +875,11 @@ async def create_account(
     ensure_profile_ready_for_account_creation(profile_rows[0])
 
     account_type = normalize_account_type(payload.type)
-    routing_number, account_number = await generate_unique_account_identifiers()
+    if account_type == "credit":
+        routing_number = None
+        account_number = await generate_unique_account_number()
+    else:
+        routing_number, account_number = await generate_unique_account_identifiers()
     is_default_internal_receive = False
     if account_type == "checking":
         existing_default = await supabase_client.select_rows(

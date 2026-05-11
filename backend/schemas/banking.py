@@ -31,7 +31,7 @@ class BankAccount(BaseModel):
     type: AccountType
     maskedNumber: str
     status: Literal["Open", "Restricted"]
-    routingNumber: str
+    routingNumber: Optional[str] = None
     openedAt: str
     closeEligible: bool = Field(description="Deprecated compatibility field that mirrors whether the account can be closed right now.")
     canClose: bool = Field(description="Whether the account can be closed immediately based on balances, status, and pending activity.")
