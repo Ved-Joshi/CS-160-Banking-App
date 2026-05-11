@@ -100,7 +100,7 @@ describe('AccountDetailPage', () => {
 
     renderPage();
 
-    expect(await screen.findByText('Travel Credit')).toBeInTheDocument();
+    expect(await screen.findAllByText('Travel Credit')).toHaveLength(2);
     expect(screen.queryByText(/^Routing$/)).not.toBeInTheDocument();
     expect(screen.queryByText(/Routing /)).not.toBeInTheDocument();
   });
