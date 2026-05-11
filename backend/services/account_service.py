@@ -4,10 +4,22 @@ from utils.banking_numbers import generate_unique_account_identifiers, generate_
 from services.ledger_service import ensure_customer_ledger_account
 from utils.supabase import SupabaseUser, random_last4, supabase_client
 
+ACCOUNT_NUMBER_INSERT_RETRIES = 3
+
 
 def _is_admin(current_user: SupabaseUser) -> bool:
     roles = current_user.app_metadata.get("roles") or current_user.user_metadata.get("roles") or []
     return isinstance(roles, list) and "admin" in roles
+
+
+def _is_duplicate_account_number_conflict(exc: HTTPException) -> bool:
+    if exc.status_code != status.HTTP_409_CONFLICT:
+        return False
+    detail = str(exc.detail).lower()
+    return (
+        "duplicate key value" in detail
+        and ("account_number" in detail or "accounts_account_number" in detail)
+    )
 
 
 async def create_account_for_user(
@@ -28,27 +40,38 @@ async def create_account_for_user(
             limit=1,
         )
         is_default_internal_receive = len(existing_default) == 0
-    if account_type == "credit":
-        routing_number = None
-        account_number = await generate_unique_account_number()
-    else:
-        routing_number, account_number = await generate_unique_account_identifiers()
-    payload = {
-        "user_id": current_user.id,
-        "nickname": nickname,
-        "account_type": account_type,
-        "account_last4": account_number[-4:],
-        "account_number": account_number,
-        "routing_number": routing_number,
-        "status": "open",
-        "available_balance_cents": 0,
-        "current_balance_cents": 0,
-        "close_eligible": True,
-        "is_default_internal_receive": is_default_internal_receive,
-    }
+    for attempt in range(ACCOUNT_NUMBER_INSERT_RETRIES):
+        if account_type == "credit":
+            routing_number = None
+            account_number = await generate_unique_account_number()
+        else:
+            routing_number, account_number = await generate_unique_account_identifiers()
+        payload = {
+            "user_id": current_user.id,
+            "nickname": nickname,
+            "account_type": account_type,
+            "account_last4": account_number[-4:],
+            "account_number": account_number,
+            "routing_number": routing_number,
+            "status": "open",
+            "available_balance_cents": 0,
+            "current_balance_cents": 0,
+            "close_eligible": True,
+            "is_default_internal_receive": is_default_internal_receive,
+        }
+        try:
+            account = await supabase_client.insert_row("accounts", payload)
+            break
+        except HTTPException as exc:
+            if _is_duplicate_account_number_conflict(exc) and attempt < ACCOUNT_NUMBER_INSERT_RETRIES - 1:
+                continue
+            if _is_duplicate_account_number_conflict(exc):
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="Unable to reserve a unique account number right now. Please try again.",
+                ) from exc
+            raise
 
-    account = await supabase_client.insert_row("accounts", payload)
-    
     # Ensure corresponding ledger account is created
     await ensure_customer_ledger_account(account)
     
