@@ -108,6 +108,7 @@ ALLOWED_CHECK_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".heic", ".h
 ACCOUNT_OPENING_PROFILE_ERROR = (
     "Your banking profile is not fully provisioned yet. Complete registration before opening an account."
 )
+ACCOUNT_NUMBER_INSERT_RETRIES = 3
 
 
 def map_account_type(value: str) -> str:
@@ -640,6 +641,16 @@ def is_duplicate_phone_conflict(exc: HTTPException) -> bool:
     return "profiles_mobile_unique" in detail or "mobile_phone_e164" in detail or "duplicate key value" in detail
 
 
+def is_duplicate_account_number_conflict(exc: HTTPException) -> bool:
+    if exc.status_code != status.HTTP_409_CONFLICT:
+        return False
+    detail = str(exc.detail).lower()
+    return (
+        "duplicate key value" in detail
+        and ("account_number" in detail or "accounts_account_number" in detail)
+    )
+
+
 def is_profile_ready_for_account_creation(profile: dict) -> bool:
     required_text_fields = (
         "email",
@@ -875,11 +886,6 @@ async def create_account(
     ensure_profile_ready_for_account_creation(profile_rows[0])
 
     account_type = normalize_account_type(payload.type)
-    if account_type == "credit":
-        routing_number = None
-        account_number = await generate_unique_account_number()
-    else:
-        routing_number, account_number = await generate_unique_account_identifiers()
     is_default_internal_receive = False
     if account_type == "checking":
         existing_default = await supabase_client.select_rows(
@@ -893,22 +899,39 @@ async def create_account(
             limit=1,
         )
         is_default_internal_receive = len(existing_default) == 0
-    created = await supabase_client.insert_row(
-        "accounts",
-        {
-            "user_id": current_user.id,
-            "nickname": payload.nickname.strip(),
-            "account_type": account_type,
-            "account_last4": account_number[-4:],
-            "account_number": account_number,
-            "routing_number": routing_number,
-            "status": "open",
-            "available_balance_cents": 0,
-            "current_balance_cents": 0,
-            "close_eligible": False,
-            "is_default_internal_receive": is_default_internal_receive,
-        },
-    )
+    for attempt in range(ACCOUNT_NUMBER_INSERT_RETRIES):
+        if account_type == "credit":
+            routing_number = None
+            account_number = await generate_unique_account_number()
+        else:
+            routing_number, account_number = await generate_unique_account_identifiers()
+        try:
+            created = await supabase_client.insert_row(
+                "accounts",
+                {
+                    "user_id": current_user.id,
+                    "nickname": payload.nickname.strip(),
+                    "account_type": account_type,
+                    "account_last4": account_number[-4:],
+                    "account_number": account_number,
+                    "routing_number": routing_number,
+                    "status": "open",
+                    "available_balance_cents": 0,
+                    "current_balance_cents": 0,
+                    "close_eligible": False,
+                    "is_default_internal_receive": is_default_internal_receive,
+                },
+            )
+            break
+        except HTTPException as exc:
+            if is_duplicate_account_number_conflict(exc) and attempt < ACCOUNT_NUMBER_INSERT_RETRIES - 1:
+                continue
+            if is_duplicate_account_number_conflict(exc):
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="Unable to reserve a unique account number right now. Please try again.",
+                ) from exc
+            raise
     return map_account(created)
 
 
