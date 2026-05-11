@@ -88,7 +88,7 @@ export interface BankAccount {
   type: AccountType;
   maskedNumber: string;
   status: 'Open' | 'Restricted';
-  routingNumber: string;
+  routingNumber?: string | null;
   openedAt: string;
   /** Deprecated. Use `canClose` instead. */
   closeEligible: boolean;

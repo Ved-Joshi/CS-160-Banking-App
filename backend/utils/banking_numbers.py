@@ -71,3 +71,20 @@ async def generate_unique_account_identifiers(max_attempts: int = 100) -> tuple[
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
         detail="Unable to generate unique account identifiers. Please try again.",
     )
+
+
+async def generate_unique_account_number(max_attempts: int = 100) -> str:
+    for _ in range(max_attempts):
+        account_number = _generate_account_number()
+        existing = await supabase_client.select_rows(
+            "accounts",
+            select="id",
+            filters={"account_number": f"eq.{account_number}"},
+            limit=1,
+        )
+        if not existing:
+            return account_number
+    raise HTTPException(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        detail="Unable to generate a unique account number. Please try again.",
+    )

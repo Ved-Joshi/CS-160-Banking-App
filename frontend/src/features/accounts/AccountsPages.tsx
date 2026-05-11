@@ -29,7 +29,7 @@ const accountTypeContent: Record<AccountType, { eyebrow: string; summary: string
   Credit: {
     eyebrow: 'Borrowing line',
     summary: 'Track revolving balance activity with account-level details.',
-    detail: 'Credit accounts appear in your account list right away and are available for activity views, transfers, and payment routing flows.',
+    detail: 'Credit accounts appear in your account list right away and are available for activity views, transfers, and payment management flows.',
   },
 };
 
@@ -72,6 +72,11 @@ function getAccountDetailTheme(type: AccountType) {
           ? 'Set aside cash and watch activity stay clean and deliberate.'
           : 'Track revolving balance and credit activity in one place.',
   };
+}
+
+function getAccountRoutingDisplay(account: BankAccount): string | null {
+  if (account.type === 'Credit') return null;
+  return account.routingNumber || 'N/A';
 }
 
 export function AccountsPage() {
@@ -459,6 +464,7 @@ export function AccountDetailPage() {
   }
 
   const accountTheme = getAccountDetailTheme(account.type);
+  const routingDisplay = getAccountRoutingDisplay(account);
   const accountTransactions = transactions
     .filter((transaction) => transaction.accountId === account.id)
     .slice(0, 8);
@@ -468,7 +474,11 @@ export function AccountDetailPage() {
       <PageHeader
         title={account.nickname}
         eyebrow={`${account.type} account`}
-        subtitle={`${account.maskedNumber || '••••'} • Routing ${account.routingNumber || 'N/A'}`}
+        subtitle={
+          routingDisplay
+            ? `${account.maskedNumber || '••••'} • Routing ${routingDisplay}`
+            : `${account.maskedNumber || '••••'}`
+        }
         actions={(
           <div className="account-detail-header-actions">
             <Link className="button button--secondary" to="/app/accounts">Back to accounts</Link>
@@ -511,10 +521,12 @@ export function AccountDetailPage() {
               <span>Account number</span>
               <strong>{account.maskedNumber || '••••'}</strong>
             </div>
-            <div>
-              <span>Routing</span>
-              <strong>{account.routingNumber || 'N/A'}</strong>
-            </div>
+            {routingDisplay ? (
+              <div>
+                <span>Routing</span>
+                <strong>{routingDisplay}</strong>
+              </div>
+            ) : null}
           </div>
         </div>
         <div className="account-hero__actions">

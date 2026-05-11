@@ -1,6 +1,6 @@
 from fastapi import HTTPException, status
 
-from utils.banking_numbers import generate_unique_account_identifiers
+from utils.banking_numbers import generate_unique_account_identifiers, generate_unique_account_number
 from services.ledger_service import ensure_customer_ledger_account
 from utils.supabase import SupabaseUser, random_last4, supabase_client
 
@@ -28,7 +28,11 @@ async def create_account_for_user(
             limit=1,
         )
         is_default_internal_receive = len(existing_default) == 0
-    routing_number, account_number = await generate_unique_account_identifiers()
+    if account_type == "credit":
+        routing_number = None
+        account_number = await generate_unique_account_number()
+    else:
+        routing_number, account_number = await generate_unique_account_identifiers()
     payload = {
         "user_id": current_user.id,
         "nickname": nickname,

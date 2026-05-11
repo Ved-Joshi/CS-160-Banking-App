@@ -50,9 +50,26 @@ describe('banking contract normalization', () => {
 
     expect(account.type).toBe('Savings');
     expect(account.maskedNumber).toBe('•••• 9876');
-    expect(account.routingNumber).toBe('N/A');
+    expect(account.routingNumber).toBeUndefined();
     expect(account.balances.currentBalance).toBe(500.25);
     expect(account.canClose).toBe(false);
+  });
+
+  it('drops routing numbers for credit accounts', () => {
+    const account = normalizeAccount({
+      id: 'acct_3',
+      nickname: 'Travel Credit',
+      account_type: 'credit',
+      account_last4: '1111',
+      routing_number: '121000358',
+      available_balance_cents: 0,
+      current_balance_cents: 0,
+      status: 'open',
+      opened_at: '2026-03-01T00:00:00Z',
+    });
+
+    expect(account.type).toBe('Credit');
+    expect(account.routingNumber).toBeUndefined();
   });
 
   it('normalizes transactions and transfer results with status/type casing drift', () => {

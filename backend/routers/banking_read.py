@@ -49,6 +49,7 @@ from schemas.banking import (
 )
 from utils.google_maps import SearchCenter, geocode_query, search_chase_atms
 from utils.banking_numbers import (
+    generate_unique_account_number,
     generate_unique_account_identifiers,
     validate_account_number,
     validate_routing_number,
@@ -104,6 +105,9 @@ ALLOWED_CHECK_IMAGE_MIME_TYPES = {
     "image/heif",
 }
 ALLOWED_CHECK_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".heic", ".heif"}
+ACCOUNT_OPENING_PROFILE_ERROR = (
+    "Your banking profile is not fully provisioned yet. Complete registration before opening an account."
+)
 
 
 def map_account_type(value: str) -> str:
@@ -335,8 +339,10 @@ def map_account(
     pending_deposit_accounts: set[str] | None = None,
     blocked_payment_accounts: set[str] | None = None,
 ) -> BankAccount:
+    account_type = map_account_type(row.get("account_type", "checking"))
     nickname = row.get("nickname") or f"{map_account_type(row.get('account_type', 'checking'))} Account"
     last4 = row.get("account_last4") or "----"
+    routing_number = None if account_type == "Credit" else row.get("routing_number")
     close_reasons = build_close_reasons(
         row,
         pending_transaction_accounts=pending_transaction_accounts or set(),
@@ -347,10 +353,10 @@ def map_account(
     return BankAccount(
         id=row["id"],
         nickname=nickname,
-        type=map_account_type(row.get("account_type", "checking")),
+        type=account_type,
         maskedNumber=f"...{last4}",
         status=map_account_status(row.get("status", "open")),
-        routingNumber=row.get("routing_number") or "N/A",
+        routingNumber=routing_number,
         openedAt=row.get("opened_at") or row.get("created_at") or "",
         closeEligible=can_close,
         canClose=can_close,
@@ -627,6 +633,40 @@ def map_customer_profile(profile: dict, current_user: SupabaseUser) -> CustomerP
     )
 
 
+def is_duplicate_phone_conflict(exc: HTTPException) -> bool:
+    if exc.status_code != status.HTTP_409_CONFLICT:
+        return False
+    detail = str(exc.detail).lower()
+    return "profiles_mobile_unique" in detail or "mobile_phone_e164" in detail or "duplicate key value" in detail
+
+
+def is_profile_ready_for_account_creation(profile: dict) -> bool:
+    required_text_fields = (
+        "email",
+        "first_name",
+        "last_name",
+        "mobile_phone_e164",
+        "street_address",
+        "city",
+        "state",
+        "zip_code",
+        "date_of_birth",
+    )
+    for field in required_text_fields:
+        value = profile.get(field)
+        if value is None or str(value).strip() == "":
+            return False
+    return str(profile.get("onboarding_status") or "").strip().lower() == "active"
+
+
+def ensure_profile_ready_for_account_creation(profile: dict) -> None:
+    if not is_profile_ready_for_account_creation(profile):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=ACCOUNT_OPENING_PROFILE_ERROR,
+        )
+
+
 async def require_owned_account(account_id: str, user_id: str, *, require_open: bool = False) -> dict:
     filters = {
         "id": f"eq.{account_id}",
@@ -745,21 +785,29 @@ async def update_profile(
     payload: UpdateCustomerProfileIn,
     current_user: SupabaseUser = Depends(get_current_user),
 ) -> CustomerProfile:
-    updated_rows = await supabase_client.update_rows(
-        "profiles",
-        {
-            "first_name": payload.firstName.strip(),
-            "middle_name": payload.middleName.strip() if payload.middleName else None,
-            "last_name": payload.lastName.strip(),
-            "mobile_phone_e164": normalize_phone_e164(payload.phone),
-            "street_address": payload.streetAddress.strip(),
-            "apartment_unit": payload.apartmentUnit.strip() if payload.apartmentUnit else None,
-            "city": payload.city.strip(),
-            "state": payload.state.strip().upper(),
-            "zip_code": normalize_zip_code(payload.zipCode),
-        },
-        filters={"id": f"eq.{current_user.id}"},
-    )
+    try:
+        updated_rows = await supabase_client.update_rows(
+            "profiles",
+            {
+                "first_name": payload.firstName.strip(),
+                "middle_name": payload.middleName.strip() if payload.middleName else None,
+                "last_name": payload.lastName.strip(),
+                "mobile_phone_e164": normalize_phone_e164(payload.phone),
+                "street_address": payload.streetAddress.strip(),
+                "apartment_unit": payload.apartmentUnit.strip() if payload.apartmentUnit else None,
+                "city": payload.city.strip(),
+                "state": payload.state.strip().upper(),
+                "zip_code": normalize_zip_code(payload.zipCode),
+            },
+            filters={"id": f"eq.{current_user.id}"},
+        )
+    except HTTPException as exc:
+        if is_duplicate_phone_conflict(exc):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Phone already exists.",
+            ) from exc
+        raise
     if not updated_rows:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Profile not found.")
     return map_customer_profile(updated_rows[0], current_user)
@@ -822,11 +870,16 @@ async def create_account(
     if not profile_rows:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Your banking profile is not fully provisioned yet. Complete registration before opening an account.",
+            detail=ACCOUNT_OPENING_PROFILE_ERROR,
         )
+    ensure_profile_ready_for_account_creation(profile_rows[0])
 
     account_type = normalize_account_type(payload.type)
-    routing_number, account_number = await generate_unique_account_identifiers()
+    if account_type == "credit":
+        routing_number = None
+        account_number = await generate_unique_account_number()
+    else:
+        routing_number, account_number = await generate_unique_account_identifiers()
     is_default_internal_receive = False
     if account_type == "checking":
         existing_default = await supabase_client.select_rows(

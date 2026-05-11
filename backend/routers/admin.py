@@ -15,18 +15,19 @@ router = APIRouter(prefix="/api/admin", tags=["admin"])
 def map_account(row: dict) -> BankAccount:
     nickname = row.get("nickname") or "Account"
     account_number = row.get("account_number")
+    account_type = {
+        "checking": "Checking",
+        "savings": "Savings",
+        "credit": "Credit",
+    }.get(row.get("account_type", "checking"), "Checking")
     last4 = row.get("account_last4") or (account_number[-4:] if isinstance(account_number, str) and len(account_number) >= 4 else "----")
     return BankAccount(
         id=row["id"],
         nickname=nickname,
-        type={
-            "checking": "Checking",
-            "savings": "Savings",
-            "credit": "Credit",
-        }.get(row.get("account_type", "checking"), "Checking"),
+        type=account_type,
         maskedNumber=f"...{last4}",
         status="Open" if row.get("status", "open") == "open" else "Restricted",
-        routingNumber=row.get("routing_number") or "N/A",
+        routingNumber=None if account_type == "Credit" else row.get("routing_number"),
         openedAt=row.get("opened_at") or row.get("created_at") or "",
         closeEligible=bool(row.get("close_eligible")),
         canClose=False,
