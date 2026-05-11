@@ -1248,6 +1248,7 @@ small {
 
 .dialog {
   width: min(100%, 34rem);
+  max-height: min(88vh, 52rem);
   border-radius: 24px;
   background: rgba(255, 255, 255, 0.97);
   border: 1px solid rgba(212, 221, 232, 0.92);
@@ -1255,6 +1256,8 @@ small {
   padding: 1.4rem;
   display: grid;
   gap: 1.1rem;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  overflow: hidden;
 }
 
 .dialog__header,
@@ -1273,6 +1276,8 @@ small {
 .dialog__body {
   display: grid;
   gap: 0.9rem;
+  overflow-y: auto;
+  padding-right: 0.25rem;
 }
 
 .dialog__close {
