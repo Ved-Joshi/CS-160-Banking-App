@@ -68,6 +68,18 @@ async def execute_payment_for_user(payment_id: str, current_user: SupabaseUser) 
             detail="Only scheduled or processing payments can be executed.",
         )
 
+    payee_rows = await supabase_client.select_rows(
+        "payees",
+        filters={"id": f"eq.{payment['payee_id']}"},
+        limit=1,
+    )
+    if not payee_rows:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Payee not found.")
+
+    payee_failure = await get_payee_account_validation_failure(payee_rows[0])
+    if payee_failure:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=payee_failure)
+
     account_rows = await supabase_client.select_rows(
         "accounts",
         filters={
@@ -133,6 +145,30 @@ def _format_error_detail(detail: str | dict) -> str:
     if isinstance(detail, dict):
         return str(detail.get("message", detail))
     return str(detail)
+
+
+async def get_payee_account_validation_failure(payee: dict) -> str | None:
+    routing_number = str(payee.get("routing_number") or "").strip()
+    account_number = str(payee.get("account_number") or "").strip()
+    if not routing_number or not account_number:
+        return "Payee account details are incomplete."
+
+    destination_rows = await supabase_client.select_rows(
+        "accounts",
+        select="id,status",
+        filters={
+            "routing_number": f"eq.{routing_number}",
+            "account_number": f"eq.{account_number}",
+        },
+        limit=1,
+    )
+    if not destination_rows:
+        return "Payee account number could not be verified for that routing number."
+
+    if destination_rows[0].get("status") != "open":
+        return "Payee account is not open."
+
+    return None
 
 
 def validate_payment_amount_or_raise(amount: float) -> None:
@@ -433,6 +469,18 @@ async def _set_payment_failure_notification(
 
 async def attempt_payment_run(payment: dict) -> tuple[bool, str | None]:
     amount_cents = int(payment.get("amount_cents") or 0)
+    payee_rows = await supabase_client.select_rows(
+        "payees",
+        filters={"id": f"eq.{payment['payee_id']}"},
+        limit=1,
+    )
+    if not payee_rows:
+        return False, "Payee not found."
+
+    payee_failure = await get_payee_account_validation_failure(payee_rows[0])
+    if payee_failure:
+        return False, payee_failure
+
     account_rows = await supabase_client.select_rows(
         "accounts",
         filters={

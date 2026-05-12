@@ -57,6 +57,7 @@ from services.payment_service import (
     build_payment_update_payload,
     execute_payment_for_user,
     finalize_idempotency_key,
+    get_payee_account_validation_failure,
     get_idempotency_replay,
     get_user_timezone_name,
     local_today_for_timezone,
@@ -1112,6 +1113,15 @@ async def create_payee(
     if account_number == routing_number:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Account number cannot match the routing number.")
 
+    payee_failure = await get_payee_account_validation_failure(
+        {
+            "routing_number": routing_number,
+            "account_number": account_number,
+        }
+    )
+    if payee_failure:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=payee_failure)
+
     created = await supabase_client.insert_row(
         "payees",
         {
@@ -1176,6 +1186,9 @@ async def create_payment(
 
     account = await require_owned_account(payload.accountId, current_user.id, require_open=True)
     payee = await require_owned_payee(payload.payeeId, current_user.id)
+    payee_failure = await get_payee_account_validation_failure(payee)
+    if payee_failure:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=payee_failure)
     timezone_name = await get_user_timezone_name(current_user.id)
     deliver_by = parse_deliver_by_with_timezone(payload.deliverBy, timezone_name)
     normalized_cadence = normalize_payment_cadence(payload.cadence)
@@ -1267,6 +1280,9 @@ async def update_payment(
 
     payee_id = payload.payeeId or payment["payee_id"]
     payee = await require_owned_payee(payee_id, current_user.id)
+    payee_failure = await get_payee_account_validation_failure(payee)
+    if payee_failure:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=payee_failure)
 
     timezone_name = await get_user_timezone_name(current_user.id)
     cadence_label = payload.cadence or map_payment_cadence(payment.get("cadence", "once"))

@@ -3,7 +3,8 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Button, Card, EmptyState, InlineAlert, PageHeader } from '../../components/ui';
 import type { AtmSearchInput } from '../../types/banking';
 import { atmService } from '../../lib/bankingApi';
-import { isGoogleMapsConfigured, loadGoogleMaps } from '../../lib/googleMaps';
+import { isMapboxConfigured, initializeMapbox, createMap, mapboxgl } from '../../lib/mapboxMaps';
+import type { LngLatBounds } from 'mapbox-gl';
 
 type SearchTarget =
   | { mode: 'coords'; lat: number; lng: number }
@@ -59,10 +60,10 @@ export function AtmLocatorPage() {
   );
   const [target, setTarget] = useState<SearchTarget>(null);
   const [selectedAtmId, setSelectedAtmId] = useState<string | null>(null);
-  const [mapState, setMapState] = useState<MapState>(isGoogleMapsConfigured() ? 'loading' : 'error');
+  const [mapState, setMapState] = useState<MapState>(isMapboxConfigured() ? 'loading' : 'error');
   const mapCanvasRef = useRef<HTMLDivElement | null>(null);
-  const mapRef = useRef<google.maps.Map | null>(null);
-  const markersRef = useRef<Array<{ id: string; marker: google.maps.Marker; listener: google.maps.MapsEventListener }>>([]);
+  const mapRef = useRef<mapboxgl.Map | null>(null);
+  const markersRef = useRef<Array<{ id: string; marker: mapboxgl.Marker; element: HTMLElement }>>([]);
   const cardRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const lastScrolledAtmIdRef = useRef<string | null>(null);
 
@@ -99,90 +100,110 @@ export function AtmLocatorPage() {
       return;
     }
     let cancelled = false;
-    void loadGoogleMaps()
-      .then(() => {
-        if (!cancelled) {
-          setMapState('ready');
-        }
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setMapState('error');
-        }
-      });
+    try {
+      initializeMapbox();
+      if (!cancelled) {
+        setMapState('ready');
+      }
+    } catch {
+      if (!cancelled) {
+        setMapState('error');
+      }
+    }
     return () => {
       cancelled = true;
     };
   }, [mapState]);
 
   useEffect(() => {
-    if (mapState !== 'ready' || !mapCanvasRef.current || !center || !window.google?.maps) {
+    if (mapState !== 'ready' || !mapCanvasRef.current || !center) {
       return;
     }
 
-    const google = window.google;
-    const mapCenter = { lat: center.latitude, lng: center.longitude };
     if (!mapRef.current) {
-      mapRef.current = new google.maps.Map(mapCanvasRef.current, {
-        center: mapCenter,
+      mapRef.current = createMap(mapCanvasRef.current, {
+        center: [center.longitude, center.latitude],
         zoom: 12,
-        mapTypeControl: false,
-        streetViewControl: false,
-        fullscreenControl: false,
-        gestureHandling: 'greedy',
       });
     } else {
-      mapRef.current.setCenter(mapCenter);
+      mapRef.current.flyTo({
+        center: [center.longitude, center.latitude],
+        zoom: 12,
+        duration: 1000,
+      });
     }
 
-    markersRef.current.forEach(({ marker, listener }) => {
-      listener.remove();
-      marker.setMap(null);
+    // Remove existing markers
+    markersRef.current.forEach(({ marker }) => {
+      marker.remove();
     });
     markersRef.current = [];
 
     if (!atms.length) {
-      mapRef.current.setZoom(12);
       return;
     }
 
-    const bounds = new google.maps.LatLngBounds();
+    // Add new markers and calculate bounds
+    const bounds: LngLatBounds = new mapboxgl.LngLatBounds();
     markersRef.current = atms.map((atm, index) => {
-      const marker = new google.maps.Marker({
-        map: mapRef.current,
-        position: { lat: atm.latitude, lng: atm.longitude },
-        title: atm.name,
-        label: `${index + 1}`,
-      });
-      bounds.extend({ lat: atm.latitude, lng: atm.longitude });
-      const listener = marker.addListener('click', () => {
+      const el = document.createElement('div');
+      el.className = 'mapbox-marker';
+      el.style.width = '32px';
+      el.style.height = '32px';
+      el.style.display = 'flex';
+      el.style.alignItems = 'center';
+      el.style.justifyContent = 'center';
+      el.style.backgroundColor = '#0084ff';
+      el.style.color = 'white';
+      el.style.borderRadius = '50%';
+      el.style.fontWeight = 'bold';
+      el.style.fontSize = '14px';
+      el.style.cursor = 'pointer';
+      el.style.border = '2px solid white';
+      el.style.boxShadow = '0 2px 4px rgba(0,0,0,0.3)';
+      el.textContent = `${index + 1}`;
+
+      const marker = new mapboxgl.Marker({ element: el })
+        .setLngLat([atm.longitude, atm.latitude])
+        .addTo(mapRef.current!);
+
+      el.addEventListener('click', () => {
         setSelectedAtmId(atm.id);
       });
-      return { id: atm.id, marker, listener };
+
+      bounds.extend([atm.longitude, atm.latitude]);
+      return { id: atm.id, marker, element: el };
     });
 
+    // Fit bounds with padding
     if (!bounds.isEmpty()) {
-      mapRef.current.fitBounds(bounds);
+      mapRef.current.fitBounds(bounds, {
+        padding: 50,
+        duration: 1000,
+      });
     }
   }, [atms, center, mapState]);
 
   useEffect(() => {
-    if (!selectedAtm || !mapRef.current || !window.google?.maps) {
+    if (!selectedAtm || !mapRef.current) {
       return;
     }
-    mapRef.current.panTo({ lat: selectedAtm.latitude, lng: selectedAtm.longitude });
-    markersRef.current.forEach(({ id, marker }, index) => {
-      marker.setLabel(
-        id === selectedAtm.id
-          ? { text: `${index + 1}`, color: '#ffffff', fontWeight: '700' }
-          : `${index + 1}`,
-      );
-      marker.setAnimation(id === selectedAtm.id ? google.maps.Animation.BOUNCE : null);
+    mapRef.current.flyTo({
+      center: [selectedAtm.longitude, selectedAtm.latitude],
+      zoom: 15,
+      duration: 1000,
     });
-    const timeoutId = window.setTimeout(() => {
-      markersRef.current.forEach(({ marker }) => marker.setAnimation(null));
-    }, 700);
-    return () => window.clearTimeout(timeoutId);
+
+    // Update marker styling for selected ATM
+    markersRef.current.forEach(({ id, element }) => {
+      if (id === selectedAtm.id) {
+        element.style.backgroundColor = '#ff6b35';
+        element.style.transform = 'scale(1.2)';
+      } else {
+        element.style.backgroundColor = '#0084ff';
+        element.style.transform = 'scale(1)';
+      }
+    });
   }, [selectedAtm]);
 
   useEffect(() => {
@@ -427,7 +448,7 @@ export function AtmLocatorPage() {
             {mapState === 'error' ? (
               <div className="map-panel__status">
                 <InlineAlert title="Map unavailable" tone="warning">
-                  The list still works, but the embedded map could not be loaded. Add `VITE_GOOGLE_MAPS_API_KEY` to enable it.
+                  The list still works, but the embedded map could not be loaded. Add `VITE_MAPBOX_TOKEN` to enable it.
                 </InlineAlert>
               </div>
             ) : null}
