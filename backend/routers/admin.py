@@ -102,7 +102,11 @@ async def account_report(
     limit: int = Query(default=1000, ge=1, le=5000),
     admin=Depends(require_admin),
 ) -> AdminAccountReportResponse:
-    account_rows = await supabase_client.select_rows("accounts", order="created_at.desc")
+    account_rows = await supabase_client.select_rows(
+        "accounts",
+        filters={"status": "neq.closed"},
+        order="created_at.desc",
+    )
     user_ids = sorted({str(row.get("user_id") or "").strip() for row in account_rows if row.get("user_id")})
 
     profile_rows: list[dict] = []
